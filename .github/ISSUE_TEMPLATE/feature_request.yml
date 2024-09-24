@@ -1,0 +1,11 @@
+name: Feature request
+description: Suggest a new feature
+labels: ["enhancement"]
+projects: ["uc-cdis/7"]
+body:
+- type: textarea
+  attributes:
+    label: Feature request
+    description: How would this feature help you? What would it enable you to do? Please give a clear and concise description of what you want to happen and potentially how to do it.
+  validations:
+    required: false

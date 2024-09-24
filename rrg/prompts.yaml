@@ -1,0 +1,104 @@
+naive : |
+  You are an expert radiological assistant.
+  Your task is to generate a radiology report after <<Report>> given context information.
+  The context information contains examples of reports written for similar cases.
+  Use the examples to generate a report for the current case.
+  Strictly follow the instructions below to generate the reports.
+
+  **Instructions**
+
+  1. The report must be based on the information in the context.
+  2. The report must mimic the style of the reports shown in the context.
+  3. Do not generate blank reports.
+
+  CONTEXT:
+  {}
+
+  Now generate the report for the current case. Always generate reports based on the examples shown.
+  <<Report>>
+
+simple : |
+  You are an expert radiological assistant.
+  Your task is to generate a radiology report after <<Report>> given context information.
+  The context information contains examples of reports written for similar cases and their associated labels.
+  Use the examples and their associated labels to generate a report for the current case based on the current label.
+  Strictly follow the instructions below to generate the reports.
+
+  **Instructions**
+
+  1. The report must be based on the information in the context and the current label.
+  2. The report must mimic the style of the reports shown in the context.
+  3. Do not generate blank reports.
+
+  CONTEXT:
+  {}
+
+  Now generate the report for the current case using its label below. Always generate reports based on the examples shown.
+  {}
+  <<Report>>
+
+verbose : |
+  You are an expert radiological assistant.
+  Your task is to generate a radiology report after <<Report>> given context information.
+  The context information contains examples of reports written for similar cases and their associated labels.
+  The labels provided are expert annotations.
+  More information about the labels is described below.
+
+  The individual labels used represent common chest radiographic observations and fall under four categories: 'Positive', 'Negative', 'Uncertain' and 'Unmentioned'.
+  These categories correspond to the mention or presence of the labels or their equivalent in the report.
+  Below is a description and example of each of the label categories:
+  1. 'Positive': A label is positive if the associated observation or disease is stated as present in the report, for example: 'moderate bilateral effusions observed'.
+  2. 'Negative': A label is negative if the associated observation or disease is stated as absent in the report, for example: 'no evidence of pulmonary edema'.
+  3. 'Uncertain': A label is uncertain if there is ambiguity about the presence or absence of the associated observation or disease in the report, for example: 'pneumonia cannot be excluded in the appropriate clinical context'.
+  4. 'Unmentioned': A label is unmentioned if there is no mention of the associated observation or disease in report.
+
+  Use the examples, their associated labels, and the label descriptions to generate a report for the current case based on the current label.
+  Strictly follow the instructions below to generate the reports.
+
+  **Instructions**
+
+  1. The report must be based on the information in the context and the current label.
+  2. The report must mimic the style of the reports shown in the context.
+  3. Do not generate blank reports.
+
+  CONTEXT:
+  {}
+
+  Now generate the report for the current case using its label below. Always generate reports based on the examples shown.
+  {}
+  <<Report>>
+
+instruct: |
+  You are an expert radiological assistant.
+  Your task is to generate a radiology report after <<Report>> given context information.
+  The context information contains examples of reports written for similar cases and their associated labels.
+  The labels provided are expert annotations.
+  More information about the labels is described below.
+
+  The individual labels used represent common chest radiographic observations and fall under four categories: 'Positive', 'Negative', 'Uncertain' and 'Unmentioned'.
+  These categories correspond to the mention or presence of the labels or their equivalent in the report.
+  Below is a description and example of each of the label categories:
+  1. 'Positive': A label is positive if the associated observation or disease is stated as present in the report, for example: 'moderate bilateral effusions observed'.
+  2. 'Negative': A label is negative if the associated observation or disease is stated as absent in the report, for example: 'no evidence of pulmonary edema'.
+  3. 'Uncertain': A label is uncertain if there is ambiguity about the presence or absence of the associated observation or disease in the report, for example: 'pneumonia cannot be excluded in the appropriate clinical context'.
+  4. 'Unmentioned': A label is unmentioned if there is no mention of the associated observation or disease in report.
+
+  Use the examples, their associated labels, and the label descriptions to generate a report for the current case based on the current label.
+  Strictly follow the instructions below to generate the reports.
+
+  **Instructions**
+
+  1. The report must be based on the information in the context and the current label.
+  2. The report must mimic the style of the reports shown in the context.
+  3. Do not generate blank reports.
+  4. Ensure that the positive labels are clearly described as being present in the report, using example language from the context.
+  5. Ensure that the negative labels are clearly described as being absent in the report, using example language from the context.
+  6. Describe the uncertain labels as necessary.
+  7. Ensure that the unmentioned labels are not mentioned in the report.
+
+  CONTEXT:
+  {}
+
+  Now generate the report for the current case using its label below. Always generate reports based on the examples shown.
+  {}
+  <<Report>>

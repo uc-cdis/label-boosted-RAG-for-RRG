@@ -1,0 +1,29 @@
+name: Bug report
+description: File a bug report
+labels: ["bug"]
+projects: ["uc-cdis/7"]
+body:
+- type: textarea
+  attributes:
+    label: Current behavior
+    description: A clear and concise description of what is happening / what the bug is.
+  validations:
+    required: false
+- type: textarea
+  attributes:
+    label: Expected behavior
+    description: A clear and concise description of what you expected to happen instead.
+  validations:
+    required: false
+- type: textarea
+  attributes:
+    label: How To Reproduce
+    description: Steps to reproduce the behavior.
+    placeholder: |
+      1. In this environment...
+      1. With this config...
+      1. Run '...'
+      1. See error...
+  validations:
+    required: false
+

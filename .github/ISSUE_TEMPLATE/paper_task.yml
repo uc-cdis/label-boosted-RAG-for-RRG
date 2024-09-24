@@ -1,0 +1,11 @@
+name: Paper task
+description: Outline a task for the paper or research
+labels: ["paper"]
+projects: ["uc-cdis/7"]
+body:
+- type: textarea
+  attributes:
+    label: Paper task
+    description: Describe the paper task. This might be things related to actually writing or things to inform the direction of the paper, like a lit review.
+  validations:
+    required: false

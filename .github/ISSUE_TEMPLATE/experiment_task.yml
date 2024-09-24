@@ -1,0 +1,11 @@
+name: Experiment task
+description: Outline an experimental task
+labels: ["experiment"]
+projects: ["uc-cdis/7"]
+body:
+- type: textarea
+  attributes:
+    label: Experiment task
+    description: Describe the experimental task. Open separate issues for implementing code to enable this experiment.
+  validations:
+    required: false

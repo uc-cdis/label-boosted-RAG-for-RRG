@@ -18,7 +18,7 @@ seaborn==0.13.0
 # analysis tools
 statsmodels==0.14.2
 scipy==1.14.0
-tableone==0.8.0
+tableone==0.9.1
 # ml tools
 scikit-learn==1.5.1
 torch==2.4.0

@@ -66,7 +66,7 @@ def extract_image_features(
             out = model(ims)
         img_embeds = out.img_embedding.cpu().numpy()
         img_projs = out.projected_global_embedding.cpu()
-        img_projs = F.normalize(img_projs, dim=-1)
+        # img_projs = F.normalize(img_projs, dim=-1)  # TODO re-add?
         img_projs = img_projs.numpy()
 
         with h5py.File(output_h5, "a") as h5:

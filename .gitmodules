@@ -1,0 +1,12 @@
+[submodule "inference/rgrg-rrg"]
+	path = inference/rgrg-rrg
+	url = https://github.com/anirsub/rgrg-rrg.git
+[submodule "inference/CXR-RePaiR-rrg"]
+	path = inference/CXR-RePaiR-rrg
+	url = https://github.com/anirsub/CXR-RePaiR-rrg
+[submodule "inference/X-REM-rrg"]
+	path = inference/X-REM-rrg
+	url = https://github.com/anirsub/X-REM-rrg.git
+[submodule "inference/CXR-ReDonE"]
+	path = inference/CXR-ReDonE
+	url = https://github.com/rajpurkarlab/CXR-ReDonE.git

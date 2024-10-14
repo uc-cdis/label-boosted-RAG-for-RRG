@@ -1,7 +1,7 @@
 # Inference and Replication of Inference Results
 
 ## Setup
-We will use the same data setup as the experiments section. We present a comparison of 6 other methods on our data split and how to replicate these results. The other methods are as follows:
+We will use the same data setup as the experiments section. We present a comparison our results to 6 other models on our data split and steps to replicate these results. The other methods are as follows:
 
 1. CXR-RePaiR (https://github.com/rajpurkarlab/CXR-RePaiR)
 2. CXR-ReDonE (https://github.com/rajpurkarlab/CXR-ReDonE)
@@ -10,8 +10,13 @@ We will use the same data setup as the experiments section. We present a compari
 5. CXRMate-RRG24 (https://huggingface.co/aehrc/cxrmate-rrg24)
 6. RGRG (https://github.com/ttanida/rgrg)
 
-Run the `create dataset` section of `inference-results.ipynb` to generate the dataset files `inference_findings_data.csv` and `inference_impression_data.csv`. 
-
+### Steps
+1. Run the `create dataset` section of `inference-results.ipynb` to generate the dataset files `inference_findings_data.csv` and `inference_impression_data.csv`. These will serve as the split files for our splitwise experiments
+1. Change into the inference directory 
+    ```bash
+    cd /inference
+    ```
+1. The following are the detailed steps to replicate generations for the 6 comparison models on our data split:
 ### 1. CXR-RePaiR
 
 * Create and activate the conda environment. 
@@ -138,17 +143,6 @@ The CXRMate-RRG24 model generates both findings and impression separately, we ch
     ```
 2. Run `cxrmate` section in `inference-results.ipynb` to split the generations into the 3 splits, findings only, impression only and findings & impression
 
-* Switch environments and activate the RRG environment :
-    ```bash
-    conda activate rrg
-    ```
-1. `eval.py` runs evaluation metrics for radiology report generation.
-    ```bash
-    python /path/to/rrg-repo/rrg/eval.py \
-    --report_csv /path/to/rrg-data/experiment-output.csv \
-    --output_csv /path/to/rrg-data/experiment-output-metrics.csv
-    ```
-
 ## 5. CheXagent
 
 We will use the same environment as we did for CXRMATE-RRG24. CheXagent generates both findings and impression similar to CXRMATE, so we will concatenate them to have full reports.
@@ -168,17 +162,6 @@ We will use the same environment as we did for CXRMATE-RRG24. CheXagent generate
     ```
 2. Run `chexagent` section in `inference-results.ipynb` to split the generations into the 3 splits, findings only, impression only and findings & impression
 
-* Switch environments and activate the RRG environment :
-    ```bash
-    conda activate rrg
-    ```
-1. `eval.py` runs evaluation metrics for radiology report generation.
-    ```bash
-    python /path/to/rrg-repo/rrg/eval.py \
-    --report_csv /path/to/rrg-data/experiment-output.csv \
-    --output_csv /path/to/rrg-data/experiment-output-metrics.csv
-    ```
-
 ### 6. RGRG
 The model from the RGRG paper generates only findings so we will use the findings subset of the data. Download the full model checkpoint from the link in the repo.
 
@@ -197,12 +180,9 @@ The model from the RGRG paper generates only findings so we will use the finding
         --output_csv path/to/results/generations_findings.csv
     ```
 
-* Switch environments and activate the RRG environment :
+1. Finally we can switch back into the rrg environment and run the eval script to generate the METRICS files for the 6 comparison models.Use the following run commands on each of the generated files to run evaluation metrics for radiology report generations
     ```bash
-    conda activate rrg
+        python /path/to/rrg-repo/rrg/eval.py \
+        --report_csv /path/to/generations_<split>.csv file \
+        --output_csv /path/to/results/generations_<split>_METRICS.csv 
     ```
-1. `eval.py` runs evaluation metrics for radiology report generation.
-    ```bash
-    python /path/to/rrg-repo/rrg/eval.py \
-    --report_csv /path/to/inf-results/rgrg/generations_findings.csv \
-    --output_csv /path/to/inf-results/rgrg/generations_findings_METRICS.csv

@@ -98,7 +98,7 @@ We will use the same data setup as the experiments section. We present a compari
         python m2trans_nli_filter.py \
         --m2trans_nli_model_path path/to/X-REM-anirudh repo/ifcc/resources/model_medrad_19k \
         --input_path path/to/itm_results_temp.csv
-        --save_path path/to/savename.csv
+        --save_path path/to/final_results_filtered.csv
         ```
 
 
@@ -135,7 +135,7 @@ We will use the same data setup as the experiments section. We present a compari
         ```
     1. `inference_cxrmate.py` generates findings and impression.
         ```bash
-        python /path/to/rrg-repo/inference-external/cxrmate/inference_cxrmate.py \
+        python /path/to/rrg-repo/inference/cxrmate/inference_cxrmate.py \
         --model /path/to/cxrmate-rrg24 model \
         --findings_csv /path/to/inference_findings_data.csv \
         --impression_csv /path/to/inference_impression_data.csv \
@@ -154,7 +154,7 @@ We will use the same data setup as the experiments section. We present a compari
 
     1. `inference_chexagent.py` generates findings and impression.
         ```bash
-        python /path/to/rrg-repo/inference-external/cxrmate/inference_chexagent.py \
+        python /path/to/rrg-repo/inference/chexagent/inference_chexagent.py \
         --model /path/to/chexagent model \
         --findings_csv /path/to/inference_findings_data.csv \
         --impression_csv /path/to/inference_impression_data.csv \
@@ -180,9 +180,46 @@ We will use the same data setup as the experiments section. We present a compari
             --output_csv path/to/results/generations_findings.csv
         ```
 
-1. Finally we can switch back into the rrg environment and run the eval script to generate the METRICS files for the 6 comparison models.Use the following run commands on each of the generated files to run evaluation metrics for radiology report generations
+1. Finally we will switch back into the rrg environment and run the eval script to generate the METRICS files for the 6 comparison models. Use the following run commands on each of the generated files to run evaluation metrics for radiology report generations
     ```bash
         python /path/to/rrg-repo/rrg/eval.py \
         --report_csv /path/to/generations_<split>.csv file \
         --output_csv /path/to/results/generations_<split>_METRICS.csv 
+    ```
+1. The resulting file structure should look like the following:
+    ```
+    ./path/to/output/directory
+    ├── chexagent
+    │   ├── generations.csv
+    │   ├── generations_findings.csv
+    │   ├── generations_findings_METRICS.csv
+    │   ├── generations_full_reports.csv
+    │   ├── generations_full_reports_METRICS.csv
+    │   ├── generations_impression.csv
+    │   └── generations_impression_METRICS.csv
+    ├── cxr-mate
+    │   ├── generations.csv
+    │   ├── generations_findings.csv
+    │   ├── generations_findings_METRICS.csv
+    │   ├── generations_full_reports.csv
+    │   ├── generations_full_reports_METRICS.csv
+    │   ├── generations_impression.csv
+    │   └── generations_impression_METRICS.csv
+    ├── cxr-redone
+    │   ├── generations.csv
+    │   ├── generations_impression.csv
+    │   └── generations_impression_METRICS.csv
+    ├── cxr-repair
+    │   ├── generations.csv
+    │   ├── generations_impression.csv
+    │   └── generations_impression_METRICS.csv
+    ├── rgrg
+    │   ├── generations_findings.csv
+    │   └── generations_findings_METRICS.csv
+    └── x-rem
+        ├── final_results_filtered.csv
+        ├── generations_impression.csv
+        ├── generations_impression_METRICS.csv
+        ├── itm_results_temp.csv
+        └── xrem_sids.csv
     ```

@@ -20,3 +20,4 @@ Experiments around radiology report generation using agentic retrieval augmented
 * [Data Ingest](data-ingest.md): Data download and preprocessing
 * [Experiments](experiments.md): Replicate experiments
 * [CheXpert Labels](chexpert-labels.md): Classify reports
+* [Inference](inference.md): Replicate inference results

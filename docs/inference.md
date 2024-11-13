@@ -68,7 +68,7 @@ We will use the same data setup as the experiments section. We present a compari
 
     ### 2. X-REM-rrg
 
-    1. Change into the X-REM repo and create the environment:
+    1. Change into the X-REM-rrg directory and create the environment:
         ```bash
         cd X-REM-rrg
         conda env create -f environment.yml -n X-REM_env
@@ -163,7 +163,7 @@ We will use the same data setup as the experiments section. We present a compari
     2. Run `chexagent` section in `inference-results.ipynb` to split the generations into the 3 splits, findings only, impression only and findings & impression
 
     ### 6. RGRG
-    The model from the RGRG paper generates only findings so we will use the findings subset of the data. Download the full model checkpoint from the link in the repo.
+    The model from the RGRG paper generates only findings so we will use the findings subset of the data. Download the full model checkpoint from the link in the [repo](https://github.com/ttanida/rgrg).
 
     * Create and activate the conda environment 
         ```bash

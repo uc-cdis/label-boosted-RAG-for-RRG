@@ -67,8 +67,14 @@ def evaluate_generations(
                 model_type="radgraph-xl",
                 reward_level="partial",
             )
-            _, f1radgraph_results, _, _ = f1radgraph(hyps=hyps, refs=refs)
+            _, f1radgraph_results, hyp_annots, ref_annots = f1radgraph(
+                hyps=hyps, refs=refs
+            )
             results = pd.Series(f1radgraph_results)
+            hyp_annots = pd.Series(hyp_annots, name="generated_radgraph")
+            ref_annots = pd.Series(ref_annots, name="actual_radgraph")
+            all_results.append(hyp_annots)
+            all_results.append(ref_annots)
         elif metric == "f1chexbert":
             f1chexbert = F1CheXbert()
             refs_chexbert = [f1chexbert.get_label(l.strip()) for l in refs]
@@ -77,6 +83,10 @@ def evaluate_generations(
                 f1_score(r, h) for r, h in zip(refs_chexbert, hyps_chexbert)
             ]
             results = pd.Series(f1chexbert_results)
+            hyps_chexbert = pd.Series(hyps_chexbert, name="generated_chexbert")
+            refs_chexbert = pd.Series(refs_chexbert, name="actual_chexbert")
+            all_results.append(hyps_chexbert)
+            all_results.append(refs_chexbert)
         else:
             raise ValueError(f"Unknown metric: {metric}")
         results.name = metric

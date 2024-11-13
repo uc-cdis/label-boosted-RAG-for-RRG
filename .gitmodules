@@ -4,6 +4,3 @@
 [submodule "inference/X-REM-rrg"]
 	path = inference/X-REM-rrg
 	url = https://github.com/anirsub/X-REM-rrg.git
-[submodule "inference/CXR-ReDonE"]
-	path = inference/CXR-ReDonE
-	url = https://github.com/rajpurkarlab/CXR-ReDonE.git

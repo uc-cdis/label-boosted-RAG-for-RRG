@@ -1,3 +1,0 @@
-[submodule "inference/CXR-RePaiR-rrg"]
-	path = inference/CXR-RePaiR-rrg
-	url = https://github.com/anirsub/CXR-RePaiR-rrg

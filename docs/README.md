@@ -1,23 +1,17 @@
 # Label Boosted RAG for RRG
-Experiments around radiology report generation using agentic retrieval augmented generation systems.
+<span style="color:red">TODO: change this</span> Experiments around radiology report generation using agentic retrieval augmented generation systems.
 
 ### Environment setup
-1. [install miniforge](https://github.com/conda-forge/miniforge)
-1. create env:
-    ```
-    conda env create -f env.yml
-    ```
-1. activate env:
-    ```
-    conda activate rrg
-    ```
-1. install precommit:
-    ```
-    pre-commit install
-    ```
+Using your favorite `conda` distribution (we prefer [miniforge](https://github.com/conda-forge/miniforge)), create and activate the environment:
+```
+conda env create -f env.yml
+conda activate labrag
+```
 
 ## Table of Contents
-* [Data Ingest](data-ingest.md): Data download and preprocessing
-* [Experiments](experiments.md): Replicate experiments
-* [CheXpert Labels](chexpert-labels.md): Classify reports
-* [Inference](inference.md): Replicate inference results
+<span style="color:red">TODO: change this</span>
+1. [Data Ingest](data-ingest.md): Data download and extraction
+1. [](): Image embedding
+1. [](): Label classifier training
+1. [Experiments](experiments.md): Replicate experiments
+1. [Inference](inference.md): Replicate inference results

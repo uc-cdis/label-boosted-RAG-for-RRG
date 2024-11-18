@@ -37,7 +37,8 @@ def prepare_prompt(
     findings_col: str = DEFAULT_FINDINGS_COL,
     impression_col: str = DEFAULT_IMPRESSION_COL,
     study_id_col: str = DEFAULT_STUDY_ID_COL,
-) -> tuple[str, str, str]:
+    return_relative_idxs: bool = False,
+) -> tuple[str, str, str] | tuple[str, str, str, list[int]]:
     target_positives = target_sample[labels].to_numpy()
     target_positives = (target_positives == 1).astype(int)
     global cached
@@ -52,32 +53,34 @@ def prepare_prompt(
 
     rel_target_ret_pos = retrieval_positives[sim_sort_idxs]
 
-    # Find number of overlapping labels
     target_positives_view = np.broadcast_to(target_positives, rel_target_ret_pos.shape)
-    pos_overlap_bits = target_positives_view & rel_target_ret_pos
-    num_pos_overlap = pos_overlap_bits.sum(axis=1)
 
     # The below strategies are ambiguous for samples with no positive labels
     # hence why we add an implicit "other" label to handle such cases
     if filter_type == "exact":
         # Number of overlapping labels must exactly match
-        mask = num_pos_overlap == target_positives.sum()
+        mask = (target_positives_view == rel_target_ret_pos).all(axis=1)
+        mask = np.argwhere(mask).squeeze(1)
     elif filter_type == "partial":
+        # Find number of overlapping labels
+        pos_overlap_bits = target_positives_view & rel_target_ret_pos
+        num_pos_overlap = pos_overlap_bits.sum(axis=1)
+
         # Sort by number of overlapping labels
         # Does NOT consider _which_ labels overlap
         mask = num_pos_overlap.argsort(kind="stable")
     elif filter_type == "no-filter":
         # Dummy mask
-        mask = np.arange(len(num_pos_overlap))
+        mask = np.arange(len(target_similarity))
     else:
         raise ValueError("Unknown filter type: {filter_type}")
 
-    # Iterative multi-key index sort requires mapping back to the source indices
-    merged_idxs = sim_sort_idxs[mask]
-
     # Retrieve most relevant reference samples
     # May retrieve less than k if using exact match filtering
-    k_idxs = merged_idxs[-k:][::-1]
+    k_mask = mask[-k:][::-1]
+
+    # Iterative multi-key index sort requires mapping back to the source indices
+    k_idxs = sim_sort_idxs[k_mask]
     k_references = retrieval_samples.iloc[k_idxs]
 
     # Prepare prompt options
@@ -150,6 +153,8 @@ def prepare_prompt(
             target_report += "Impression: "
         target_report += target_sample[impression_col] + "\n"
 
+    if return_relative_idxs:
+        return prompt, target_report, retrieved_studies, len(retrieval_samples) - k_mask
     return prompt, target_report, retrieved_studies
 
 

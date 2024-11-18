@@ -225,16 +225,23 @@ def plot_roc_curve(
     title: str,
     output_path: str,
 ):
-    fig, ax = plt.subplots(figsize=(5, 5))
+    colors = plt.colormaps["tab20"]
+    plt.rcParams["font.family"] = "Times New Roman"
+    plt.rcParams["font.size"] = 9
+    fig, ax = plt.subplots(figsize=(3, 3))
     ax.plot([0, 1], [0, 1], "--", color="red", alpha=0.5)
-    for label in labels:
+    for i, label in enumerate(labels):
+        color = colors(i)
         fpr, tpr, _ = roc_curve(df_trues[label], df_probs[label])
         auroc = auc(fpr, tpr)
-        ax.plot(fpr, tpr, label=f"{label} (AUC = {auroc:.3f})")
+        if label == "Enlarged Cardiomediastinum":
+            label = "Enl. Card."
+        ax.plot(fpr, tpr, label=f"{label} (AUC = {auroc:.3f})", color=color)
     ax.set_xlabel("FPR")
     ax.set_ylabel("TPR")
-    ax.set_title(title)
+    ax.set_title(title, fontsize=10)
     ax.legend(loc="lower right", fontsize="xx-small")
+    fig.tight_layout()
     fig.savefig(output_path, dpi=300)
 
 
@@ -246,15 +253,22 @@ def plot_pr_curve(
     title: str,
     output_path: str,
 ):
-    fig, ax = plt.subplots(figsize=(5, 5))
-    for label in labels:
+    colors = plt.colormaps["tab20"]
+    plt.rcParams["font.family"] = "Times New Roman"
+    plt.rcParams["font.size"] = 9
+    fig, ax = plt.subplots(figsize=(3, 3))
+    for i, label in enumerate(labels):
+        color = colors(i)
         precision, recall, _ = precision_recall_curve(df_trues[label], df_probs[label])
         auprc = auc(recall, precision)
-        ax.plot(recall, precision, label=f"{label} (AUC = {auprc:.3f})")
+        if label == "Enlarged Cardiomediastinum":
+            label = "Enl. Card."
+        ax.plot(recall, precision, label=f"{label} (AUC = {auprc:.3f})", color=color)
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
-    ax.set_title(title)
+    ax.set_title(title, fontsize=10)
     ax.legend(loc="upper right", fontsize="xx-small")
+    fig.tight_layout()
     fig.savefig(output_path, dpi=300)
 
 

@@ -53,24 +53,25 @@ def prepare_prompt(
 
     rel_target_ret_pos = retrieval_positives[sim_sort_idxs]
 
-    # Find number of overlapping labels
     target_positives_view = np.broadcast_to(target_positives, rel_target_ret_pos.shape)
-    pos_overlap_bits = target_positives_view & rel_target_ret_pos
-    num_pos_overlap = pos_overlap_bits.sum(axis=1)
 
     # The below strategies are ambiguous for samples with no positive labels
     # hence why we add an implicit "other" label to handle such cases
     if filter_type == "exact":
         # Number of overlapping labels must exactly match
-        mask = num_pos_overlap == target_positives.sum()
+        mask = (target_positives_view == rel_target_ret_pos).all(axis=1)
         mask = np.argwhere(mask).squeeze(1)
     elif filter_type == "partial":
+        # Find number of overlapping labels
+        pos_overlap_bits = target_positives_view & rel_target_ret_pos
+        num_pos_overlap = pos_overlap_bits.sum(axis=1)
+
         # Sort by number of overlapping labels
         # Does NOT consider _which_ labels overlap
         mask = num_pos_overlap.argsort(kind="stable")
     elif filter_type == "no-filter":
         # Dummy mask
-        mask = np.arange(len(num_pos_overlap))
+        mask = np.arange(len(target_similarity))
     else:
         raise ValueError("Unknown filter type: {filter_type}")
 

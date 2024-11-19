@@ -1,7 +1,6 @@
 name: Feature request
 description: Suggest a new feature
 labels: ["enhancement"]
-projects: ["uc-cdis/7"]
 body:
 - type: textarea
   attributes:

@@ -1,7 +1,6 @@
 name: Bug report
 description: File a bug report
 labels: ["bug"]
-projects: ["uc-cdis/7"]
 body:
 - type: textarea
   attributes:

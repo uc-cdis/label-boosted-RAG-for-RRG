@@ -41,14 +41,14 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    # parser.add_argument('--m2trans_nli_model_path', default='/n/data1/hms/dbmi/rajpurkar/lab/datasets/nlp/radnli/ifcc-code/resources/model_medrad_19k')
     parser.add_argument(
         "--m2trans_nli_model_path",
-        default="/opt/gpudata/anirudh/git-repos/X-REM-anirudh/ifcc/resources/model_medrad_19k",
+        required=True,
+        help="path to model_medrad_19k directory",
     )
     parser.add_argument(
         "--input_path",
-        default="../ALBEF/example.csv",
+        required=True,
         help="path to the output of the VE module",
     )
     parser.add_argument("--save_path", default="example_m2trans_nli.csv")

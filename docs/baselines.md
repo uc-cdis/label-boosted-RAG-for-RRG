@@ -149,7 +149,8 @@ We specifically use CXRMate-RRG24, the authors' submisson to the RRG task of the
 1. Create and cctivate the `cxrmate` conda environment.
     ```bash
     cd baselines/CXRMate
-    conda activate labrag
+    conda env create -f environment.yml
+    conda activate cxrmate
     ```
 1. Generate findings and impression.
     ```bash
@@ -206,6 +207,8 @@ Our evaluation tools expect model generations to be in a CSV file with columns `
 <summary>Then run evaluation (expand for template).</summary>
 
 ```bash
+conda activate labrag
+
 python /path/to/labrag-repo/rrg/eval.py \
 --report_csv /path/to/cxrrepair_impression.csv \
 --output_csv /path/to/cxrrepair_impression_METRICS.csv

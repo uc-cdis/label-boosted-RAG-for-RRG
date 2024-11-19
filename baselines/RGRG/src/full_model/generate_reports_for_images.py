@@ -262,17 +262,14 @@ def main():
         generated_reports.append(generated_report)
 
     # write_generated_reports_to_txt(images_paths, generated_reports, generated_reports_txt_path)
-    pd.DataFrame(
+    out_df = pd.DataFrame(
         {
             "study_id": paths_df["study_id"].tolist(),
             "actual_text": paths_df["findings"].tolist(),
             "generated_text": generated_reports,
         }
-    ).to_csv(
-        args.output_csv,
-        mode="w",
-        index=False,
     )
+    out_df.to_csv(args.output_csv, mode="w", index=False)
 
 
 if __name__ == "__main__":

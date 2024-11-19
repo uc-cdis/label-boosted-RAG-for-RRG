@@ -3,13 +3,13 @@
 We compare against 3 retrieval based methods and 3 supervised fine-tuned methods from the literature as our baseline results. While we provide static clones of each of the methods, we made modifications as needed to get things to run. These changes are detailed within each method's specific section below. Our linting tools also formatted all code.
 
 * Retrieval methods:
-  * [CXR-RePaiR](https://github.com/rajpurkarlab/CXR-RePaiR): Generates impression as the retrieval of the most similar report(s) via crossmodal embedding retrieval by a model trained with CLIP.
-  * [CXR-ReDonE](https://github.com/rajpurkarlab/CXR-ReDonE): Similar to CXR-RePaiR except the joint embedding model was trained via ALBEF and the retrieval data are preprocessed by a langauge model to remove references to prior studies.
-  * [X-REM](https://github.com/rajpurkarlab/X-REM): Similar to as CXR-ReDonE except for a new custom similarity score used in ALBEF training and no data preprocessing is done, instead rather doing postprocessing of intermediate retrieved reports to filter to the most relevant reports.
+  * [CXR-RePaiR](#cxr-repair): Generates impression as the retrieval of the most similar report(s) via crossmodal embedding retrieval by a model trained with CLIP. [GitHub](https://github.com/rajpurkarlab/CXR-RePaiR).
+  * [CXR-ReDonE](#cxr-redone): Similar to CXR-RePaiR except the joint embedding model was trained via ALBEF and the retrieval data are preprocessed by a langauge model to remove references to prior studies. [GitHub](https://github.com/rajpurkarlab/CXR-ReDonE).
+  * [X-REM](#x-rem): Similar to as CXR-ReDonE except for a new custom similarity score used in ALBEF training and no data preprocessing is done, instead rather doing postprocessing of intermediate retrieved reports to filter to the most relevant reports. [GitHub](https://github.com/rajpurkarlab/X-REM).
 * Fine-tuned methods:
-  * [CheXagent](https://github.com/Stanford-AIMI/CheXagent): Generates findings and impression. Findings are generated as a concatenation of generated localized findings, i.e. findings describing specific anatomical regions, by following prompted instructions.
-  * [CXRMate](https://huggingface.co/aehrc/cxrmate-rrg24): Generates findings and impression. A full encoder-decoder transformer that jointly generates findings and impression and postprocesses the output into separate findings and impression sections.
-  * [RGRG](https://github.com/ttanida/rgrg): Generates findings
+  * [CheXagent](#chexagent): Generates findings and impression. Findings are generated as a concatenation of generated localized findings, i.e. findings describing specific anatomical regions, by following prompted instructions. Uses a decoder-only language model with image features prepended to the tokens. [GitHub](https://github.com/Stanford-AIMI/CheXagent).
+  * [CXRMate](#cxrmate): Generates findings and impression. A full encoder-decoder transformer that jointly generates findings and impression and postprocesses the output into separate findings and impression sections. [HuggingFace](https://huggingface.co/aehrc/cxrmate-rrg24).
+  * [RGRG](#rgrg): Generates findings. Trained to first do object detection of anatomical regions with pathologies or abnormalities, then generates region specific findings. Final findings are a concatenation of localized findings. Uses a decoder-only language model with image features prepended to the tokens. [GitHub](https://github.com/ttanida/rgrg).
 
 ## Prepare baseline inference data
 
@@ -28,7 +28,7 @@ python rrg/prepare_inference_data.py \
 
 ## CXR-RePaiR
 
-We provide a static clone of the CXR-RePaiR repo at commit hash `c11fa85`. We added `environment.yml` and modified `gen_corpus_embeddings.py` and `run_test.py` to remove hardcoded data paths.
+We provide a static clone of the CXR-RePaiR repo at commit hash `c11fa85`. We added `environment.yml`, modified `data_preprocessing/create_bootstrapped_testset.py` to save the `dicom_id`, and modified `gen_corpus_embeddings.py` and `run_test.py` to remove hardcoded data paths.
 
 1. Create and activate the `cxrrepair` conda environment.
     ```bash
@@ -169,7 +169,7 @@ We pin the model from its huggingface repository at commit hash `4934e91`. We ad
     cd baselines/CheXagent
     conda activate cxrmate
     ```
-1. Generates findings and impression.
+1. Generates findings and impression. This takes a while.
     ```bash
     python inference.py \
     --findings_csv /path/to/data/dir/findings.csv \
@@ -179,7 +179,7 @@ We pin the model from its huggingface repository at commit hash `4934e91`. We ad
 
 ## RGRG
 
-We provide a static clone of the RGRG repo at commit hash `9520b6d`. We modified `environment.yml` to change the environment name and specified torch and torchvision with CUDA 11.6 to run on newer hardware.
+We provide a static clone of the RGRG repo at commit hash `9520b6d`. We modified `environment.yml` to change the environment name and specified torch and torchvision with CUDA 11.6 to run on newer hardware. We also modified `src/full_model/generate_reports_for_images.py` to save associated information for each generation.
 
 1. [Follow steps](#prepare-baseline-inference-data) to generate `findings.csv` and `impression.csv` if you have not already.
 1. Create and activate the `rgrg` conda environment.
@@ -198,48 +198,57 @@ We provide a static clone of the RGRG repo at commit hash `9520b6d`. We modified
     ```
 
 
-# TODO vvv Below
+## Postprocessing and evaluation metrics
 
-1. Finally we will switch back into the rrg environment and run the eval script to generate the METRICS files for the 6 comparison models. Use the following run commands on each of the generated files to run evaluation metrics for radiology report generations
-    ```bash
-        python /path/to/rrg-repo/rrg/eval.py \
-        --report_csv /path/to/generations_<split>.csv file \
-        --output_csv /path/to/results/generations_<split>_METRICS.csv 
-    ```
-1. The resulting file structure should look like the following:
-    ```
-    ./path/to/output/directory
-    ├── chexagent
-    │   ├── generations.csv
-    │   ├── generations_findings.csv
-    │   ├── generations_findings_METRICS.csv
-    │   ├── generations_full_reports.csv
-    │   ├── generations_full_reports_METRICS.csv
-    │   ├── generations_impression.csv
-    │   └── generations_impression_METRICS.csv
-    ├── cxr-mate
-    │   ├── generations.csv
-    │   ├── generations_findings.csv
-    │   ├── generations_findings_METRICS.csv
-    │   ├── generations_full_reports.csv
-    │   ├── generations_full_reports_METRICS.csv
-    │   ├── generations_impression.csv
-    │   └── generations_impression_METRICS.csv
-    ├── cxr-redone
-    │   ├── generations.csv
-    │   ├── generations_impression.csv
-    │   └── generations_impression_METRICS.csv
-    ├── cxr-repair
-    │   ├── generations.csv
-    │   ├── generations_impression.csv
-    │   └── generations_impression_METRICS.csv
-    ├── rgrg
-    │   ├── generations_findings.csv
-    │   └── generations_findings_METRICS.csv
-    └── x-rem
-        ├── final_results_filtered.csv
-        ├── generations_impression.csv
-        ├── generations_impression_METRICS.csv
-        ├── itm_results_temp.csv
-        └── xrem_sids.csv
-    ```
+Our evaluation tools expect model generations to be in a CSV file with columns `study_id`, `actual_text`, and `generated_text`. Run all cells in the notebook [`baselines/collate_baseline_results.ipynb`](../baselines/collate_baseline_results.ipynb) to postprocess results into the expected format.
+
+<details>
+<summary>Then run evaluation (expand for template).</summary>
+
+```bash
+python /path/to/labrag-repo/rrg/eval.py \
+--report_csv /path/to/cxrrepair_impression.csv \
+--output_csv /path/to/cxrrepair_impression_METRICS.csv
+
+python /path/to/labrag-repo/rrg/eval.py \
+--report_csv /path/to/cxrredone_impression.csv \
+--output_csv /path/to/cxrredone_impression_METRICS.csv
+
+python /path/to/labrag-repo/rrg/eval.py \
+--report_csv /path/to/xrem_impression.csv \
+--output_csv /path/to/xrem_impression_METRICS.csv
+
+python /path/to/labrag-repo/rrg/eval.py \
+--report_csv /path/to/cxrmate_impression.csv \
+--output_csv /path/to/cxrmate_impression_METRICS.csv
+
+python /path/to/labrag-repo/rrg/eval.py \
+--report_csv /path/to/chexagent_impression.csv \
+--output_csv /path/to/chexagent_impression_METRICS.csv
+
+python /path/to/labrag-repo/rrg/eval.py \
+--report_csv /path/to/cxrmate_findings.csv \
+--output_csv /path/to/cxrmate_findings_METRICS.csv
+
+python /path/to/labrag-repo/rrg/eval.py \
+--report_csv /path/to/chexagent_findings.csv \
+--output_csv /path/to/chexagent_findings_METRICS.csv
+
+python /path/to/labrag-repo/rrg/eval.py \
+--report_csv /path/to/rgrg_findings.csv \
+--output_csv /path/to/rgrg_findings_METRICS.csv
+
+python /path/to/labrag-repo/rrg/eval.py \
+--report_csv /path/to/cxrmate_both.csv \
+--output_csv /path/to/cxrmate_both_METRICS.csv
+
+python /path/to/labrag-repo/rrg/eval.py \
+--report_csv /path/to/chexagent_both.csv \
+--output_csv /path/to/chexagent_both_METRICS.csv
+```
+
+</details>
+<br>
+
+
+Though we use paired t-tests to compare results, we reorder the results by `study_id` when we plot comparisons so there is no need to enforce result order here.

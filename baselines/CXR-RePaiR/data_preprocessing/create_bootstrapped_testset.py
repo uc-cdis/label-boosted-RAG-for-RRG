@@ -45,11 +45,14 @@ def img_to_hdf5(cxr_paths, study_ids, out_filepath, resolution=320):
 
         str_dtype = h5py.string_dtype(encoding="utf-8")
         sid_dset = h5f.create_dataset("sid", shape=(dset_size,), dtype=int)
+        did_dset = h5f.create_dataset("did", shape=(dset_size,), dtype="S44")
         for idx, (path, sid) in enumerate(tqdm(zip(cxr_paths, study_ids))):
+            dicom_id = os.path.splitext(os.path.basename(path))[0]
             img = Image.open(path)
             img = preprocess(img, resolution)
             img_dset[idx] = img
             sid_dset[idx] = sid
+            did_dset[idx] = dicom_id
 
 
 def preprocess(img, desired_size):

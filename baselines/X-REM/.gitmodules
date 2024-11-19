@@ -1,0 +1,12 @@
+[submodule "ifcc"]
+	path = ifcc
+	url = https://github.com/ysmiura/ifcc
+[submodule "CheXbert"]
+	path = CheXbert
+	url = https://github.com/stanfordmlgroup/CheXbert
+[submodule "CXR-RePaiR"]
+	path = CXR-RePaiR
+	url = https://github.com/rajpurkarlab/CXR-RePaiR
+[submodule "CXR-Report-Metric"]
+	path = CXR-Report-Metric
+	url = https://github.com/rajpurkarlab/CXR-Report-Metric

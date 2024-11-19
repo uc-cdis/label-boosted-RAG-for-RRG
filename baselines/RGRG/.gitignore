@@ -1,0 +1,6 @@
+/.vscode
+/src.egg-info
+__pycache__/
+.idea/
+.DS_Store
+src/CheXbert/src/models/chexbert.pth

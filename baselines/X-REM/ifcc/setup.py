@@ -19,7 +19,7 @@ setuptools.setup(
         "bioc==1.3.4",
         "bllipparser==2016.9.11",
         "cachetools==4.1.0",
-        "flask==1.1.1",
+        "flask==2.2.5",
         "jpype1==0.6.3",
         "networkx==1.11",
         "nltk==3.4.5",

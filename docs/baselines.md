@@ -1,15 +1,15 @@
 # Baseline Results
 
-We compare against 3 retrieval based methods and 3 supervised fine-tuned methods from the literature as our baseline results.
+We compare against 3 retrieval based methods and 3 supervised fine-tuned methods from the literature as our baseline results. While we provide static clones of each of the methods, we made modifications as needed to get things to run. These changes are detailed within each method's specific section below. Our linting tools also formatted all code.
 
 * Retrieval methods:
-  * [CXR-RePaiR](https://github.com/rajpurkarlab/CXR-RePaiR)
-  * [CXR-ReDonE](https://github.com/rajpurkarlab/CXR-ReDonE)
-  * [X-REM](https://github.com/rajpurkarlab/X-REM)
+  * [CXR-RePaiR](https://github.com/rajpurkarlab/CXR-RePaiR): Generates impression as the retrieval of the most similar report(s) via crossmodal embedding retrieval by a model trained with CLIP.
+  * [CXR-ReDonE](https://github.com/rajpurkarlab/CXR-ReDonE): Similar to CXR-RePaiR except the joint embedding model was trained via ALBEF and the retrieval data are preprocessed by a langauge model to remove references to prior studies.
+  * [X-REM](https://github.com/rajpurkarlab/X-REM): Similar to as CXR-ReDonE except for a new custom similarity score used in ALBEF training and no data preprocessing is done, instead rather doing postprocessing of intermediate retrieved reports to filter to the most relevant reports.
 * Fine-tuned methods:
-  * [RGRG](https://github.com/ttanida/rgrg)
-  * [CheXagent](https://github.com/Stanford-AIMI/CheXagent)
-  * [CXRMate](https://huggingface.co/aehrc/cxrmate-rrg24)
+  * [CheXagent](https://github.com/Stanford-AIMI/CheXagent): Generates findings and impression. Findings are generated as a concatenation of generated localized findings, i.e. findings describing specific anatomical regions, by following prompted instructions.
+  * [CXRMate](https://huggingface.co/aehrc/cxrmate-rrg24): Generates findings and impression. A full encoder-decoder transformer that jointly generates findings and impression and postprocesses the output into separate findings and impression sections.
+  * [RGRG](https://github.com/ttanida/rgrg): Generates findings
 
 ## Prepare baseline inference data
 
@@ -17,14 +17,20 @@ Some methods require special data preparation; these instructions are detailed u
 
 ```bash
 conda activate labrag
-python rrg/prepare_inference_data.py # specify args as needed
+python rrg/prepare_inference_data.py \
+--data_dir /path/to/mimic-cxr/files/ \
+--split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
+--metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
+--report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
+--true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
+--output_dir /path/to/data/dir/
 ```
 
 ## CXR-RePaiR
 
 We provide a static clone of the CXR-RePaiR repo at commit hash `c11fa85`. We added `environment.yml` and modified `gen_corpus_embeddings.py` and `run_test.py` to remove hardcoded data paths.
 
-1. Create and activate the conda environment. 
+1. Create and activate the `cxrrepair` conda environment.
     ```bash
     cd baselines/CXR-RePaiR
     conda env create -f environment.yml
@@ -46,7 +52,7 @@ We provide a static clone of the CXR-RePaiR repo at commit hash `c11fa85`. We ad
     --cxr_files_dir /path/to/mimic-cxr/files/
     ```
 1. Manually download the model weights `clip-imp-pretrained_128_6_after_4.pt` from [this Box folder](https://stanfordmedicine.box.com/s/dbebk0jr5651dj8x1cu6b6kqyuuvz3ml).
-1. Generate whole-report embeddings of the retrieval corpus. This step runs on the GPU so prefix with `CUDA_VISIBLE_DEVICES` as needed.
+1. Generate whole-report embeddings of the retrieval corpus.
     ```bash
     python gen_corpus_embeddings.py \
     --clip_model_path /path/to/clip-imp-pretrained_128_6_after_4.pt \
@@ -69,8 +75,8 @@ We provide a static clone of the CXR-RePaiR repo at commit hash `c11fa85`. We ad
 
 We provide a static clone of the CXR-ReDonE repo at commit hash `b385988`. We modified `environment.yml` to change the environment name, bumped the version of pycocotools `2.0.4 → 2.0.5` to fix some installation error, and specified torch and torchvision with CUDA 11.3 to run on newer hardware. We also modified `remove_prior_refs.py` to prevent overwriting input data and to join multi-token words (i.e. `" ##" → ""`). Finally, we modified `CXR_ReDonE_pipeline.py` to save the study ids of each generated reports.
 
-1. Follow steps 1 and 2 of the CXR-RePaiR section to prepare initial data if you have not already.
-1. Create and activate the conda environment. 
+1. [Follow steps 1 and 2 of the CXR-RePaiR](#cxr-repair) section to prepare initial data if you have not already.
+1. Create and activate the `cxrredone` conda environment.
     ```bash
     cd baselines/CXR-ReDonE
     conda env create -f environment.yml
@@ -97,9 +103,9 @@ We provide a static clone of the CXR-ReDonE repo at commit hash `b385988`. We mo
 
 ## X-REM
 
-We provide a static clone of the X-REM repo at commit hash `c9c3571` with ifcc subrepo at commit hash `0c5c24c`. Per the author instructions, we move `m2trans_nli_filter.py` and `M2TransNLI.py` to the ifcc directory. We modified `X-REM/environment.yml` to change the environment name and specified torch and torchvision with CUDA 11.1 to run on newer hardware. We additionally modified `X-REM/ifcc/environment.yml` to change the environment name and specified the oldest possible torch and torchvision with CUDA 11.0, the minimum CUDA required to run on our hardware. We also remove unused data files provided by the repo authors.
+We provide a static clone of the X-REM repo at commit hash `c9c3571` with ifcc subrepo at commit hash `0c5c24c`. Per the author instructions, we move `m2trans_nli_filter.py` and `M2TransNLI.py` to the ifcc directory. We modified `X-REM/environment.yml` to change the environment name and specified torch and torchvision with CUDA 11.1 to run on newer hardware. We additionally modified `X-REM/ifcc/environment.yml` to change the environment name and specified the oldest possible torch and torchvision with CUDA 11.0, the minimum CUDA required to run on our hardware. We removed unused data files provided by the repo authors. Lastly, we add `X-REM/inference.py`, a short script to generate intermediate output, inspired by the authors' inference guidelines.
 
-1. Follow steps 1 and 2 of the CXR-RePaiR section to prepare initial data if you have not already.
+1. [Follow steps 1 and 2 of the CXR-RePaiR](#cxr-repair) section to prepare initial data if you have not already.
 1. Create and activate the `xrem` conda environment. 
     ```bash
     cd baselines/X-REM
@@ -126,7 +132,7 @@ We provide a static clone of the X-REM repo at commit hash `c9c3571` with ifcc s
     conda env create -f environment.yml
     conda activate ifcc
     ```
-1. Post-process the intermediate reports using the NLI filter.
+1. Postprocess the intermediate reports using the NLI filter.
     ```bash
     python m2trans_nli_filter.py \
     --m2trans_nli_model_path /path/to/model_medrad_19k/ \
@@ -135,66 +141,64 @@ We provide a static clone of the X-REM repo at commit hash `c9c3571` with ifcc s
     --topk 2
     ```
 
-# THINGS BELOW THIS LINE HAVE NOT BEEN REVIEWED
+## CXRMate
 
-## 4. CXRMate-RRG24 
+We specifically use CXRMate-RRG24, the authors' submisson to the RRG task of the ACL 2024 BioNLP workshop. We pin the model from its huggingface repository at commit hash `81c38cf`. We add `inference.py` based on the authors' inference guidelines and add `environment.yml`.
 
-First setup the environment by running;
-```bash
-conda create env -f env.yml -n cxrmate_env
-```
-The CXRMate-RRG24 model generates both findings and impression separately, we choose to then concatenate the reports to form full reports including both the avaialable sections of findings and impression. 
-
-* Activate the conda environment : 
+1. [Follow steps](#prepare-baseline-inference-data) to generate `findings.csv` and `impression.csv` if you have not already.
+1. Create and cctivate the `cxrmate` conda environment.
     ```bash
-    conda activate cxrmate_env
+    cd baselines/CXRMate
+    conda activate labrag
     ```
-1. `inference_cxrmate.py` generates findings and impression.
+1. Generate findings and impression.
     ```bash
-    python /path/to/rrg-repo/inference/cxrmate/inference_cxrmate.py \
-    --model /path/to/cxrmate-rrg24 model \
-    --findings_csv /path/to/inference_findings_data.csv \
-    --impression_csv /path/to/inference_impression_data.csv \
-    --savepath /path/to/save/directory
-    ```
-2. Run `cxrmate` section in `inference-results.ipynb` to split the generations into the 3 splits, findings only, impression only and findings & impression
-
-## 5. CheXagent
-
-We will use the same environment as we did for CXRMATE-RRG24. CheXagent generates both findings and impression similar to CXRMATE, so we will concatenate them to have full reports.
-
-* Activate the environment
-    ```bash
-    conda activate cxrmate_env
+    python inference.py \
+    --findings_csv /path/to/data/dir/findings.csv \
+    --impression_csv /path/to/data/dir/impression.csv \
+    --save_dir /path/to/cxrmate/outputs/
     ```
 
-1. `inference_chexagent.py` generates findings and impression.
+## CheXagent
+
+We pin the model from its huggingface repository at commit hash `4934e91`. We add `inference.py` based on the authors' inference guidelines.
+
+1. [Follow steps](#prepare-baseline-inference-data) to generate `findings.csv` and `impression.csv` if you have not already.
+1. Activate the `cxrmate` environment (reusing the same environment).
     ```bash
-    python /path/to/rrg-repo/inference/chexagent/inference_chexagent.py \
-    --model /path/to/chexagent model \
-    --findings_csv /path/to/inference_findings_data.csv \
-    --impression_csv /path/to/inference_impression_data.csv \
-    --savepath /path/to/save/directory
+    cd baselines/CheXagent
+    conda activate cxrmate
     ```
-2. Run `chexagent` section in `inference-results.ipynb` to split the generations into the 3 splits, findings only, impression only and findings & impression
-
-### 6. RGRG
-The model from the RGRG paper generates only findings so we will use the findings subset of the data. Download the full model checkpoint from the link in the [repo](https://github.com/ttanida/rgrg).
-
-* Create and activate the conda environment 
+1. Generates findings and impression.
     ```bash
-    cd rgrg-rrg
+    python inference.py \
+    --findings_csv /path/to/data/dir/findings.csv \
+    --impression_csv /path/to/data/dir/impression.csv \
+    --save_dir /path/to/chexagent/outputs/
+    ```
+
+## RGRG
+
+We provide a static clone of the RGRG repo at commit hash `9520b6d`. We modified `environment.yml` to change the environment name and specified torch and torchvision with CUDA 11.6 to run on newer hardware.
+
+1. [Follow steps](#prepare-baseline-inference-data) to generate `findings.csv` and `impression.csv` if you have not already.
+1. Create and activate the `rgrg` conda environment.
+    ```bash
+    cd baselines/RGRG
     conda env create -f environment.yml 
-    conda activate rgrg_env
+    conda activate rgrg
+    ```
+1. Manually download the model weights `full_model_checkpoint_val_loss_19.793_overall_steps_155252.pt` from [this google drive link](https://drive.google.com/file/d/1rDxqzOhjqydsOrITJrX0Rj1PAdMeP7Wy/view?usp=sharing).
+1. Generate findings.
+    ```bash
+    python src/full_model/generate_reports_for_images.py \
+    --model_path /path/to/full_model_checkpoint_val_loss_19.793_overall_steps_155252.pt \
+    --input_csv /path/to/data/dir/findings.csv \
+    --output_csv /path/to/rgrg/outputs/generations.csv
     ```
 
-1. `generate_reports_for_images.py` generates findings for a lit of image paths
-    ```bash
-        python ./src/full_model/generate_reports_for_images.py \
-        --model_path /path/to/rgrg_full_model_checkpoint_val_loss_19.793_overall_steps_155252.pt \
-        --input_csv path/to/inference_findings_data.csv \
-        --output_csv path/to/results/generations_findings.csv
-    ```
+
+# TODO vvv Below
 
 1. Finally we will switch back into the rrg environment and run the eval script to generate the METRICS files for the 6 comparison models. Use the following run commands on each of the generated files to run evaluation metrics for radiology report generations
     ```bash

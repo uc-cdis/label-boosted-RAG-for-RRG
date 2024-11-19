@@ -1,15 +1,5 @@
-# report generation code for cxrmate-rrg24
-"""
-# RUN
-
-python /path/to/inference_cxrmate.py \
--- model /path/to/cxrmate-rrg24 model \
---findings_csv /path/to/inference_findings_data.csv \
---impression_csv /path/to/inference_impression_data.csv
-"""
 import argparse
 import os
-from typing import get_args
 
 import pandas as pd
 import torch
@@ -19,17 +9,12 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 from tqdm import tqdm
 
-"""
-# packages
-transformers==4.40.2
-"""
-
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model",
-        required=True,
+        default="aehrc/cxrmate-rrg24",
         help="Path to the local cxrmate-rrg4 model or HuggingFace model name",
     )
     parser.add_argument(
@@ -43,20 +28,18 @@ def parse_args():
         help="Path to the inference_impression_data.csv file",
     )
     parser.add_argument(
-        "--savepath", required=True, help="Save path for generations.csv"
+        "--save_dir", required=True, help="Save path for generations.csv"
     )
+    return parser.parse_args()
 
 
 def generate_reports(
     *,  # enforce kwargs
-    model=str,
-    findings_path=str,
-    impression_path=str,
-    results_savepath=str,
+    model_path: str,
+    findings_path: str,
+    impression_path: str,
+    results_save_dir: str,
 ):
-    # findings_df = pd.read_csv("/opt/gpudata/rrg-data-2/inference-all/inference_findings_data.csv")
-    # impression_df = pd.read_csv("/opt/gpudata/rrg-data-2/inference-all/inference_impression_data.csv")
-
     findings_df = pd.read_csv(findings_path)
     impression_df = pd.read_csv(impression_path)
 
@@ -85,10 +68,15 @@ def generate_reports(
 
     hf_dataset = Dataset.from_dict(data_dict, features)
 
-    # model_path = "/opt/gpudata/rrg-data-2/inference-all/inf-models/cxrmate-rrg24/cxrmate-rrg24"
-    model_path = model
-    tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
-    model = transformers.AutoModel.from_pretrained(model_path, trust_remote_code=True)
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        model_path,
+        revision="81c38cf",
+    )
+    model = transformers.AutoModel.from_pretrained(
+        model_path,
+        trust_remote_code=True,
+        revision="81c38cf",
+    )
 
     device = "cuda" if torch.cuda.is_available else "cpu"
 
@@ -155,20 +143,15 @@ def generate_reports(
         results["findings"].extend(batch_findings)
         results["impression"].extend(batch_impression)
 
-    # pd.DataFrame(
-    #     results,
-    # ).to_csv("/opt/gpudata/rrg-data-2/inference-all/inf-results/cxr-mate/generations.csv")
-
-    pd.DataFrame(
-        results,
-    ).to_csv(os.path.join(results_savepath, "generations.csv"))
+    out_df = pd.DataFrame(results)
+    out_df.to_csv(os.path.join(results_save_dir, "generations.csv"), index=False)
 
 
 if __name__ == "__main__":
     args = parse_args()
     generate_reports(
-        model=args.model,
+        model_path=args.model,
         findings_path=args.findings_csv,
         impression_path=args.impression_csv,
-        results_savepath=args.savepath,
+        results_save_dir=args.save_dir,
     )

@@ -35,7 +35,7 @@ setuptools.setup(
         "tensorboard==2.0.0",
         "torch==1.5.0",
         "torchvision==0.6.0",
-        "tqdm==4.45.0",
+        "tqdm==4.66.3",
         "transformers==2.9.0",
     ],
 )

@@ -13,5 +13,5 @@ conda activate labrag
 1. [Data Ingest](data-ingest.md): Data download and extraction
 1. [](): Image embedding
 1. [](): Label classifier training
-1. [Experiments](experiments.md): Replicate experiments
-1. [Inference](inference.md): Replicate inference results
+1. [Experiments](experiments.md): Replicate experiment results
+1. [Baselines](baselines.md): Replicate baseline results

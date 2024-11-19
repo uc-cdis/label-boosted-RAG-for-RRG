@@ -1,0 +1,27 @@
+name: xrem
+channels:
+  - defaults
+dependencies:
+  - conda
+  - python=3.8
+  - conda-env
+  - conda-build
+  - conda-verify
+  - anaconda
+  - anaconda-navigator
+  - navigator-updater
+  - libgcc
+  - pytorch=1.12.1
+  - pip:
+    - ipython==7.30.1
+    - -f https://download.pytorch.org/whl/torch_stable.html
+    - torchvision==0.11.1+cu111
+    - torch==1.10.0+cu111
+    - timm==0.4.12
+    - transformers==4.8.1
+    - Pillow==8.3.2
+    - numpy==1.21.1
+    - opencv-python==4.5.5.62
+    - scipy==1.8.0
+    - scikit_image==0.19.2
+    - matplotlib==3.4.3

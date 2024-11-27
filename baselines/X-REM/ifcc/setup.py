@@ -22,7 +22,7 @@ setuptools.setup(
         "flask==1.1.1",
         "jpype1==0.6.3",
         "networkx==1.11",
-        "nltk==3.4.5",
+        "nltk==3.9",
         "numpy==1.18.5",
         "pandas==1.0.1",
         "pathlib2==2.3.5",

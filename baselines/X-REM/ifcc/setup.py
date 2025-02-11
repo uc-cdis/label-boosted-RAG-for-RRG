@@ -36,6 +36,6 @@ setuptools.setup(
         "torch==1.5.0",
         "torchvision==0.6.0",
         "tqdm==4.45.0",
-        "transformers==2.9.0",
+        "transformers==4.48.0",
     ],
 )

@@ -33,7 +33,7 @@ setuptools.setup(
         "spacy==2.1.3",
         "stanza==1.1.1",
         "tensorboard==2.0.0",
-        "torch==1.5.0",
+        "torch==2.6.0",
         "torchvision==0.6.0",
         "tqdm==4.45.0",
         "transformers==2.9.0",

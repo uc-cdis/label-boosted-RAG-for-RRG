@@ -6,6 +6,7 @@ pqdm==0.2.0
 tqdm==4.66.4
 docker==7.0.0
 detect-secrets==1.5.0
+omegaconf==2.3.0
 # data tools
 numpy==1.26.4
 pandas==2.1.3

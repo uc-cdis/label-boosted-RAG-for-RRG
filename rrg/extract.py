@@ -99,7 +99,8 @@ def extract_image_features(
             for img_embed, img_proj, patient_id, study_id, dicom_id in zip(
                 img_embeds, img_projs, patient_ids, study_ids, dicom_ids
             ):
-                h5[f"{embed_key}/{patient_id}/{study_id}/{dicom_id}"] = img_embed
+                if img_embed is not None:
+                    h5[f"{embed_key}/{patient_id}/{study_id}/{dicom_id}"] = img_embed
                 h5[f"{proj_key}/{patient_id}/{study_id}/{dicom_id}"] = img_proj
 
 

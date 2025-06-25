@@ -91,7 +91,7 @@ def extract_image_features(
                 img_projs = model.global_embedder(img_embeds).cpu().numpy()
             elif model_type == "resnet50":
                 img_embeds = [None] * len(ims)
-                img_projs = model(ims)
+                img_projs = model(ims).cpu().numpy()
             else:
                 raise ValueError(f"Unknown model type: {model_type}")
 

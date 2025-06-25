@@ -1,4 +1,5 @@
 import argparse
+import os
 from typing import Literal, get_args
 
 import evaluate
@@ -31,6 +32,9 @@ def evaluate_generations(
     hyp_col: str = DEFAULT_HYP_COL,
     study_id_col: str = DEFAULT_STUDY_ID_COL,
 ):
+    if os.path.exists(output_csv):
+        print("File Exists, Exiting")
+        return
     report_df = pd.read_csv(report_csv)
     refs = fill_empty(report_df[ref_col])
     hyps = fill_empty(report_df[hyp_col])

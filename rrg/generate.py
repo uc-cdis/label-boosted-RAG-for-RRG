@@ -61,7 +61,9 @@ def generate_radiology_notes(
     model_name = os.path.basename(model)
     filename = f"{model_name}_{filter_type}_{label_type}-label_{prompt_type}_top-{k}_{section_type}.csv"
     result_csv = os.path.join(output_dir, filename)
-    assert not os.path.exists(result_csv)
+    if os.path.exists(result_csv):
+        print("File Exists, Exiting")
+        return
 
     # TODO parameterize hardcoded split remapping
     split_remap = {

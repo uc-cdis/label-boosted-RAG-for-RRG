@@ -13,7 +13,7 @@ The experiments are divided into four parts. Part 1 is extracting features using
 1. `extract.py` extracts image features using BioViL-T [1].
     ```bash
     python /path/to/labrag-repo/rrg/extract.py \
-    --mimic_cxr /path/to/mimic-cxr/files \
+    --input_path /path/to/mimic-cxr/files \
     --file_ext ".jpg" \
     --output_h5 /path/to/rrg-data/biovilt-features.h5 \
     --num_workers 16 \

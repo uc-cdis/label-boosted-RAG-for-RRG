@@ -242,7 +242,7 @@ def plot_roc_curve(
     ax.set_title(title, fontsize=10)
     ax.legend(loc="lower right", fontsize="xx-small")
     fig.tight_layout()
-    fig.savefig(output_path, dpi=300)
+    fig.savefig(output_path, dpi=1000)
 
 
 def plot_pr_curve(
@@ -269,7 +269,7 @@ def plot_pr_curve(
     ax.set_title(title, fontsize=10)
     ax.legend(loc="upper right", fontsize="xx-small")
     fig.tight_layout()
-    fig.savefig(output_path, dpi=300)
+    fig.savefig(output_path, dpi=1000)
 
 
 def parse_args():

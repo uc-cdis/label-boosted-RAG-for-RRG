@@ -14,6 +14,7 @@ from health_multimodal.image.data.transforms import (
     create_chest_xray_transform_for_inference,
 )
 from health_multimodal.image.model.pretrained import get_biovil_t_image_encoder
+from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from torchvision.models import ResNet50_Weights, resnet50
 from torchvision.transforms import Normalize
@@ -70,7 +71,7 @@ def extract_image_features(
     elif model_type == "resnet50":
         model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
         # remove classification layer but still use forward method
-        model.fc = lambda x: x
+        model.fc = nn.Identity()
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
@@ -102,7 +103,7 @@ def extract_image_features(
                 h5[f"{proj_key}/{patient_id}/{study_id}/{dicom_id}"] = img_proj
 
 
-def get_gloria_image_encoder(model_path: str) -> torch.nn.Module:
+def get_gloria_image_encoder(model_path: str) -> nn.Module:
     cfg = SimpleNamespace(
         model=SimpleNamespace(
             text=SimpleNamespace(embedding_dim=768),

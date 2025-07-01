@@ -148,7 +148,6 @@ class ImageDataset(Dataset):
         paths: list[str],
         transform_type: MODEL_T,
     ):
-        self.paths = paths
         if transform_type == "biovil-t":
             self.transform = create_chest_xray_transform_for_inference(
                 resize=512,
@@ -185,8 +184,12 @@ class ImageDataset(Dataset):
             self.get_ids = get_mimic_ids
         elif "chexpert" in root_path:
             self.get_ids = get_chexpert_ids
+            # image can't be processed
+            paths = [p for p in paths if "patient32368" not in p]
         else:
             raise ValueError(f"Cannot infer dataset type: {root_path}")
+
+        self.paths = paths
 
     def __getitem__(self, index) -> tuple[torch.Tensor, IDS_T]:
         path = self.paths[index]

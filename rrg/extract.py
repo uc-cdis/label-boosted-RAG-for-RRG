@@ -24,6 +24,7 @@ DEFAULT_BATCH_SIZE = 32
 DEFAULT_NUM_WORKERS = 16
 DEFAULT_FILE_EXT = ".jpg"
 MODEL_T = Literal["biovil-t", "gloria", "resnet50"]
+IDS_T = tuple[str, str, str]
 
 
 def extract_image_features(
@@ -55,7 +56,11 @@ def extract_image_features(
                 path = os.path.join(root, file)
                 paths.append(path)
     paths = sorted(paths)
-    ds = ImageDataset(paths=paths, transform_type=model_type)
+    ds = ImageDataset(
+        root_path=input_path,
+        paths=paths,
+        transform_type=model_type,
+    )
     dl = DataLoader(
         dataset=ds,
         batch_size=batch_size,
@@ -89,6 +94,7 @@ def extract_image_features(
             elif model_type == "gloria":
                 img_embeds = model(ims)
                 img_projs = model.global_embedder(img_embeds).cpu().numpy()
+                img_embeds = img_embeds.cpu().numpy()
             elif model_type == "resnet50":
                 img_embeds = [None] * len(ims)
                 img_projs = model(ims).cpu().numpy()
@@ -138,6 +144,7 @@ class ImageDataset(Dataset):
     def __init__(
         self,
         *,  # enforce kwargs
+        root_path: str,
         paths: list[str],
         transform_type: MODEL_T,
     ):
@@ -174,9 +181,16 @@ class ImageDataset(Dataset):
         else:
             raise ValueError(f"Unknown transform type: {transform_type}")
 
-    def __getitem__(self, index) -> torch.Tensor:
+        if "mimic" in root_path:
+            self.get_ids = get_mimic_ids
+        elif "chexpert" in root_path:
+            self.get_ids = get_chexpert_ids
+        else:
+            raise ValueError(f"Cannot infer dataset type: {root_path}")
+
+    def __getitem__(self, index) -> tuple[torch.Tensor, IDS_T]:
         path = self.paths[index]
-        ids = os.path.splitext(path)[0].split(os.path.sep)[-3:]
+        ids = self.get_ids(path)
         try:
             im = load_image(Path(path))
         except Exception as e:
@@ -187,6 +201,17 @@ class ImageDataset(Dataset):
 
     def __len__(self) -> int:
         return len(self.paths)
+
+
+def get_mimic_ids(path: str) -> IDS_T:
+    return os.path.splitext(path)[0].split(os.path.sep)[-3:]
+
+
+def get_chexpert_ids(path: str) -> IDS_T:
+    patient_id, study_id, dicom_id = os.path.splitext(path)[0].split(os.path.sep)[-3:]
+    study_id = f"{patient_id}_{study_id}"
+    dicom_id = f"{study_id}_{dicom_id}"
+    return patient_id, study_id, dicom_id
 
 
 def parse_args() -> argparse.Namespace:

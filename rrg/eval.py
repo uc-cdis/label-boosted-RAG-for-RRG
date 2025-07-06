@@ -63,7 +63,7 @@ def evaluate_generations(
             bert_results = bertscore.compute(
                 predictions=hyps,
                 references=refs,
-                model_name="allenai/scibert_scivocab_uncased",
+                model_type="allenai/scibert_scivocab_uncased",
             )
             results = pd.Series(bert_results["f1"])
         elif metric == "f1radgraph":

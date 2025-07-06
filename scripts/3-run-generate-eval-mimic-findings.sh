@@ -319,12 +319,12 @@ python $REPO_ROOT/rrg/generate.py \
 --true_label_csv $LABEL_DIR/mimic-findings-labels.csv \
 --predicted_label_csv $BASE_OUTPUT_DIR/mimic-findings-biovilt-classifiers/pred_pr.csv \
 --report_csv $MIMIC_CXR_DIR/mimic_cxr_sectioned.csv \
---feature_h5 $BASE_OUTPUT_DIR/chexpertplus-biovilt.h5 \
+--feature_h5 $BASE_OUTPUT_DIR/mimic-cxr-biovilt.h5 \
 --output_dir $BASE_OUTPUT_DIR/exp-mimic/exp-findings/exp-embedding
 
 python $REPO_ROOT/rrg/eval.py \
---report_csv $BASE_OUTPUT_DIR/exp-mimic/exp-findings/exp-embedding/findings_top-5_chexpertplus-biovilt-pred-label_exact_simple_Mistral-7B-Instruct-v0.3.csv \
---output_csv $BASE_OUTPUT_DIR/exp-mimic/exp-findings/exp-embedding/findings_top-5_chexpertplus-biovilt-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv
+--report_csv $BASE_OUTPUT_DIR/exp-mimic/exp-findings/exp-embedding/findings_top-5_mimic-cxr-biovilt-pred-label_exact_simple_Mistral-7B-Instruct-v0.3.csv \
+--output_csv $BASE_OUTPUT_DIR/exp-mimic/exp-findings/exp-embedding/findings_top-5_mimic-cxr-biovilt-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv
 
 python $REPO_ROOT/rrg/generate.py \
 --model mistralai/Mistral-7B-Instruct-v0.3 \
@@ -339,12 +339,12 @@ python $REPO_ROOT/rrg/generate.py \
 --true_label_csv $LABEL_DIR/mimic-findings-labels.csv \
 --predicted_label_csv $BASE_OUTPUT_DIR/mimic-findings-resnet50-classifiers/pred_pr.csv \
 --report_csv $MIMIC_CXR_DIR/mimic_cxr_sectioned.csv \
---feature_h5 $BASE_OUTPUT_DIR/chexpertplus-resnet50.h5 \
+--feature_h5 $BASE_OUTPUT_DIR/mimic-cxr-resnet50.h5 \
 --output_dir $BASE_OUTPUT_DIR/exp-mimic/exp-findings/exp-embedding
 
 python $REPO_ROOT/rrg/eval.py \
---report_csv $BASE_OUTPUT_DIR/exp-mimic/exp-findings/exp-embedding/findings_top-5_chexpertplus-resnet50-pred-label_exact_simple_Mistral-7B-Instruct-v0.3.csv \
---output_csv $BASE_OUTPUT_DIR/exp-mimic/exp-findings/exp-embedding/findings_top-5_chexpertplus-resnet50-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv
+--report_csv $BASE_OUTPUT_DIR/exp-mimic/exp-findings/exp-embedding/findings_top-5_mimic-cxr-resnet50-pred-label_exact_simple_Mistral-7B-Instruct-v0.3.csv \
+--output_csv $BASE_OUTPUT_DIR/exp-mimic/exp-findings/exp-embedding/findings_top-5_mimic-cxr-resnet50-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv
 
 # =================================
 # True Label Experiments

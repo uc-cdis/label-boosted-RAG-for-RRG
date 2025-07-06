@@ -57,9 +57,12 @@ def generate_radiology_notes(
     other_col: str = DEFAULT_OTHER_COL,
 ):
     os.makedirs(output_dir, exist_ok=True)
-    label_type = "pred" if predicted_label_csv is not None else "true"
+    label_type = "true"
+    if predicted_label_csv is not None:
+        # assumes predicted labels were generated using "feature_h5" embeddings
+        label_type = f"{os.path.basename(feature_h5.replace('.h5', ''))}-pred"
     model_name = os.path.basename(model)
-    filename = f"{model_name}_{filter_type}_{label_type}-label_{prompt_type}_top-{k}_{section_type}.csv"
+    filename = f"{section_type}_top-{k}_{label_type}-label_{filter_type}_{prompt_type}_{model_name}.csv"
     result_csv = os.path.join(output_dir, filename)
     if os.path.exists(result_csv):
         print("File Exists, Exiting")
@@ -228,6 +231,10 @@ def generate_radiology_notes(
         )
 
 
+def optional_empty_str(x):
+    return None if x in ["", "None", "none"] else x
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -288,6 +295,7 @@ def parse_args():
     parser.add_argument(
         "--predicted_label_csv",
         required=False,
+        type=optional_empty_str,
         help="Path to input predicted label csv with study ID and label columns (exclude to infer using true labels)",
     )
     parser.add_argument(

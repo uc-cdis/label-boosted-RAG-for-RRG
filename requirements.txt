@@ -21,6 +21,7 @@ opencv-python==4.11.0.86
 matplotlib==3.8.3
 seaborn==0.13.0
 # analysis tools
+statannotations==0.7.2
 statsmodels==0.14.2
 scipy==1.14.0
 tableone==0.9.1

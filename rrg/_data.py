@@ -142,7 +142,12 @@ def get_split_features(
             for patient_id, study_id, dicom_id in tqdm(
                 ids, desc=f"{split.title()} Samples", disable=not use_tqdm
             ):
-                x = feature_h5[f"p{patient_id}/s{study_id}/{dicom_id}"][:]
+                if f"p{patient_id}/s{study_id}/{dicom_id}" in feature_h5:
+                    # mimic-cxr style
+                    x = feature_h5[f"p{patient_id}/s{study_id}/{dicom_id}"][:]
+                else:
+                    # chexpertplus style
+                    x = feature_h5[f"{patient_id}/{study_id}/{dicom_id}"][:]
                 split_features.append(x)
             split_features = np.stack(split_features)
             ret[split] = split_features

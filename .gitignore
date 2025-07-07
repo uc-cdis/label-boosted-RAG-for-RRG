@@ -171,3 +171,6 @@ temp
 chexpert_auc14.dict.gz
 glove_mimic-cxr_train.512.txt.gz
 model_medrad_19k
+chexpert_resnet50.ckpt
+
+labrag

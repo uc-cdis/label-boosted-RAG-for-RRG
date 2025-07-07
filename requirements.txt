@@ -6,16 +6,22 @@ pqdm==0.2.0
 tqdm==4.66.4
 docker==7.0.0
 detect-secrets==1.5.0
+omegaconf==2.3.0
+pytorch-lightning==2.5.2
+wandb==0.20.1
 # data tools
 numpy==1.26.4
 pandas==2.1.3
 h5py==3.11.0
 h5tree==1.0
 tables==3.9.2
+lxml==5.4.0
+opencv-python==4.11.0.86
 # viz tools
 matplotlib==3.8.3
 seaborn==0.13.0
 # analysis tools
+statannotations==0.7.2
 statsmodels==0.14.2
 scipy==1.14.0
 tableone==0.9.1
@@ -38,5 +44,6 @@ nltk==3.9.1
 rouge-score==0.1.2
 # models
 hi-ml-multimodal==0.2.2
+gloria @ git+https://github.com/StevenSong/gloria
 radgraph==0.1.2
 f1chexbert==0.0.2

@@ -82,6 +82,7 @@ def plot_experiment(
     exp_trials: list[tuple[str, str]],
     trial_dfs: list[pd.DataFrame],
     metrics: list[str],
+    n_resamples: int | None = None,
 ) -> plt.Figure:
     # setup dataframe for seaborn barplot
     melted_results = []
@@ -93,6 +94,23 @@ def plot_experiment(
 
     # filter metrics for plotting
     df = df[df["metric"].isin(metrics)]
+
+    # bootstrap
+    if n_resamples is not None:
+        resampled = []
+        for i in range(n_resamples):
+            bootstrap_studies = set(
+                df["study_id"]
+                .drop_duplicates()
+                .sample(frac=0.75, replace=False, random_state=i)
+            )
+            temp = df[df["study_id"].isin(bootstrap_studies)]
+            bootstrap_results = (
+                temp.groupby(["metric", exp_name])["value"].mean().reset_index()
+            )
+            bootstrap_results["bootstrap"] = i
+            resampled.append(bootstrap_results)
+        df = pd.concat(resampled)
 
     # setup seaborn barplot parameters
     x = "metric"
@@ -134,12 +152,13 @@ def plot_experiment(
         ax=ax,
         saturation=1,
         zorder=15,
-        errorbar="se",
-        err_kws={
-            "zorder": 25,
-            "linewidth": 1,
-            "alpha": 1,
-        },
+        errorbar=None,
+        # errorbar="se",
+        # err_kws={
+        #     "zorder": 25,
+        #     "linewidth": 1,
+        #     "alpha": 1,
+        # },
         width=0.15 * len(hue_order),
     )
     annot = Annotator(

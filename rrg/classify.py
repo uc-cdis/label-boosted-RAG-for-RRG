@@ -19,12 +19,67 @@ from _data import (
     get_split_features,
     get_split_samples,
 )
+from omegaconf import OmegaConf
+from sklearn.base import ClassifierMixin as Classifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import auc, precision_recall_curve, roc_curve
+from sklearn.model_selection import GridSearchCV
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
 from tqdm import tqdm
+from xgboost import XGBClassifier
 
-DEFAULT_MAX_ITER = 500
-DEFAULT_NUM_WORKERS = -1
+MODEL_TYPES = Literal["lr", "rf", "svm", "xgb"]
+MODEL_MAP = {
+    "lr": LogisticRegression,
+    "rf": RandomForestClassifier,
+    "svm": SVC,
+    "xgb": XGBClassifier,
+}
+HYPERPARAM_T = str | int | float
+MODEL_HYPERPARAMS_T = dict[str, HYPERPARAM_T | list[HYPERPARAM_T]]
+
+
+def make_model(
+    *,  # enforce kwargs
+    model_type: MODEL_TYPES,
+    model_hyperparams: MODEL_HYPERPARAMS_T,
+    standard_scale: bool,
+) -> Classifier:
+    cv_hyperparams = dict()
+    static_hyperparams = dict()
+    for k, v in model_hyperparams.items():
+        if isinstance(v, list):
+            cv_hyperparams[k] = v
+        else:
+            static_hyperparams[k] = v
+
+    model_cls = MODEL_MAP[model_type]
+    model = model_cls(**static_hyperparams)
+    base_has_njobs = "n_jobs" in model.get_params()
+    if standard_scale:
+        model = Pipeline(
+            [
+                ("scale", StandardScaler()),
+                ("classify", model),
+            ]
+        )
+        cv_hyperparams = {f"classify__{k}": v for k, v in cv_hyperparams.items()}
+
+    if len(cv_hyperparams) != 0:
+        # if base model doesn't parallelize, do it at the cross val level
+        n_jobs = 1 if base_has_njobs else -1
+        model = GridSearchCV(
+            estimator=model,
+            param_grid=cv_hyperparams,
+            n_jobs=n_jobs,
+            refit=True,
+            cv=5,
+        )
+
+    return model
 
 
 def train_image_classifier(
@@ -42,8 +97,9 @@ def train_image_classifier(
     labels: list[str] = DEFAULT_LABELS,
     view_order: list[str] = DEFAULT_VIEW_ORDER,
     feature_key: str = DEFAULT_IMG_EMBED_KEY,
-    max_iter: int = DEFAULT_MAX_ITER,
-    num_workers: int = DEFAULT_NUM_WORKERS,
+    model_type: MODEL_TYPES,
+    model_hyperparams: MODEL_HYPERPARAMS_T,
+    standard_scale: bool,
 ):
     assert not os.path.exists(output_results)
     os.makedirs(output_results)
@@ -97,12 +153,10 @@ def train_image_classifier(
 
     models = dict()
     for label in tqdm(labels, desc="Training Label"):
-        # TODO hardcoded model type
-        model = LogisticRegression(
-            penalty="l2",
-            solver="saga",
-            max_iter=max_iter,
-            n_jobs=num_workers,
+        model = make_model(
+            model_type=model_type,
+            model_hyperparams=model_hyperparams,
+            standard_scale=standard_scale,
         )
         model.fit(X_train, y_train[label].to_numpy())
         y_prob_train[label] = model.predict_proba(X_train)[:, 1]
@@ -127,7 +181,7 @@ def train_image_classifier(
         y_pred_pr_val[label] = (y_prob_val[label] > pr_threshold).astype(int)
         y_pred_pr_test[label] = (y_prob_test[label] > pr_threshold).astype(int)
 
-        models[label] = models
+        models[label] = model
 
     # save models and predictions to disk
     with open(os.path.join(output_results, "models.pkl"), "wb") as f:
@@ -342,16 +396,9 @@ def parse_args():
         help="Name of image features",
     )
     parser.add_argument(
-        "--max_iter",
-        type=int,
-        default=DEFAULT_MAX_ITER,
-        help="Number of iterations for model fitting",
-    )
-    parser.add_argument(
-        "--num_workers",
-        type=int,
-        default=DEFAULT_NUM_WORKERS,
-        help="Number of parallel workers for model fitting",
+        "--model_config",
+        default="configs/classify/default.yaml",
+        help="Classifier model configuration file",
     )
     args = parser.parse_args()
     return args
@@ -359,6 +406,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    config = OmegaConf.load(args.model_config)
     train_image_classifier(
         split_csv=args.split_csv,
         metadata_csv=args.metadata_csv,
@@ -373,6 +421,7 @@ if __name__ == "__main__":
         labels=args.labels,
         view_order=args.view_order,
         feature_key=args.feature_key,
-        max_iter=args.max_iter,
-        num_workers=args.num_workers,
+        model_type=config["model_type"],
+        model_hyperparams=config["model_hyperparams"],
+        standard_scale=config["standard_scale"],
     )

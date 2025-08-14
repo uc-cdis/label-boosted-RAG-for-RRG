@@ -1,8 +1,0 @@
-model_type: svm
-model_hyperparams:
-  C: 1.0
-  kernel: "rbf"
-  gamma: "scale"
-  class_weight: "balanced"
-  cache_size: 2000
-standard_scale: True

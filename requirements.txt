@@ -27,11 +27,11 @@ scipy==1.14.0
 tableone==0.9.1
 # ml tools
 scikit-learn==1.5.1
+xgboost==3.0.4
 torch==2.4.0
 torchvision==0.19.0
 tensorboard==2.17.0
 vllm==0.5.5
-xgboost==3.0.4
 # huggingface
 accelerate==0.32.1
 datasets==2.20.0
@@ -48,3 +48,6 @@ hi-ml-multimodal==0.2.2
 gloria @ git+https://github.com/StevenSong/gloria
 radgraph==0.1.2
 f1chexbert==0.0.2
+# annoying bugfix
+outlines==0.0.46
+pyairports @ git+https://github.com/StevenSong/pyairports.git@f611ee5a5a82b4e98b22641bb99693d862c802e4

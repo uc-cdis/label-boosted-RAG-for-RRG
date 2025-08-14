@@ -1,0 +1,27 @@
+model_type: rf
+model_hyperparams:
+  n_estimators:
+  - 100
+  - 200
+  - 400
+  criterion: gini
+  max_depth: null
+  min_samples_split: 2
+  min_samples_leaf: 1
+  min_weight_fraction_leaf: 0.0
+  max_features: sqrt
+  max_leaf_nodes: null
+  min_impurity_decrease: 0.0
+  bootstrap: 
+  - True
+  - False
+  oob_score: False
+  n_jobs: 5 # if parallelize_labels = 14, uses 70 total processes
+  random_state: 42
+  # verbose: 0
+  warm_start: False
+  class_weight: balanced
+  ccp_alpha: 0.0
+  max_samples: null
+  monotonic_cst: null
+standard_scale: False

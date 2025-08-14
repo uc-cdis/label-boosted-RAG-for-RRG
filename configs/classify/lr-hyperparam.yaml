@@ -1,0 +1,27 @@
+model_type: lr
+model_hyperparams:
+# LogisticRegression
+  penalty: elasticnet
+  # dual: False # only used for liblinear solver
+  tol: 1e-3
+  C:
+  - 0.1
+  - 1.0
+  - 10.0
+  fit_intercept: True
+  # intercept_scaling: 1 # only used for liblinear solver
+  class_weight: balanced
+  random_state: 42
+  solver: saga
+  max_iter: 100
+  multi_class: ovr
+  # verbose: 0
+  warm_start: False
+  n_jobs: 5 # if parallelize_labels = 14, uses 70 total processes
+  l1_ratio:
+  - 0 # equivalent to l2
+  - 0.25
+  - 0.5
+  - 0.75
+  - 1 # equivalent to l1
+standard_scale: True

@@ -1,5 +1,6 @@
 model_type: lr
 model_hyperparams:
+  # LogisticRegression
   penalty: l2
   solver: saga
   max_iter: 500

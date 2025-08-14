@@ -19,15 +19,23 @@ from _data import (
     get_split_features,
     get_split_samples,
 )
+from _utils import make_linear_svm_with_probs
 from omegaconf import OmegaConf
+from pqdm.processes import pqdm
 from sklearn.base import ClassifierMixin as Classifier
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import auc, precision_recall_curve, roc_curve
+from sklearn.metrics import (
+    auc,
+    make_scorer,
+    precision_recall_curve,
+    roc_auc_score,
+    roc_curve,
+)
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
 from tqdm import tqdm
 from xgboost import XGBClassifier
 
@@ -35,7 +43,7 @@ MODEL_TYPES = Literal["lr", "rf", "svm", "xgb"]
 MODEL_MAP = {
     "lr": LogisticRegression,
     "rf": RandomForestClassifier,
-    "svm": SVC,
+    "svm": make_linear_svm_with_probs,
     "xgb": XGBClassifier,
 }
 HYPERPARAM_T = str | int | float
@@ -51,14 +59,19 @@ def make_model(
     cv_hyperparams = dict()
     static_hyperparams = dict()
     for k, v in model_hyperparams.items():
-        if isinstance(v, list):
+        if isinstance(v, list) or OmegaConf.is_list(v):
             cv_hyperparams[k] = v
         else:
             static_hyperparams[k] = v
 
-    model_cls = MODEL_MAP[model_type]
-    model = model_cls(**static_hyperparams)
+    model_factory = MODEL_MAP[model_type]
+    model = model_factory(**static_hyperparams)
+
     base_has_njobs = "n_jobs" in model.get_params()
+
+    if isinstance(model, CalibratedClassifierCV):
+        cv_hyperparams = {f"estimator__{k}": v for k, v in cv_hyperparams.items()}
+
     if standard_scale:
         model = Pipeline(
             [
@@ -77,9 +90,69 @@ def make_model(
             n_jobs=n_jobs,
             refit=True,
             cv=5,
+            scoring=make_scorer(
+                roc_auc_score,  # AUROC can take predicted probabilities in the binary case
+                greater_is_better=True,
+                response_method="predict_proba",
+            ),
         )
 
+    assert getattr(model, "predict_proba", None) is not None
+
     return model
+
+
+def train_per_label_cls(
+    *,  # enforce kwargs
+    X_train: np.ndarray,
+    X_val: np.ndarray,
+    X_test: np.ndarray,
+    y_train: np.ndarray,
+    y_val: np.ndarray,
+    model_type: MODEL_TYPES,
+    model_hyperparams: MODEL_HYPERPARAMS_T,
+    standard_scale: bool,
+):
+    model = make_model(
+        model_type=model_type,
+        model_hyperparams=model_hyperparams,
+        standard_scale=standard_scale,
+    )
+    model.fit(X_train, y_train)
+    y_prob_train = model.predict_proba(X_train)[:, 1]
+    y_prob_val = model.predict_proba(X_val)[:, 1]
+    y_prob_test = model.predict_proba(X_test)[:, 1]
+
+    roc_threshold = get_optimal_threshold(
+        trues=y_val,
+        probs=y_prob_val,
+        method="roc",
+    )
+    y_pred_roc_train = (y_prob_train > roc_threshold).astype(int)
+    y_pred_roc_val = (y_prob_val > roc_threshold).astype(int)
+    y_pred_roc_test = (y_prob_test > roc_threshold).astype(int)
+
+    pr_threshold = get_optimal_threshold(
+        trues=y_val,
+        probs=y_prob_val,
+        method="pr",
+    )
+    y_pred_pr_train = (y_prob_train > pr_threshold).astype(int)
+    y_pred_pr_val = (y_prob_val > pr_threshold).astype(int)
+    y_pred_pr_test = (y_prob_test > pr_threshold).astype(int)
+
+    return {
+        "model": model,
+        "y_prob_train": y_prob_train,
+        "y_prob_val": y_prob_val,
+        "y_prob_test": y_prob_test,
+        "y_pred_roc_train": y_pred_roc_train,
+        "y_pred_roc_val": y_pred_roc_val,
+        "y_pred_roc_test": y_pred_roc_test,
+        "y_pred_pr_train": y_pred_pr_train,
+        "y_pred_pr_val": y_pred_pr_val,
+        "y_pred_pr_test": y_pred_pr_test,
+    }
 
 
 def train_image_classifier(
@@ -100,10 +173,13 @@ def train_image_classifier(
     model_type: MODEL_TYPES,
     model_hyperparams: MODEL_HYPERPARAMS_T,
     standard_scale: bool,
+    parallelize_labels: int = 1,
 ):
+    assert parallelize_labels > 0
     assert not os.path.exists(output_results)
     os.makedirs(output_results)
 
+    print("Loading Data")
     sample_df = get_per_study_data(
         split_csv=split_csv,
         metadata_csv=metadata_csv,
@@ -151,37 +227,51 @@ def train_image_classifier(
     y_pred_pr_val = y_val.copy()
     y_pred_pr_test = y_test.copy()
 
+    print("Training Models")
+    inputs = []
+    for label in labels:
+        inputs.append(
+            {
+                "X_train": X_train,
+                "X_val": X_val,
+                "X_test": X_test,
+                "y_train": y_train[label].to_numpy(),
+                "y_val": y_val[label].to_numpy(),
+                "model_type": model_type,
+                "model_hyperparams": model_hyperparams,
+                "standard_scale": standard_scale,
+            }
+        )
+
+    if parallelize_labels != 1:
+        results = pqdm(
+            inputs,
+            train_per_label_cls,
+            n_jobs=parallelize_labels,
+            argument_type="kwargs",
+            desc="Training Label",
+            exception_behaviour="immediate",
+        )
+    else:
+        results = [
+            train_per_label_cls(**kwargs)
+            for kwargs in tqdm(inputs, desc="Training Label")
+        ]
+
     models = dict()
-    for label in tqdm(labels, desc="Training Label"):
-        model = make_model(
-            model_type=model_type,
-            model_hyperparams=model_hyperparams,
-            standard_scale=standard_scale,
-        )
-        model.fit(X_train, y_train[label].to_numpy())
-        y_prob_train[label] = model.predict_proba(X_train)[:, 1]
-        y_prob_val[label] = model.predict_proba(X_val)[:, 1]
-        y_prob_test[label] = model.predict_proba(X_test)[:, 1]
+    for label, ret in zip(labels, results):
+        models[label] = ret["model"]
+        y_prob_train[label] = ret["y_prob_train"]
+        y_prob_val[label] = ret["y_prob_val"]
+        y_prob_test[label] = ret["y_prob_test"]
+        y_pred_roc_train[label] = ret["y_pred_roc_train"]
+        y_pred_roc_val[label] = ret["y_pred_roc_val"]
+        y_pred_roc_test[label] = ret["y_pred_roc_test"]
+        y_pred_pr_train[label] = ret["y_pred_pr_train"]
+        y_pred_pr_val[label] = ret["y_pred_pr_val"]
+        y_pred_pr_test[label] = ret["y_pred_pr_test"]
 
-        roc_threshold = get_optimal_threshold(
-            trues=y_val[label].to_numpy(),
-            probs=y_prob_val[label].to_numpy(),
-            method="roc",
-        )
-        y_pred_roc_train[label] = (y_prob_train[label] > roc_threshold).astype(int)
-        y_pred_roc_val[label] = (y_prob_val[label] > roc_threshold).astype(int)
-        y_pred_roc_test[label] = (y_prob_test[label] > roc_threshold).astype(int)
-
-        pr_threshold = get_optimal_threshold(
-            trues=y_val[label].to_numpy(),
-            probs=y_prob_val[label].to_numpy(),
-            method="pr",
-        )
-        y_pred_pr_train[label] = (y_prob_train[label] > pr_threshold).astype(int)
-        y_pred_pr_val[label] = (y_prob_val[label] > pr_threshold).astype(int)
-        y_pred_pr_test[label] = (y_prob_test[label] > pr_threshold).astype(int)
-
-        models[label] = model
+    print("Saving Results")
 
     # save models and predictions to disk
     with open(os.path.join(output_results, "models.pkl"), "wb") as f:
@@ -213,6 +303,8 @@ def train_image_classifier(
         labels=labels,
     )
     y_pred_pr.to_csv(os.path.join(output_results, "pred_pr.csv"), index=False)
+
+    print("Drawing Figures")
 
     # save plots
     for df_trues, df_probs, split in [
@@ -400,6 +492,12 @@ def parse_args():
         default="configs/classify/default.yaml",
         help="Classifier model configuration file",
     )
+    parser.add_argument(
+        "--parallelize_labels",
+        type=int,
+        default=len(DEFAULT_LABELS),
+        help="Number of labels to fit in parallel. Take care to adjust the number of workers used to fit each individual model to avoid process contention",
+    )
     args = parser.parse_args()
     return args
 
@@ -424,4 +522,5 @@ if __name__ == "__main__":
         model_type=config["model_type"],
         model_hyperparams=config["model_hyperparams"],
         standard_scale=config["standard_scale"],
+        parallelize_labels=args.parallelize_labels,
     )

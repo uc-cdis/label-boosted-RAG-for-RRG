@@ -118,7 +118,23 @@ def train_per_label_cls(
         model_hyperparams=model_hyperparams,
         standard_scale=standard_scale,
     )
-    model.fit(X_train, y_train)
+    if model_type == "xgb" and "early_stopping_rounds" in model_hyperparams:
+        if standard_scale:  # pipeline wrapper
+            model.fit(
+                X_train,
+                y_train,
+                classify__eval_set=[(X_val, y_val)],
+                classify__verbose=False,
+            )
+        else:
+            model.fit(
+                X_train,
+                y_train,
+                eval_set=[(X_val, y_val)],
+                verbose=False,
+            )
+    else:
+        model.fit(X_train, y_train)
     y_prob_train = model.predict_proba(X_train)[:, 1]
     y_prob_val = model.predict_proba(X_val)[:, 1]
     y_prob_test = model.predict_proba(X_test)[:, 1]

@@ -14,7 +14,7 @@ model_hyperparams:
   random_state: 42
   solver: saga
   max_iter: 100
-  multi_class: ovr
+  # multi_class: ovr # given we train each binary label separately, will default to ovr - do not specify to avoid deprecation warning
   # verbose: 0
   warm_start: False
   n_jobs: 5 # if parallelize_labels = 14, uses 70 total processes

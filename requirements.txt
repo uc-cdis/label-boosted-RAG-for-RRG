@@ -39,6 +39,7 @@ tokenizers==0.19.1
 transformers==4.43.2
 evaluate==0.4.2
 timm==1.0.7
+huggingface-hub==0.25.2 # needed for radgraph 0.1.2
 # nlp
 bert-score==0.3.13
 nltk==3.9.1

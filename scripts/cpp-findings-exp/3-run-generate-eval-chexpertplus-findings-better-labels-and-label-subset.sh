@@ -16,6 +16,7 @@ python $REPO_ROOT/rrg/generate.py \
 --prompt_type naive \
 --section_type findings \
 --k 5 \
+--labels "Atelectasis" "Cardiomegaly" "Edema" "Fracture" "No Finding" "Pleural Effusion" "Pneumonia" "Pneumothorax" \
 --batch_size 32 \
 --prompt_yaml $REPO_ROOT/rrg/prompts.yaml \
 --split_csv $CHEXPERTPLUS_DIR/split.csv \
@@ -24,11 +25,11 @@ python $REPO_ROOT/rrg/generate.py \
 --predicted_label_csv $BASE_OUTPUT_DIR/chexpertplus-findings-best-pred.csv \
 --report_csv $CHEXPERTPLUS_DIR/report.csv \
 --feature_h5 $BASE_OUTPUT_DIR/chexpertplus-gloria.h5 \
---output_dir $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-best
+--output_dir $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-better-labels-and-label-subset
 
 python $REPO_ROOT/rrg/eval.py \
---report_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-best/findings_top-5_chexpertplus-gloria-pred-label_no-filter_naive_Mistral-7B-Instruct-v0.3.csv \
---output_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-best/findings_top-5_chexpertplus-gloria-pred-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv
+--report_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-better-labels-and-label-subset/findings_top-5_chexpertplus-gloria-pred-label_no-filter_naive_Mistral-7B-Instruct-v0.3.csv \
+--output_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-better-labels-and-label-subset/findings_top-5_chexpertplus-gloria-pred-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv
 
 python $REPO_ROOT/rrg/generate.py \
 --model mistralai/Mistral-7B-Instruct-v0.3 \
@@ -36,6 +37,7 @@ python $REPO_ROOT/rrg/generate.py \
 --prompt_type naive \
 --section_type findings \
 --k 5 \
+--labels "Atelectasis" "Cardiomegaly" "Edema" "Fracture" "No Finding" "Pleural Effusion" "Pneumonia" "Pneumothorax" \
 --batch_size 32 \
 --prompt_yaml $REPO_ROOT/rrg/prompts.yaml \
 --split_csv $CHEXPERTPLUS_DIR/split.csv \
@@ -44,11 +46,11 @@ python $REPO_ROOT/rrg/generate.py \
 --predicted_label_csv $BASE_OUTPUT_DIR/chexpertplus-findings-best-pred.csv \
 --report_csv $CHEXPERTPLUS_DIR/report.csv \
 --feature_h5 $BASE_OUTPUT_DIR/chexpertplus-gloria.h5 \
---output_dir $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-best
+--output_dir $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-better-labels-and-label-subset
 
 python $REPO_ROOT/rrg/eval.py \
---report_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-best/findings_top-5_chexpertplus-gloria-pred-label_exact_naive_Mistral-7B-Instruct-v0.3.csv \
---output_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-best/findings_top-5_chexpertplus-gloria-pred-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv
+--report_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-better-labels-and-label-subset/findings_top-5_chexpertplus-gloria-pred-label_exact_naive_Mistral-7B-Instruct-v0.3.csv \
+--output_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-better-labels-and-label-subset/findings_top-5_chexpertplus-gloria-pred-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv
 
 python $REPO_ROOT/rrg/generate.py \
 --model mistralai/Mistral-7B-Instruct-v0.3 \
@@ -56,6 +58,7 @@ python $REPO_ROOT/rrg/generate.py \
 --prompt_type simple \
 --section_type findings \
 --k 5 \
+--labels "Atelectasis" "Cardiomegaly" "Edema" "Fracture" "No Finding" "Pleural Effusion" "Pneumonia" "Pneumothorax" \
 --batch_size 32 \
 --prompt_yaml $REPO_ROOT/rrg/prompts.yaml \
 --split_csv $CHEXPERTPLUS_DIR/split.csv \
@@ -64,11 +67,11 @@ python $REPO_ROOT/rrg/generate.py \
 --predicted_label_csv $BASE_OUTPUT_DIR/chexpertplus-findings-best-pred.csv \
 --report_csv $CHEXPERTPLUS_DIR/report.csv \
 --feature_h5 $BASE_OUTPUT_DIR/chexpertplus-gloria.h5 \
---output_dir $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-best
+--output_dir $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-better-labels-and-label-subset
 
 python $REPO_ROOT/rrg/eval.py \
---report_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-best/findings_top-5_chexpertplus-gloria-pred-label_no-filter_simple_Mistral-7B-Instruct-v0.3.csv \
---output_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-best/findings_top-5_chexpertplus-gloria-pred-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv
+--report_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-better-labels-and-label-subset/findings_top-5_chexpertplus-gloria-pred-label_no-filter_simple_Mistral-7B-Instruct-v0.3.csv \
+--output_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-better-labels-and-label-subset/findings_top-5_chexpertplus-gloria-pred-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv
 
 python $REPO_ROOT/rrg/generate.py \
 --model mistralai/Mistral-7B-Instruct-v0.3 \
@@ -76,6 +79,7 @@ python $REPO_ROOT/rrg/generate.py \
 --prompt_type simple \
 --section_type findings \
 --k 5 \
+--labels "Atelectasis" "Cardiomegaly" "Edema" "Fracture" "No Finding" "Pleural Effusion" "Pneumonia" "Pneumothorax" \
 --batch_size 32 \
 --prompt_yaml $REPO_ROOT/rrg/prompts.yaml \
 --split_csv $CHEXPERTPLUS_DIR/split.csv \
@@ -84,8 +88,8 @@ python $REPO_ROOT/rrg/generate.py \
 --predicted_label_csv $BASE_OUTPUT_DIR/chexpertplus-findings-best-pred.csv \
 --report_csv $CHEXPERTPLUS_DIR/report.csv \
 --feature_h5 $BASE_OUTPUT_DIR/chexpertplus-gloria.h5 \
---output_dir $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-best
+--output_dir $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-better-labels-and-label-subset
 
 python $REPO_ROOT/rrg/eval.py \
---report_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-best/findings_top-5_chexpertplus-gloria-pred-label_exact_simple_Mistral-7B-Instruct-v0.3.csv \
---output_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-best/findings_top-5_chexpertplus-gloria-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv
+--report_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-better-labels-and-label-subset/findings_top-5_chexpertplus-gloria-pred-label_exact_simple_Mistral-7B-Instruct-v0.3.csv \
+--output_csv $BASE_OUTPUT_DIR/exp-chexpertplus/exp-findings/exp-core-better-labels-and-label-subset/findings_top-5_chexpertplus-gloria-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv

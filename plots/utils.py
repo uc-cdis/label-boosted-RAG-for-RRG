@@ -229,8 +229,10 @@ def get_experiments_metadata(
     #         Trial name
     #         Trial file
     experiments = {
-        "Core": (
-            os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-core"),
+        "Core - Original": (
+            os.path.join(
+                result_dir, dataset_dir, f"exp-{section}", "exp-core-original"
+            ),
             [
                 (
                     "Standard RAG",
@@ -250,158 +252,230 @@ def get_experiments_metadata(
                 ),
             ],
         ),
-        "Filter": (
-            os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-filter"),
+        "Core - Label Subset": (
+            os.path.join(
+                result_dir, dataset_dir, f"exp-{section}", "exp-core-label-subset"
+            ),
             [
                 (
-                    "No-filter",
-                    f"{section}_top-5_{label_type}-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+                    "Standard RAG",
+                    f"{section}_top-5_{label_type}-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
                 (
-                    "Exact",
-                    f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-                ),
-                (
-                    "Partial",
-                    f"{section}_top-5_{label_type}-label_partial_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-                ),
-            ],
-        ),
-        "Prompt": (
-            os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-prompt"),
-            [
-                (
-                    "Naive",
+                    "Label Filter only",
                     f"{section}_top-5_{label_type}-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
                 (
-                    "Simple",
+                    "Label Format only",
+                    f"{section}_top-5_{label_type}-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+                ),
+                (
+                    "LaB-RAG",
                     f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-                ),
-                (
-                    "Verbose",
-                    f"{section}_top-5_{label_type}-label_exact_verbose_Mistral-7B-Instruct-v0.3_METRICS.csv",
-                ),
-                (
-                    "Instruct",
-                    f"{section}_top-5_{label_type}-label_exact_instruct_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
             ],
         ),
-        "Language Model": (
-            os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-llm"),
+        "Core - Better Labels": (
+            os.path.join(
+                result_dir, dataset_dir, f"exp-{section}", "exp-core-better-labels"
+            ),
             [
                 (
-                    "Mistral-v1",
-                    f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.1_METRICS.csv",
+                    "Standard RAG",
+                    f"{section}_top-5_{label_type}-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
                 (
-                    "BioMistral",
-                    f"{section}_top-5_{label_type}-label_exact_simple_BioMistral-7B_METRICS.csv",
+                    "Label Filter only",
+                    f"{section}_top-5_{label_type}-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
                 (
-                    "Mistral-v3",
+                    "Label Format only",
+                    f"{section}_top-5_{label_type}-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+                ),
+                (
+                    "LaB-RAG",
                     f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
             ],
         ),
-        "Embedding Model": (
-            os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-embedding"),
+        "Core - Better Labels and Label Subset": (
+            os.path.join(
+                result_dir,
+                dataset_dir,
+                f"exp-{section}",
+                "exp-core-better-labels-and-label-subset",
+            ),
             [
                 (
-                    emb_type,
-                    f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+                    "Standard RAG",
+                    f"{section}_top-5_{label_type}-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
                 (
-                    "ResNet50",
-                    f"{section}_top-5_{dataset}-resnet50-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-                ),
-            ],
-        ),
-        "Label Quality": (
-            os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-true-label"),
-            [
-                (
-                    "True",
-                    f"{section}_top-5_true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+                    "Label Filter only",
+                    f"{section}_top-5_{label_type}-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
                 (
-                    "Predicted",
+                    "Label Format only",
+                    f"{section}_top-5_{label_type}-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+                ),
+                (
+                    "LaB-RAG",
                     f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
             ],
         ),
-        "Retrieved Samples": (
-            os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-top-k"),
-            [
-                (
-                    "3",
-                    f"{section}_top-3_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-                ),
-                (
-                    "5",
-                    f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-                ),
-                (
-                    "10",
-                    f"{section}_top-10_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-                ),
-            ],
-        ),
+        # "Filter": (
+        #     os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-filter"),
+        #     [
+        #         (
+        #             "No-filter",
+        #             f"{section}_top-5_{label_type}-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #         (
+        #             "Exact",
+        #             f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #         (
+        #             "Partial",
+        #             f"{section}_top-5_{label_type}-label_partial_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #     ],
+        # ),
+        # "Prompt": (
+        #     os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-prompt"),
+        #     [
+        #         (
+        #             "Naive",
+        #             f"{section}_top-5_{label_type}-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #         (
+        #             "Simple",
+        #             f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #         (
+        #             "Verbose",
+        #             f"{section}_top-5_{label_type}-label_exact_verbose_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #         (
+        #             "Instruct",
+        #             f"{section}_top-5_{label_type}-label_exact_instruct_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #     ],
+        # ),
+        # "Language Model": (
+        #     os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-llm"),
+        #     [
+        #         (
+        #             "Mistral-v1",
+        #             f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.1_METRICS.csv",
+        #         ),
+        #         (
+        #             "BioMistral",
+        #             f"{section}_top-5_{label_type}-label_exact_simple_BioMistral-7B_METRICS.csv",
+        #         ),
+        #         (
+        #             "Mistral-v3",
+        #             f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #     ],
+        # ),
+        # "Embedding Model": (
+        #     os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-embedding"),
+        #     [
+        #         (
+        #             emb_type,
+        #             f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #         (
+        #             "ResNet50",
+        #             f"{section}_top-5_{dataset}-resnet50-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #     ],
+        # ),
+        # "Label Quality": (
+        #     os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-true-label"),
+        #     [
+        #         (
+        #             "True",
+        #             f"{section}_top-5_true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #         (
+        #             "Predicted",
+        #             f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #     ],
+        # ),
+        # "Retrieved Samples": (
+        #     os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-top-k"),
+        #     [
+        #         (
+        #             "3",
+        #             f"{section}_top-3_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #         (
+        #             "5",
+        #             f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #         (
+        #             "10",
+        #             f"{section}_top-10_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        #         ),
+        #     ],
+        # ),
     }
-    if dataset == "mimic-cxr":
-        if section == "findings":
-            experiments["Literature"] = (
-                os.path.join(result_dir, "exp-baselines"),
-                [
-                    (
-                        "LaB-RAG",
-                        "labrag_findings_METRICS.csv",
-                    ),
-                    (
-                        "RGRG",
-                        "rgrg_findings_METRICS.csv",
-                    ),
-                    (
-                        "CheXagent",
-                        "chexagent_findings_METRICS.csv",
-                    ),
-                    (
-                        "CXRMate",
-                        "cxrmate_findings_METRICS.csv",
-                    ),
-                ],
-            )
-        elif section == "impression":
-            experiments["Literature"] = (
-                os.path.join(result_dir, "exp-baselines"),
-                [
-                    (
-                        "LaB-RAG",
-                        "labrag_impression_METRICS.csv",
-                    ),
-                    (
-                        "CXR-RePaiR",
-                        "cxrrepair_impression_METRICS.csv",
-                    ),
-                    (
-                        "CXR-ReDonE",
-                        "cxrredone_impression_METRICS.csv",
-                    ),
-                    (
-                        "X-REM",
-                        "xrem_impression_METRICS.csv",
-                    ),
-                    (
-                        "CheXagent",
-                        "chexagent_impression_METRICS.csv",
-                    ),
-                    (
-                        "CXRMate",
-                        "cxrmate_impression_METRICS.csv",
-                    ),
-                ],
-            )
+    # if dataset == "mimic-cxr":
+    #     if section == "findings":
+    #         experiments["Literature"] = (
+    #             os.path.join(result_dir, "exp-baselines"),
+    #             [
+    #                 (
+    #                     "LaB-RAG",
+    #                     "labrag_findings_METRICS.csv",
+    #                 ),
+    #                 (
+    #                     "RGRG",
+    #                     "rgrg_findings_METRICS.csv",
+    #                 ),
+    #                 (
+    #                     "CheXagent",
+    #                     "chexagent_findings_METRICS.csv",
+    #                 ),
+    #                 (
+    #                     "CXRMate",
+    #                     "cxrmate_findings_METRICS.csv",
+    #                 ),
+    #             ],
+    #         )
+    #     elif section == "impression":
+    #         experiments["Literature"] = (
+    #             os.path.join(result_dir, "exp-baselines"),
+    #             [
+    #                 (
+    #                     "LaB-RAG",
+    #                     "labrag_impression_METRICS.csv",
+    #                 ),
+    #                 (
+    #                     "CXR-RePaiR",
+    #                     "cxrrepair_impression_METRICS.csv",
+    #                 ),
+    #                 (
+    #                     "CXR-ReDonE",
+    #                     "cxrredone_impression_METRICS.csv",
+    #                 ),
+    #                 (
+    #                     "X-REM",
+    #                     "xrem_impression_METRICS.csv",
+    #                 ),
+    #                 (
+    #                     "CheXagent",
+    #                     "chexagent_impression_METRICS.csv",
+    #                 ),
+    #                 (
+    #                     "CXRMate",
+    #                     "cxrmate_impression_METRICS.csv",
+    #                 ),
+    #             ],
+    #         )
     return experiments
 
 

@@ -57,11 +57,12 @@ def generate_radiology_notes(
     other_col: str = DEFAULT_OTHER_COL,
 ):
     os.makedirs(output_dir, exist_ok=True)
-    label_type = "true"
     if predicted_label_csv is not None:
-        # assumes predicted labels were generated using "feature_h5" embeddings
-        label_type = f"{os.path.basename(feature_h5.replace('.h5', ''))}-pred"
+        label_type = get_label_name_from_predicted_label_path(predicted_label_csv)
+    else:
+        label_type = get_label_name_from_true_label_path(true_label_csv)
     model_name = os.path.basename(model)
+    # TODO embedding features not in name separate from predicted label (matters most for experiments with true labels)
     filename = f"{section_type}_top-{k}_{label_type}-label_{filter_type}_{prompt_type}_{model_name}.csv"
     result_csv = os.path.join(output_dir, filename)
     if os.path.exists(result_csv):
@@ -229,6 +230,54 @@ def generate_radiology_notes(
             header=lo == 0,
             index=False,
         )
+
+
+def get_label_name_from_true_label_path(true_label_csv: str) -> str:
+    # assumes some naming conventions of the true labels path like:
+    # {dataset}-{section}-labels-{labeler}.csv
+    if true_label_csv.endswith("-chexbert.csv"):
+        label_name = "chexbert-true"
+    elif true_label_csv.endswith("-chexpert.csv"):
+        label_name = "chexpert-true"
+    else:
+        label_name = "unknown"
+    return label_name
+
+
+def get_label_name_from_predicted_label_path(predicted_label_csv: str) -> str:
+    # assumes some naming conventions of the predicted labels path like:
+    # /[...]/{dataset}-{section}-{model}-classifiers-{labeler}/pred_{threshold}.csv
+    # e.g. /[...]/mimic-findings-biovilt-classifiers-chexbert/pred_pr.csv
+
+    filename = os.path.basename(predicted_label_csv)
+    full_dir = os.path.dirname(predicted_label_csv)
+    direct_parent = os.path.basename(full_dir)
+
+    if "biovilt" in direct_parent:
+        emb_model = "biovilt"
+    elif "gloria" in direct_parent:
+        emb_model = "gloria"
+    elif "resnet50" in direct_parent:
+        emb_model = "resnet50"
+    else:
+        emb_model = "unknown"
+
+    if "-chexpert" in direct_parent:
+        labeler = "chexpert"
+    elif "-chexbert" in direct_parent:
+        labeler = "chexbert"
+    else:
+        labeler = "unknown"
+
+    if "_pr" in filename:
+        ths_meth = "pr"
+    elif "_roc" in filename:
+        ths_meth = "roc"
+    else:
+        ths_meth = "unknown"
+
+    label_name = f"{emb_model}-{labeler}-{ths_meth}-pred"
+    return label_name
 
 
 def optional_empty_str(x):

@@ -118,8 +118,9 @@ def plot_experiment(
         ]
 
     # do plotting
-    extra_room = "bertscore" in metrics
-    if extra_room:
+    extra_height = "bertscore" in metrics or exp_name == "Label Quality"
+    extra_width = "bertscore" in metrics
+    if extra_width:
         fig, ax = plt.subplots(figsize=(6, 3))
     else:
         fig, ax = plt.subplots(figsize=(3, 3))
@@ -171,7 +172,7 @@ def plot_experiment(
     # format plot
     ax.set_xlabel("")
     ax.set_ylabel("")
-    if extra_room:
+    if extra_height:
         ax.set_ylim([-0.05, 1.55])
     else:
         ax.set_ylim([-0.05, 1.05])
@@ -194,11 +195,13 @@ def get_experiments_metadata(
 ):
     if dataset == "mimic-cxr":
         emb_type = "BioViL-T"
-        label_type = "mimic-cxr-biovilt-pred"
+        label_type = "biovilt-chexbert-pr-pred"
+        alt_label_type = "biovilt-chexpert-pr-pred"
         dataset_dir = "exp-mimic"
     elif dataset == "chexpertplus":
         emb_type = "GLoRIA"
-        label_type = "chexpertplus-gloria-pred"
+        label_type = "gloria-chexbert-pr-pred"
+        alt_label_type = "gloria-chexpert-pr-pred"
         dataset_dir = "exp-chexpertplus"
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
@@ -295,7 +298,7 @@ def get_experiments_metadata(
                 ),
                 (
                     "ResNet50",
-                    f"{section}_top-5_{dataset}-resnet50-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+                    f"{section}_top-5_resnet50-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
             ],
         ),
@@ -303,12 +306,20 @@ def get_experiments_metadata(
             os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-true-label"),
             [
                 (
-                    "True",
-                    f"{section}_top-5_true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+                    "True - CheXbert",
+                    f"{section}_top-5_chexbert-true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
                 (
-                    "Predicted",
+                    "True - CheXpert",
+                    f"{section}_top-5_chexpert-true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+                ),
+                (
+                    "Predicted - CheXbert",
                     f"{section}_top-5_{label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+                ),
+                (
+                    "Predicted - CheXpert",
+                    f"{section}_top-5_{alt_label_type}-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
             ],
         ),
@@ -415,96 +426,110 @@ COLOR2MODELS = {
     ],
     (0.5019607843137255, 0.6941176470588235, 0.8274509803921568): [
         # LaB-RAG
-        "findings_top-5_mimic-cxr-biovilt-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_mimic-cxr-biovilt-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "findings_top-5_chexpertplus-gloria-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_chexpertplus-gloria-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_biovilt-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_biovilt-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_gloria-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_gloria-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
         "labrag_findings_METRICS.csv",
         "labrag_impression_METRICS.csv",
     ],
     (0.5529411764705883, 0.8274509803921568, 0.7803921568627451): [
         # Filter - No-filter
-        "findings_top-5_mimic-cxr-biovilt-pred-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_mimic-cxr-biovilt-pred-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "findings_top-5_chexpertplus-gloria-pred-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_chexpertplus-gloria-pred-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_biovilt-chexbert-pr-pred-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_biovilt-chexbert-pr-pred-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_gloria-chexbert-pr-pred-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_gloria-chexbert-pr-pred-label_no-filter_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
     ],
     (1.0, 1.0, 0.7019607843137254): [
         # Filter - Partial
-        "findings_top-5_mimic-cxr-biovilt-pred-label_partial_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_mimic-cxr-biovilt-pred-label_partial_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "findings_top-5_chexpertplus-gloria-pred-label_partial_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_chexpertplus-gloria-pred-label_partial_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_biovilt-chexbert-pr-pred-label_partial_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_biovilt-chexbert-pr-pred-label_partial_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_gloria-chexbert-pr-pred-label_partial_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_gloria-chexbert-pr-pred-label_partial_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
     ],
     (0.7450980392156863, 0.7294117647058823, 0.8549019607843137): [
         # Prompt - Naive
-        "findings_top-5_mimic-cxr-biovilt-pred-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_mimic-cxr-biovilt-pred-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "findings_top-5_chexpertplus-gloria-pred-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_chexpertplus-gloria-pred-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_biovilt-chexbert-pr-pred-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_biovilt-chexbert-pr-pred-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_gloria-chexbert-pr-pred-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_gloria-chexbert-pr-pred-label_exact_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
     ],
     (0.984313725490196, 0.5019607843137255, 0.4470588235294118): [
         # Prompt - Verbose
-        "findings_top-5_mimic-cxr-biovilt-pred-label_exact_verbose_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_mimic-cxr-biovilt-pred-label_exact_verbose_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "findings_top-5_chexpertplus-gloria-pred-label_exact_verbose_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_chexpertplus-gloria-pred-label_exact_verbose_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_biovilt-chexbert-pr-pred-label_exact_verbose_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_biovilt-chexbert-pr-pred-label_exact_verbose_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_gloria-chexbert-pr-pred-label_exact_verbose_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_gloria-chexbert-pr-pred-label_exact_verbose_Mistral-7B-Instruct-v0.3_METRICS.csv",
     ],
     (0.9921568627450981, 0.7058823529411765, 0.3843137254901961): [
         # Prompt - Instruct
-        "findings_top-5_mimic-cxr-biovilt-pred-label_exact_instruct_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_mimic-cxr-biovilt-pred-label_exact_instruct_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "findings_top-5_chexpertplus-gloria-pred-label_exact_instruct_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_chexpertplus-gloria-pred-label_exact_instruct_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_biovilt-chexbert-pr-pred-label_exact_instruct_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_biovilt-chexbert-pr-pred-label_exact_instruct_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_gloria-chexbert-pr-pred-label_exact_instruct_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_gloria-chexbert-pr-pred-label_exact_instruct_Mistral-7B-Instruct-v0.3_METRICS.csv",
     ],
     (0.7019607843137254, 0.8705882352941177, 0.4117647058823529): [
         # LLM - Mistral v1
-        "findings_top-5_mimic-cxr-biovilt-pred-label_exact_simple_Mistral-7B-Instruct-v0.1_METRICS.csv",
-        "impression_top-5_mimic-cxr-biovilt-pred-label_exact_simple_Mistral-7B-Instruct-v0.1_METRICS.csv",
-        "findings_top-5_chexpertplus-gloria-pred-label_exact_simple_Mistral-7B-Instruct-v0.1_METRICS.csv",
-        "impression_top-5_chexpertplus-gloria-pred-label_exact_simple_Mistral-7B-Instruct-v0.1_METRICS.csv",
+        "findings_top-5_biovilt-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.1_METRICS.csv",
+        "impression_top-5_biovilt-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.1_METRICS.csv",
+        "findings_top-5_gloria-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.1_METRICS.csv",
+        "impression_top-5_gloria-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.1_METRICS.csv",
     ],
     (0.9882352941176471, 0.803921568627451, 0.8980392156862745): [
         # LLM - BioMistral
-        "findings_top-5_mimic-cxr-biovilt-pred-label_exact_simple_BioMistral-7B_METRICS.csv",
-        "impression_top-5_mimic-cxr-biovilt-pred-label_exact_simple_BioMistral-7B_METRICS.csv",
-        "findings_top-5_chexpertplus-gloria-pred-label_exact_simple_BioMistral-7B_METRICS.csv",
-        "impression_top-5_chexpertplus-gloria-pred-label_exact_simple_BioMistral-7B_METRICS.csv",
+        "findings_top-5_biovilt-chexbert-pr-pred-label_exact_simple_BioMistral-7B_METRICS.csv",
+        "impression_top-5_biovilt-chexbert-pr-pred-label_exact_simple_BioMistral-7B_METRICS.csv",
+        "findings_top-5_gloria-chexbert-pr-pred-label_exact_simple_BioMistral-7B_METRICS.csv",
+        "impression_top-5_gloria-chexbert-pr-pred-label_exact_simple_BioMistral-7B_METRICS.csv",
     ],
     (0.8509803921568627, 0.8509803921568627, 0.8509803921568627): [
-        # Label - True
-        "findings_top-5_true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "findings_top-5_true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        # Label - True - CheXbert
+        "findings_top-5_chexbert-true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_chexbert-true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_chexbert-true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_chexbert-true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+    ],
+    (0.761, 0.761, 0.761): [
+        # Label - True - CheXpert
+        "findings_top-5_chexpert-true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_chexpert-true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_chexpert-true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_chexpert-true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+    ],
+    (0.455, 0.62, 0.741): [
+        # Label - Predicted - CheXpert
+        "findings_top-5_biovilt-chexpert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_biovilt-chexpert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_gloria-chexpert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_gloria-chexpert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
     ],
     (0.7372549019607844, 0.5019607843137255, 0.7411764705882353): [
         # Core - No-filter, Naive-prompt
-        "findings_top-5_mimic-cxr-biovilt-pred-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_mimic-cxr-biovilt-pred-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "findings_top-5_chexpertplus-gloria-pred-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_chexpertplus-gloria-pred-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_biovilt-chexbert-pr-pred-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_biovilt-chexbert-pr-pred-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_gloria-chexbert-pr-pred-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_gloria-chexbert-pr-pred-label_no-filter_naive_Mistral-7B-Instruct-v0.3_METRICS.csv",
     ],
     (0.8, 0.9215686274509803, 0.7725490196078432): [
         # Top-K - 3
-        "findings_top-3_mimic-cxr-biovilt-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-3_mimic-cxr-biovilt-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "findings_top-3_chexpertplus-gloria-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-3_chexpertplus-gloria-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-3_biovilt-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-3_biovilt-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-3_gloria-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-3_gloria-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
     ],
     (1.0, 0.9294117647058824, 0.43529411764705883): [
         # Top-K - 10
-        "findings_top-10_mimic-cxr-biovilt-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-10_mimic-cxr-biovilt-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "findings_top-10_chexpertplus-gloria-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-10_chexpertplus-gloria-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-10_biovilt-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-10_biovilt-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-10_gloria-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-10_gloria-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
     ],
     (0.7686274509803922, 0.611764705882353, 0.5803921568627451): [
         # Embedding - ResNet50
-        "findings_top-5_mimic-cxr-resnet50-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_mimic-cxr-resnet50-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "findings_top-5_chexpertplus-resnet50-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
-        "impression_top-5_chexpertplus-resnet50-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_resnet50-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_resnet50-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "findings_top-5_resnet50-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
+        "impression_top-5_resnet50-chexbert-pr-pred-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
     ],
 }
 

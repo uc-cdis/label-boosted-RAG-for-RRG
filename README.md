@@ -12,3 +12,8 @@ conda activate labrag
 1. [Data Ingest](https://github.com/StevenSong/cxr-data-ingest): Data download and extraction
 1. [Experiments](docs/experiments.md): Replicate experiment results
 1. [Baselines](docs/baselines.md): Replicate baseline results
+
+## Citation
+```
+TODO: add bibtex citation
+```

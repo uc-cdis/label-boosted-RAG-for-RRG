@@ -7,7 +7,7 @@ This document serves to detail the experiments we conducted. Precise commands to
 1. [Download and preprocess data](https://github.com/StevenSong/cxr-data-ingest)
 
 ## Experimental Procedure
-The experimental procedure is divided into four parts. **Part 1** is extracting features using pretrained vision models. **Part 2** is training classifiers over the image features of the train set and applying the classifiers over the test set. This generates labels for use in part 3. **Part 3** is testing various strategies for retrieving and prompting an LLM to generate reports over the test set using sample labels. **Part 4** is evaluating the generated reports against the true reports.
+The experimental procedure is divided into four parts. **<u>Part 1</u>** is extracting features using pretrained vision models. **<u>Part 2</u>** is training classifiers over the image features of the train set and applying the classifiers over the test set. This generates labels for use in part 3. **<u>Part 3</u>** is testing various strategies for retrieving and prompting an LLM to generate reports over the test set using sample labels. **<u>Part 4</u>** is evaluating the generated reports against the true reports.
 
 1. `extract.py` extracts image features using a pretrained image embedding model.
     ```bash

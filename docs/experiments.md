@@ -1,16 +1,18 @@
 # Experiments and Replication of Results
 
-## Environment and Data Setup
-1. [Create the required python environment](README.md#environment-setup)
-1. [Download and preprocess data](data-ingest.md)
+This document serves to detail the experiments we conducted. Precise commands to replicate those experiments are provided in our [run scripts](../scripts/). We additionally provide a utility notebook to generate the run scripts for our experiment set: [`prepare-experiment-scripts.ipynb`](../scripts/prepare-experiment-scripts.ipynb).
 
-## Experimental Setup
-The experiments are divided into four parts. Part 1 is extracting features using a pretrained vision model. Part 2 is training a classifier over the image features of the train set and applying the classifier over the test set. This generates labels for use in part 3. Part 3 is testing various strategies for retrieving and prompting an LLM to generate reports over the test set using sample labels. Part 4 is evaluating the generated reports against the true reports.
-* Activate the conda environment:
-    ```bash
-    conda activate labrag
-    ```
-1. `extract.py` extracts image features using BioViL-T [1].
+### TODO
+* update command templates
+
+### Prerequisites
+1. [Create the required python environment](README.md#environment-setup)
+1. [Download and preprocess data](https://github.com/StevenSong/cxr-data-ingest)
+
+## Experimental Procedure
+The experimental procedure is divided into four parts. **Part 1** is extracting features using pretrained vision models. **Part 2** is training classifiers over the image features of the train set and applying the classifiers over the test set. This generates labels for use in part 3. **Part 3** is testing various strategies for retrieving and prompting an LLM to generate reports over the test set using sample labels. **Part 4** is evaluating the generated reports against the true reports.
+
+1. `extract.py` extracts image features using a pretrained image embedding model.
     ```bash
     python /path/to/labrag-repo/rrg/extract.py \
     --input_path /path/to/mimic-cxr/files \
@@ -28,7 +30,9 @@ The experiments are divided into four parts. Part 1 is extracting features using
     --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
     --output_results /path/to/rrg-data/image-labels
     ```
-1. `generate.py` does RAG for radiology reports using configurable LLMs, number of retrieved examples, retrieval label filtering, prompt label verbosity and templates, target section for generation, and inference label set. The exact runs and their command line arguments are detailed in the following section.
+1. `generate.py` does RAG for radiology reports using configurable LLMs, embedding features, number of retrieved examples, retrieval label filtering, prompt label verbosity and templates, target report section for generation, and inference label set.
+    ```bash
+    ```
 1. `eval.py` runs evaluation metrics for radiology report generation.
     ```bash
     python /path/to/labrag-repo/rrg/eval.py \
@@ -36,486 +40,119 @@ The experiments are divided into four parts. Part 1 is extracting features using
     --output_csv /path/to/rrg-data/experiment-output-metrics.csv
     ```
 
-### Experiment Runs
-1. **Simplest Label Filter & Format**: Investigating the effects of the exact label filter and the simple label format over standard RAG.
+## Experimental Trials
+
+**NB**: <u>All experiments are repeated across both Findings and Impression section, and additionally across both MIMIC-CXR and CheXpert Plus datasets</u>. We tie embedding model to dataset so BioViL-T is used as the default image embedding model for MIMIC-CXR and GLoRIA for CheXPert Plus. Additionally, the predicted labels are always from a classifier trained over the specified image embedding model, regardless of what label type is used (i.e. CheXbert vs CheXpert).
+
+The default hyperparameters of LaB-RAG are as follows:
+```
+Filter: Exact
+Format: Simple
+Label:  Pred-CheXbert
+Embed:  BioViL-T/GLoRIA
+LLM:    Mistral-v3
+Top-k:  5
+```
+
+The set of hyperparameters we investigate is below:
+```
+Filter: [No-filter, Exact, Partial]
+Format: [Naive, Simple, Verbose, Instruct]
+Label:  [Pred-CheXbert, Pred-CheXpert, True-CheXbert, True-CheXpert]
+Embed:  [BioViL-T/GLoRIA, ResNet50]
+LLM:    [Mistral-v1, BioMistral, Mistral-v3]
+Top-k:  [3, 5, 10]
+```
+
+### Experiments:
+1. **Core Experiment**
     <details open>
     <summary>Hyperparameters</summary>
 
     ```
-    Model:   Mistral v3
-    K:       5
-    Filter:  [No-filter|Exact]
-    Prompt:  [Naive|Simple]
-    Section: Findings|Impression
-    Labels:  Predicted
+    Filter: [No-filter, Exact]
+    Format: [Naive, Simple]
+    Label:  Pred-CheXbert
+    Embed:  BioViL-T/GLoRIA
+    LLM:    Mistral-v3
+    Top-k:  5
     ```
     </details>
-    <details>
-    <summary>Standard RAG</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type no-filter \
-    --prompt_type naive \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-boost
-    ```
-    </details>
-    <details>
-    <summary>Exact Label Filter only</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type naive \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-boost
-    ```
-    </details>
-    <details>
-    <summary>Simple Label Format only</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type no-filter \
-    --prompt_type simple \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-boost
-    ```
-    </details>
-    <details>
-    <summary>LaB-RAG</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type simple \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-boost
-    ```
-    </details>
-
-1. **Label Filtering**: The strategy by which to filter retrieved contexts based on their labels, in addition to baseline vector similarity.
+1. **Filter Variants**
     <details open>
     <summary>Hyperparameters</summary>
 
     ```
-    Model:   Mistral v3
-    K:       5
-    Filter:  [experiment]
-    Prompt:  Simple
-    Section: Findings|Impression
-    Labels:  Predicted
+    Filter: [No-filter, Exact, Partial]
+    Format: Simple
+    Label:  Pred-CheXbert
+    Embed:  BioViL-T/GLoRIA
+    LLM:    Mistral-v3
+    Top-k:  5
     ```
     </details>
-    <details>
-    <summary>No Filtering</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type no-filter \
-    --prompt_type simple \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-filter
-    ```
-    </details>
-    <details>
-    <summary>Exact Filtering</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type simple \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-filter
-    ```
-    </details>
-    <details>
-    <summary>Partial Filtering</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type partial \
-    --prompt_type simple \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-filter
-    ```
-    </details>
-
-1. **Label Format & Prompt**: The verbosity of the prompt, including whether we include labels and instructions on how to use those labels.
+1. **Format Variants**
     <details open>
     <summary>Hyperparameters</summary>
 
     ```
-    Model:   Mistral v3
-    K:       5
-    Filter:  Exact
-    Prompt:  [experiment]
-    Section: Findings|Impression
-    Labels:  Predicted
+    Filter: Exact
+    Format: [Naive, Simple, Verbose, Instruct]
+    Label:  Pred-CheXbert
+    Embed:  BioViL-T/GLoRIA
+    LLM:    Mistral-v3
+    Top-k:  5
     ```
     </details>
-    <details>
-    <summary>Naive</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type naive \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-prompt
-    ```
-    </details>
-    <details>
-    <summary>Simple</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type simple \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-prompt
-    ```
-    </details>
-    <details>
-    <summary>Verbose</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type verbose \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-prompt
-    ```
-    </details>
-    <details>
-    <summary>Instruct</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type instruct \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-prompt
-    ```
-    </details>
-1. **Model**: The LLM we use to generate.
+1. **Label Quality**
     <details open>
     <summary>Hyperparameters</summary>
 
     ```
-    Model:   [experiment]
-    K:       5
-    Filter:  Exact
-    Prompt:  Simple
-    Section: Findings|Impression
-    Labels:  Predicted
+    Filter: Exact
+    Format: Simple
+    Label:  [Pred-CheXbert, Pred-CheXpert, True-CheXbert, True-CheXpert]
+    Embed:  BioViL-T/GLoRIA
+    LLM:    Mistral-v3
+    Top-k:  5
     ```
     </details>
-    <details>
-    <summary>BioMistral</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model BioMistral/BioMistral-7B \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type simple \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-model
-    ```
-    </details>
-    <details>
-    <summary>Mistral v1</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.1 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type simple \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-model
-    ```
-    </details>
-    <details>
-    <summary>Mistral v3</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type simple \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-model
-    ```
-    </details>
-1. **Labels**: Predicted or true labels at inference.
+1. **Image Embedding Model**
     <details open>
     <summary>Hyperparameters</summary>
 
     ```
-    Model:   Mistral v3
-    K:       5
-    Filter:  Exact
-    Prompt:  Simple
-    Section: Findings|Impression
-    Labels:  [experiment]
+    Filter: Exact
+    Format: Simple
+    Label:  Pred-CheXbert
+    Embed:  [BioViL-T/GLoRIA, ResNet50]
+    LLM:    Mistral-v3
+    Top-k:  5
     ```
     </details>
-    <details>
-    <summary>Predicted</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type simple \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-labels
-    ```
-    </details>
-    <details>
-    <summary>True</summary>
-
-    ```bash
-    # Omit --predicted_label_csv
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type simple \
-    --section_type findings|impression \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-labels
-    ```
-    </details>
-1. **Section**: Radiology report section to generate.
+1. **Language Model**
     <details open>
     <summary>Hyperparameters</summary>
 
     ```
-    Model:   Mistral v3
-    K:       5
-    Filter:  Exact
-    Prompt:  Simple
-    Section: [experiment]
-    Labels:  Predicted
+    Filter: Exact
+    Format: Simple
+    Label:  Pred-CheXbert
+    Embed:  BioViL-T/GLoRIA
+    LLM:    [Mistral-v1, BioMistral, Mistral-v3]
+    Top-k:  5
     ```
     </details>
-    <details>
-    <summary>Findings</summary>
+1. **Retrieved Samples**
+    <details open>
+    <summary>Hyperparameters</summary>
 
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type simple \
-    --section_type findings-intersect \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-section
+    ```
+    Filter: Exact
+    Format: Simple
+    Label:  Pred-CheXbert
+    Embed:  BioViL-T/GLoRIA
+    LLM:    Mistral-v3
+    Top-k:  [3, 5, 10]
     ```
     </details>
-    <details>
-    <summary>Impression</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type simple \
-    --section_type impression-intersect \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-section
-    ```
-    </details>
-    <details>
-    <summary>Both</summary>
-
-    ```bash
-    python /path/to/labrag-repo/rrg/generate.py \
-    --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --k 5 \
-    --filter_type exact \
-    --prompt_type simple \
-    --section_type both \
-    --batch_size 32 \
-    --prompt_yaml /path/to/labrag-repo/rrg/prompts.yaml \
-    --split_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-split.csv \
-    --metadata_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
-    --true_label_csv /path/to/mimic-cxr/mimic-cxr-2.0.0-chexpert.csv \
-    --predicted_label_csv /path/to/rrg-data/image-labels/pred_pr.csv \
-    --report_csv /path/to/mimic-cxr/mimic_cxr_sectioned.csv \
-    --feature_h5 /path/to/rrg-data/biovilt-features.h5 \
-    --output_dir /path/to/rrg-data/exp-section
-    ```
-    </details>
-
-## References
-1. https://huggingface.co/microsoft/BiomedVLP-BioViL-T

@@ -9,6 +9,6 @@ conda activate labrag
 ```
 
 ## Table of Contents
-1. [Data Ingest](data-ingest/README.md): Data download and extraction
+1. [Data Ingest](https://github.com/StevenSong/cxr-data-ingest): Data download and extraction
 1. [Experiments](docs/experiments.md): Replicate experiment results
 1. [Baselines](docs/baselines.md): Replicate baseline results

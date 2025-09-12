@@ -9,6 +9,6 @@ conda activate labrag
 ```
 
 ## Table of Contents
-1. [Data Ingest](data-ingest.md): Data download and extraction
-1. [Experiments](experiments.md): Replicate experiment results
-1. [Baselines](baselines.md): Replicate baseline results
+1. [Data Ingest](data-ingest/data-ingest.md): Data download and extraction
+1. [Experiments](docs/experiments.md): Replicate experiment results
+1. [Baselines](docs/baselines.md): Replicate baseline results

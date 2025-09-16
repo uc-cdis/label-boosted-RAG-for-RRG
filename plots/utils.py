@@ -306,11 +306,11 @@ def get_experiments_metadata(
             os.path.join(result_dir, dataset_dir, f"exp-{section}", "exp-true-label"),
             [
                 (
-                    "True - CheXbert",
+                    "Extracted - CheXbert",
                     f"{section}_top-5_chexbert-true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
                 (
-                    "True - CheXpert",
+                    "Extracted - CheXpert",
                     f"{section}_top-5_chexpert-true-label_exact_simple_Mistral-7B-Instruct-v0.3_METRICS.csv",
                 ),
                 (

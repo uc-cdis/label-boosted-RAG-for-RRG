@@ -63,6 +63,7 @@ def get_per_study_data(
     view_order: list[str] = DEFAULT_VIEW_ORDER,
     report_cols: list[str] = [DEFAULT_FINDINGS_COL, DEFAULT_IMPRESSION_COL],
     split_remap: dict[str, str] | None = None,
+    extra_meta_cols: list[str] = [],
 ) -> pd.DataFrame:
     split_df = pd.read_csv(split_csv)
     # check all samples per patient are within one split
@@ -73,7 +74,9 @@ def get_per_study_data(
     split_df = split_df.reset_index(drop=True)
 
     metadata_df = pd.read_csv(metadata_csv)
-    metadata_df = metadata_df[[patient_id_col, study_id_col, dicom_id_col, view_col]]
+    metadata_df = metadata_df[
+        [patient_id_col, study_id_col, dicom_id_col, view_col] + extra_meta_cols
+    ]
 
     view_to_index = {v: i for i, v in enumerate(view_order)}
     metadata_df[view_col].fillna("", inplace=True)
@@ -88,6 +91,7 @@ def get_per_study_data(
         on=study_id_col,
     )
     cols = [patient_id_col, study_id_col, dicom_id_col, split_col, view_col]
+    cols += extra_meta_cols
 
     if label_csv is not None:
         label_df = pd.read_csv(label_csv)

@@ -77,7 +77,7 @@ def get_experiment_results(
 
 def plot_experiment(
     *,  # enforce kwargs
-    section: str,  # for title only
+    title: str,
     exp_name: str,
     exp_trials: list[tuple[str, str]],
     trial_dfs: list[pd.DataFrame],
@@ -179,7 +179,7 @@ def plot_experiment(
     ax.set_xlim([-0.5, len(metrics) - 0.5])
     ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
     ax.grid(which="major", axis="y", zorder=0)
-    ax.set_title(f"{section.title()}, N={len(trial_dfs[0])}", fontsize=10)
+    ax.set_title(f"{title}, N={len(trial_dfs[0])}", fontsize=10)
     legend = ax.legend(title=None, loc="upper left")
     legend.set_zorder(10)
 

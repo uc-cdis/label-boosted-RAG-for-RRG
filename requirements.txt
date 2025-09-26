@@ -1,7 +1,7 @@
 # dev tools
 pre-commit==3.7.1
 ipympl==0.9.4
-jupyterlab==4.2.5
+jupyterlab==4.4.8
 pqdm==0.2.0
 tqdm==4.66.4
 docker==7.0.0

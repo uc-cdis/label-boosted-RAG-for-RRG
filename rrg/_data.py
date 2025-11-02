@@ -30,6 +30,7 @@ DEFAULT_LABELS = [
 DEFAULT_VIEW_ORDER = [
     "PA",
     "AP",
+    "FRONTAL",
     "LATERAL",
     "LL",
     "AP AXIAL",
@@ -78,9 +79,14 @@ def get_per_study_data(
         [patient_id_col, study_id_col, dicom_id_col, view_col] + extra_meta_cols
     ]
 
-    view_to_index = {v: i for i, v in enumerate(view_order)}
+    view_to_index = {v.lower(): i for i, v in enumerate(view_order)}
     metadata_df[view_col].fillna("", inplace=True)
-    metadata_df = metadata_df.sort_values(view_col, key=lambda v: v.map(view_to_index))
+    view_col_lower = view_col + "_lower"
+    metadata_df[view_col_lower] = metadata_df[view_col].str.lower()
+    metadata_df = metadata_df.sort_values(
+        view_col_lower,
+        key=lambda v: v.map(view_to_index),
+    )
     # stable sort to preserve view order
     metadata_df = metadata_df.sort_values(study_id_col, kind="stable")
     metadata_df = metadata_df.drop_duplicates(study_id_col, keep="first")

@@ -186,6 +186,8 @@ class ImageDataset(Dataset):
             self.get_ids = get_chexpert_ids
             # image can't be processed
             paths = [p for p in paths if "patient32368" not in p]
+        elif "openi" in root_path:
+            self.get_ids = get_openi_ids
         else:
             raise ValueError(f"Cannot infer dataset type: {root_path}")
 
@@ -214,6 +216,15 @@ def get_chexpert_ids(path: str) -> IDS_T:
     patient_id, study_id, dicom_id = os.path.splitext(path)[0].split(os.path.sep)[-3:]
     study_id = f"{patient_id}_{study_id}"
     dicom_id = f"{study_id}_{dicom_id}"
+    return patient_id, study_id, dicom_id
+
+
+def get_openi_ids(path: str) -> IDS_T:
+    fname = os.path.basename(path)
+    id_ = fname.split("_", maxsplit=1)[0].replace("CXR", "")
+    patient_id = f"patient_{id_}"
+    study_id = f"study_{id_}"
+    dicom_id = os.path.splitext(fname)[0]
     return patient_id, study_id, dicom_id
 
 

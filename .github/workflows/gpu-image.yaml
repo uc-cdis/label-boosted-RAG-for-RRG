@@ -13,7 +13,7 @@ concurrency:
 jobs:
   build_gpu_image:
     name: Build Image and Push (gpu-superslim)
-    uses: uc-cdis/.github/.github/workflows/image_build_push_native.yaml@master
+    uses: uc-cdis/.github/.github/workflows/image_build_push_native.yaml@fix/native-image
     with:
       DOCKERFILE_LOCATION: "./Dockerfile"
       DOCKERFILE_BUILD_CONTEXT: "."

@@ -1,0 +1,26 @@
+name: Build and Push Jupyter Image
+
+on:
+  push:
+  pull_request:
+    types: [opened, reopened]
+
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+
+jobs:
+  build_gpu_image:
+    name: Build Image and Push (gpu-superslim)
+    uses: uc-cdis/.github/.github/workflows/image_build_push_native.yaml@master
+    with:
+      DOCKERFILE_LOCATION: "./Dockerfile"
+      DOCKERFILE_BUILD_CONTEXT: "."
+      OVERRIDE_REPO_NAME: "label-boosted-rag-for-rrg"
+      USE_QUAY_ONLY: true
+    secrets:
+      ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
+      ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}

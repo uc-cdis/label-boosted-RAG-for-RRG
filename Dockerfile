@@ -53,8 +53,9 @@ USER ${NB_UID}
 WORKDIR /home/${NB_USER}
 EXPOSE 8888
 
-# Copy project files if needed
-COPY . .
+# Copy notebooks
+COPY *.ipynb requirements.txt .
+
 
 ENTRYPOINT ["/tini", "-g", "--"]
 CMD ["start-notebook.sh"]

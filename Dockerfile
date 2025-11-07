@@ -38,14 +38,14 @@ ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 # The base image defines NB_UID/NB_USER
 USER ${NB_UID}
 
-# Note: conda-forge and PyTorch wheels support both archs natively.
-RUN conda install -y -c conda-forge \
-      pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia && \
-    conda install -y tensorflow && \
-    conda clean -afy
+# # Note: conda-forge and PyTorch wheels support both archs natively.
+# RUN conda install -y -c conda-forge \
+#       pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia && \
+#     conda install -y tensorflow && \
+#     conda clean -afy
 
 # Optional: build JupyterLab extensions
-RUN jupyter lab build
+# RUN jupyter lab build
 
 # ----------------------------------------------------------
 # Runtime configuration

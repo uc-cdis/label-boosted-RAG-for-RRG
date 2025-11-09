@@ -174,3 +174,5 @@ model_medrad_19k
 chexpert_resnet50.ckpt
 
 labrag
+
+demos/with-all-data/data

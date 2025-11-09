@@ -31,7 +31,7 @@ EXPOSE 8888
 # Copy demo materials
 COPY demos/*.ipynb demos/manifests requirements-docker.txt .
 
-RUN pip install requirements-docker.txt && pip cache purge
+RUN pip install -r requirements-docker.txt && pip cache purge
 
 ENTRYPOINT ["/tini", "-g", "--"]
 CMD ["start-notebook.sh"]

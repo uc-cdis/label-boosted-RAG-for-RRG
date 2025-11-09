@@ -8,7 +8,9 @@ scikit-survival==0.23.1
 jsonrpcclient
 gen3
 hi-ml-multimodal==0.2.2
-torch
 transformers
 accelerate
 openai
+--index-url https://download.pytorch.org/whl/cu128
+torch==2.8.0
+torchvision==0.23.0

@@ -5,7 +5,7 @@ LABEL name="jupyterlab-gpu-multiarch"
 USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN yum install -y wget python3-devel
+RUN yum install -y wget python3-devel gcc gcc-c++ && yum clean all && rm -rf /var/cache/yum
 
 # ----------------------------------------------------------
 # Detect architecture and configure NVIDIA repo for AL2023

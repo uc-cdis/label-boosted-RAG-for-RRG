@@ -54,7 +54,8 @@ WORKDIR /home/${NB_USER}
 EXPOSE 8888
 
 # Copy notebooks
-COPY demos/* .
+COPY demos/*.ipynb .
+COPY demos/manifests/ ./manifests/
 
 # need to figure out why platform is aarch64 during image build pipeline
 # RUN pip install h5py pandas numpy tqdm pqdm scikit-learn scikit-survival==0.23.1 jsonrpcclient gen3 hi-ml-multimodal==0.2.2 torch transformers accelerate openai

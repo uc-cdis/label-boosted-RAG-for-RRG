@@ -6,7 +6,7 @@ USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # TODO remove this when there's no more dependence on externally hosted h5 files
-RUN yum install wget
+RUN yum install -y wget
 
 # ----------------------------------------------------------
 # Detect architecture and configure NVIDIA repo for AL2023

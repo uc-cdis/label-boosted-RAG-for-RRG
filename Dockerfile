@@ -54,8 +54,9 @@ WORKDIR /home/${NB_USER}
 EXPOSE 8888
 
 # Copy notebooks
-COPY *.ipynb requirements.txt .
+COPY demos/* .
 
+RUN pip install h5py pandas numpy tqdm pqdm scikit-learn scikit-survival jsonrpcclient gen3 hi-ml-multimodal==0.2.2 torch transformers accelerate openai
 
 ENTRYPOINT ["/tini", "-g", "--"]
 CMD ["start-notebook.sh"]

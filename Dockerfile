@@ -27,6 +27,7 @@ ADD "https://uchicago.box.com/shared/static/rasdb3b3xuirx7q4k012vnnx558px3we.csv
 ADD "https://uchicago.box.com/shared/static/k8z0kip2pej2v62pwgymdm45gt7dq0yw.h5" ./data/hist.h5
 ADD "https://uchicago.box.com/shared/static/hr82b5c9g3h4y8c7avrnbgvhgdcoetld.h5" ./data/expr.h5
 ADD "https://uchicago.box.com/shared/static/liwt3vlvdpmbfsa21wqboshh9nv6enm2.h5" ./data/summ.h5
+RUN chmod -R a+r ./data
 
 # Circumvent SSL issues by predownloading model weights (for labrag-demos)
 RUN hf download "ibm-granite/granite-4.0-h-350M" \

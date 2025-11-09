@@ -11,12 +11,6 @@ concurrency:
 
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Print Disk
-        run: df -h
   build_gpu_image:
     name: Build Image and Push (gpu-superslim)
     uses: uc-cdis/.github/.github/workflows/image_build_push_native.yaml@fix/native-image

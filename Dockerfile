@@ -5,8 +5,7 @@ LABEL name="jupyterlab-gpu-multiarch"
 USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# TODO remove this when there's no more dependence on externally hosted h5 files
-RUN yum install -y wget
+RUN yum install -y wget python3-devel
 
 # ----------------------------------------------------------
 # Detect architecture and configure NVIDIA repo for AL2023
@@ -60,8 +59,7 @@ EXPOSE 8888
 COPY demos/*.ipynb .
 COPY demos/manifests/ ./manifests/
 
-# need to figure out why platform is aarch64 during image build pipeline
-# RUN pip install h5py pandas numpy tqdm pqdm scikit-learn scikit-survival==0.23.1 jsonrpcclient gen3 hi-ml-multimodal==0.2.2 torch transformers accelerate openai
+RUN pip install h5py pandas numpy tqdm pqdm scikit-learn scikit-survival==0.23.1 jsonrpcclient gen3 hi-ml-multimodal==0.2.2 torch transformers accelerate openai
 
 ENTRYPOINT ["/tini", "-g", "--"]
 CMD ["start-notebook.sh"]

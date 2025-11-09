@@ -11,6 +11,11 @@ concurrency:
 
 
 jobs:
+  test:
+    name: Test
+    steps:
+      - name: Print Disk
+        run: df -h
   build_gpu_image:
     name: Build Image and Push (gpu-superslim)
     uses: uc-cdis/.github/.github/workflows/image_build_push_native.yaml@fix/native-image
@@ -19,12 +24,6 @@ jobs:
       DOCKERFILE_BUILD_CONTEXT: "."
       OVERRIDE_REPO_NAME: "label-boosted-rag-for-rrg"
       USE_QUAY_ONLY: true
-      BUILD_PLATFORMS: "linux/amd64"
-    strategy:
-      matrix:
-        include:
-          - platform: linux/amd64
-            runner: ubuntu-22.04
     secrets:
       ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
       ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}

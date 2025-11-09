@@ -12,23 +12,23 @@ RUN yum install -y wget python3-devel
 # ----------------------------------------------------------
 ENV DISTRO="amzn2023"
 
-RUN set -eux && \
-    dnf -y update && \
-    dnf install -y dnf-plugins-core && \
-    arch=$(uname -m) && \
-    if [[ "$arch" == "aarch64" ]]; then \
-        # ARM64 (Graviton or A100G instances)
-        dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/${DISTRO}/sbsa/cuda-${DISTRO}.repo; \
-    else \
-        # x86_64 (Intel/AMD GPU instances)
-        dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/${DISTRO}/x86_64/cuda-${DISTRO}.repo; \
-    fi && \
-    dnf clean expire-cache && \
-    # Enable open kernel driver stream (universal)
-    dnf -y module enable nvidia-driver:open-dkms && \
-    # Install CUDA toolkit and open NVIDIA drivers (for container toolkit)
-    dnf -y install nvidia-open cuda-toolkit && \
-    dnf clean all
+# RUN set -eux && \
+#     dnf -y update && \
+#     dnf install -y dnf-plugins-core && \
+#     arch=$(uname -m) && \
+#     if [[ "$arch" == "aarch64" ]]; then \
+#         # ARM64 (Graviton or A100G instances)
+#         dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/${DISTRO}/sbsa/cuda-${DISTRO}.repo; \
+#     else \
+#         # x86_64 (Intel/AMD GPU instances)
+#         dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/${DISTRO}/x86_64/cuda-${DISTRO}.repo; \
+#     fi && \
+#     dnf clean expire-cache && \
+#     # Enable open kernel driver stream (universal)
+#     dnf -y module enable nvidia-driver:open-dkms && \
+#     # Install CUDA toolkit and open NVIDIA drivers (for container toolkit)
+#     dnf -y install nvidia-open cuda-toolkit && \
+#     dnf clean all
 
 # NVIDIA Container Toolkit runtime vars
 ENV NVIDIA_VISIBLE_DEVICES=all

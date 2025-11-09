@@ -13,6 +13,7 @@ concurrency:
 jobs:
   test:
     name: Test
+    runs-on: ubuntu-latest
     steps:
       - name: Print Disk
         run: df -h

@@ -19,6 +19,7 @@ jobs:
       DOCKERFILE_BUILD_CONTEXT: "."
       OVERRIDE_REPO_NAME: "label-boosted-rag-for-rrg"
       USE_QUAY_ONLY: true
+      BUILD_PLATFORMS: "linux/amd64"
     secrets:
       ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
       ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}

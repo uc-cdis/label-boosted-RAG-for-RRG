@@ -12,7 +12,7 @@ ADD "https://uchicago.box.com/shared/static/rasdb3b3xuirx7q4k012vnnx558px3we.csv
 ADD "https://uchicago.box.com/shared/static/k8z0kip2pej2v62pwgymdm45gt7dq0yw.h5" ./with-all-data/data/hist.h5
 ADD "https://uchicago.box.com/shared/static/hr82b5c9g3h4y8c7avrnbgvhgdcoetld.h5" ./with-all-data/data/expr.h5
 ADD "https://uchicago.box.com/shared/static/liwt3vlvdpmbfsa21wqboshh9nv6enm2.h5" ./with-all-data/data/summ.h5
-RUN chmod -R a+rwx ./with-all-data
+RUN chmod -R 777 ./with-all-data
 
 # Install linux dependencies for building python wheels
 RUN yum install -y python3-devel gcc gcc-c++ && yum clean all && rm -rf /var/cache/yum

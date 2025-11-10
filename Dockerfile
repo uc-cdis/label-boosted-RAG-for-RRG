@@ -31,7 +31,7 @@ RUN pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.py
 
 # Circumvent SSL issues by predownloading model weights (for labrag-demos)
 RUN hf download "ibm-granite/granite-4.0-h-350M" \
- && hf download --revision v1.0 "microsoft/BiomedVLP-BioViL-T"
+ && hf download --revision v1.0 "microsoft/BiomedVLP-BioViL-T" "biovil_t_image_model_proj_size_128.pt"
 
 ENTRYPOINT ["/tini", "-g", "--"]
 CMD ["start-notebook.sh"]

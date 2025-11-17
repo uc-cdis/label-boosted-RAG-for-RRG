@@ -12,3 +12,4 @@ transformers
 accelerate
 openai
 umap-learn
+seaborn

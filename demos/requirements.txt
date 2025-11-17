@@ -11,3 +11,4 @@ hi-ml-multimodal==0.2.2
 transformers
 accelerate
 openai
+umap-learn

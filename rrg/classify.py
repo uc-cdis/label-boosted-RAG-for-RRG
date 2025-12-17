@@ -127,7 +127,7 @@ def train_image_classifier(
         y_pred_pr_val[label] = (y_prob_val[label] > pr_threshold).astype(int)
         y_pred_pr_test[label] = (y_prob_test[label] > pr_threshold).astype(int)
 
-        models[label] = models
+        models[label] = model
 
     # save models and predictions to disk
     with open(os.path.join(output_results, "models.pkl"), "wb") as f:

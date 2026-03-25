@@ -35,11 +35,12 @@ vllm==0.5.5
 # huggingface
 accelerate==0.32.1
 datasets==2.20.0
-tokenizers==0.19.1
-transformers==4.43.2
+tokenizers==0.21.4
+transformers==4.51.3
 evaluate==0.4.2
 timm==1.0.7
-huggingface-hub==0.25.2 # needed for radgraph 0.1.2
+huggingface-hub==0.36.0 # needed for radgraph 0.1.2 
+hf-xet==1.2.0
 # nlp
 bert-score==0.3.13
 nltk==3.9.1
@@ -47,8 +48,26 @@ rouge-score==0.1.2
 # models
 hi-ml-multimodal==0.2.2
 gloria @ git+https://github.com/StevenSong/gloria
-radgraph==0.1.2
+radgraph==0.1.18
 f1chexbert==0.0.2
+# RaTEScore
+RaTEScore @ git+https://github.com/tnguyen2907/RaTEScore.git
+medspacy
+# green-score w/o conflict dependencies
+green_score @ git+https://github.com/tnguyen2907/GREEN.git
+sentencepiece==0.2.0
+sentence-transformers==3.0.1
+Pillow==10.3.0
+# Radcliq w/o conflict dependencies
+CXRMetric @ git+https://github.com/tnguyen2907/CXR-Report-Metric.git
+beautifulsoup4==4.8.1
+fast-bleu==0.0.90
+python-Levenshtein
+optuna>=2.1.0
+# CLEAR
+clear_evaluator @ git+https://github.com/tnguyen2907/CLEAR-evaluator.git
 # annoying bugfix
 outlines==0.0.46
 pyairports @ git+https://github.com/StevenSong/pyairports.git@f611ee5a5a82b4e98b22641bb99693d862c802e4
+
+

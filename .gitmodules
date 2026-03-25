@@ -1,3 +1,15 @@
 [submodule "data-ingest"]
 	path = data-ingest
 	url = git@github.com:StevenSong/cxr-data-ingest.git
+[submodule "metrics/CLEAR-evaluator"]
+	path = metrics/CLEAR-evaluator
+	url = https://github.com/tnguyen2907/CLEAR-evaluator
+[submodule "metrics/GREEN"]
+	path = metrics/GREEN
+	url = https://github.com/tnguyen2907/GREEN
+[submodule "metrics/CXR-Report-Metric"]
+	path = metrics/CXR-Report-Metric
+	url = https://github.com/tnguyen2907/CXR-Report-Metric
+[submodule "metrics/RaTEScore"]
+	path = metrics/RaTEScore
+	url = https://github.com/tnguyen2907/RaTEScore

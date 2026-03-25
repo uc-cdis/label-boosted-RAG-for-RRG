@@ -1,8 +1,8 @@
-REPO_ROOT=/opt/gpudata/steven/label-boosted-RAG-for-RRG
+REPO_ROOT=/opt/gpudata/trung/label-boosted-RAG-for-RRG
 MIMIC_CXR_DIR=/opt/gpudata/mimic-cxr
 CHEXPERTPLUS_DIR=/opt/gpudata/chexpertplus
 LABEL_DIR=/opt/gpudata/cxr-derived
-BASE_OUTPUT_DIR=/opt/gpudata/labrag
+BASE_OUTPUT_DIR=$REPO_ROOT/labrag
 
 set -e
 

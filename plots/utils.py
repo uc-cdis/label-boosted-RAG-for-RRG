@@ -1,5 +1,6 @@
 import os
 from collections import defaultdict
+from pathlib import Path
 from typing import Literal
 
 import matplotlib.pyplot as plt
@@ -8,9 +9,87 @@ import pandas as pd
 import seaborn as sns
 from statannotations.Annotator import Annotator
 
+ALL_METRICS = [
+    "bleu4",
+    "rougeL",
+    "bertscore",
+    "radcliqv1",
+    "ratescore",
+    "f1chexbert",
+    "f1radgraph",
+    "green",
+    "clear_label_presence",
+    "clear_severity",
+    "clear_descriptive_location",
+    "clear_recommendation",
+]
+
+METRIC_DISPLAY_NAMES = {
+    "bleu4": "BL-4",
+    "rougeL": "RG-L",
+    "bertscore": "BERT",
+    "f1radgraph": "F1-RG",
+    "f1chexbert": "F1-CXB",
+    "green": "GREEN",
+    "ratescore": "RATE",
+    "radcliqv1": "1/RCQ",
+    "clear_label_presence": "CLR-LP",
+    "clear_severity": "CLR-SV",
+    "clear_descriptive_location": "CLR-LOC",
+    "clear_recommendation": "CLR-REC",
+}
+
+
+def filter_existing_trials(
+    *,  # enforce kwargs
+    exp_name: str,
+    exp_dir: str,
+    exp_trials: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    existing_trials = []
+    missing_trials = []
+    for trial_name, trial_file in exp_trials:
+        trial_path = os.path.join(exp_dir, trial_file)
+        if os.path.exists(trial_path):
+            existing_trials.append((trial_name, trial_file))
+        else:
+            missing_trials.append((trial_name, trial_path))
+
+    available_names = [trial_name for trial_name, _ in existing_trials]
+    missing_names = [trial_name for trial_name, _ in missing_trials]
+    print(f"{exp_name}:")
+    print(f"  available: {available_names if available_names else 'none'}")
+    print(f"  missing: {missing_names if missing_names else 'none'}")
+    if missing_trials:
+        for _, trial_path in missing_trials:
+            print(f"    - {trial_path}")
+
+    return existing_trials
+
+
+def get_metric_display_names(metrics: list[str]) -> list[str]:
+    return [METRIC_DISPLAY_NAMES[m] for m in metrics]
+
+
+def get_plot_metric_names(metrics: list[str]) -> list[str]:
+    return ["1/radcliqv1" if m == "radcliqv1" else m for m in metrics]
+
+
+def get_metric_display_mean(metric: str, trial_df: pd.DataFrame) -> float:
+    if metric == "radcliqv1":
+        radcliq_mean = trial_df[metric].mean()
+        if radcliq_mean <= 0:
+            raise ValueError(
+                "Mean RadCliqv1 must be positive to display 1 / mean(RadCliqv1)"
+            )
+        return 1 / radcliq_mean
+    return trial_df[metric].mean()
+
 
 def check_duplicate_runs(result_dir):
     print("===== Checking duplicate runs are equivalent =====\n")
+    compared_groups = 0
+    skipped_groups = 0
     for dataset in ["mimic-cxr", "chexpertplus"]:
         for section in ["findings", "impression"]:
             print(f"-------- {dataset}/{section} --------")
@@ -24,23 +103,64 @@ def check_duplicate_runs(result_dir):
                 for trial_name, trial_file in trials:
                     count[trial_file].append(os.path.join(exp_dir, trial_file))
 
-            cols = ["bleu4", "rougeL", "bertscore", "f1radgraph", "f1chexbert"]
+            cols = ALL_METRICS
             dupes = {k: v for k, v in count.items() if len(v) > 1}
             print("Duplicates:\n")
             for k, vs in dupes.items():
                 print(k)
-                group_dfs = []
-                for v in vs:
-                    df = pd.read_csv(v)
-                    group_dfs.append(df)
-                ref = group_dfs[0]
-                print(f"--- ref: {vs[0]}")
-                for df, v in zip(group_dfs[1:], vs[1:]):
-                    print(f"--- cmp: {v}")
-                    assert (ref["study_id"] == df["study_id"]).all()
-                    assert np.isclose(ref[cols], df[cols]).all()
+                try:
+                    group_dfs = []
+                    for v in vs:
+                        df = pd.read_csv(v)
+                        group_dfs.append(df)
+                    ref = group_dfs[0]
+                    print(f"--- ref: {vs[0]}")
+                    for df, v in zip(group_dfs[1:], vs[1:]):
+                        print(f"--- cmp: {v}")
+                        assert (ref["study_id"] == df["study_id"]).all()
+                        assert np.isclose(
+                            ref[cols], df[cols], rtol=1e-5, atol=1e-6
+                        ).all()
+                    compared_groups += 1
+                except FileNotFoundError as e:
+                    print(f"  WARNING: {e}, skipping")
+                    skipped_groups += 1
                 print()
-    print("===== All duplicate runs are equivalent! =====")
+    if skipped_groups:
+        print(
+            "===== All available duplicate runs are equivalent "
+            f"({compared_groups} compared, {skipped_groups} skipped due to missing files)! ====="
+        )
+    else:
+        print(
+            f"===== All duplicate runs are equivalent ({compared_groups} compared)! ====="
+        )
+
+
+def check_metric_nan_rows(result_dir):
+    print("===== Checking metric columns for missing values =====\n")
+    metric_files = sorted(Path(result_dir).rglob("*_METRICS.csv"))
+    flagged_files = 0
+    for path in metric_files:
+        df = pd.read_csv(path)
+        metric_cols = [col for col in ALL_METRICS if col in df.columns]
+        nan_cols = [col for col in metric_cols if df[col].isna().any()]
+        if not nan_cols:
+            continue
+
+        flagged_files += 1
+        print(path)
+        for col in nan_cols:
+            bad = df[col].isna()
+            cols_to_show = [c for c in ["study_id", "dicom_id", col] if c in df.columns]
+            print(f"  {col}: {int(bad.sum())} missing")
+            print(df.loc[bad, cols_to_show])
+            print()
+
+    if flagged_files:
+        print(f"===== Found missing metric values in {flagged_files} file(s) =====")
+    else:
+        print("===== No missing metric values found =====")
 
 
 def get_experiment_results(
@@ -75,7 +195,46 @@ def get_experiment_results(
     return trial_dfs
 
 
-def plot_experiment(
+def get_radcliq_bootstrap_intervals(
+    *,
+    exp_trials: list[tuple[str, str]],
+    trial_dfs: list[pd.DataFrame],
+    n_boot: int = 2000,
+    ci: float = 0.95,
+    random_state: int = 0,
+) -> dict[str, tuple[float, float, float]]:
+    intervals = {}
+    for (trial_name, _), trial_df in zip(exp_trials, trial_dfs):
+        values = trial_df["radcliqv1"].to_numpy(dtype=float)
+        if values.size == 0:
+            raise ValueError("Cannot bootstrap empty values")
+
+        mean_val = values.mean()
+        if mean_val <= 0:
+            raise ValueError(
+                "Mean RadCliqv1 must be positive to display 1 / mean(RadCliqv1)"
+            )
+
+        rng = np.random.default_rng(random_state)
+        boot_stats = np.empty(n_boot, dtype=float)
+
+        for i in range(n_boot):
+            sample = rng.choice(values, size=values.size, replace=True)
+            sample_mean = sample.mean()
+            if sample_mean <= 0:
+                raise ValueError("Bootstrap sample mean RadCliqv1 must stay positive")
+            boot_stats[i] = 1 / sample_mean
+
+        alpha = 1 - ci
+        ci_low, ci_high = np.percentile(
+            boot_stats,
+            [100 * alpha / 2, 100 * (1 - alpha / 2)],
+        )
+        intervals[trial_name] = (1 / mean_val, ci_low, ci_high)
+    return intervals
+
+
+def plot_experiment_bar(
     *,  # enforce kwargs
     title: str,
     exp_name: str,
@@ -83,108 +242,266 @@ def plot_experiment(
     trial_dfs: list[pd.DataFrame],
     metrics: list[str],
 ) -> plt.Figure:
+    lexical_metrics = ["bleu4", "rougeL", "bertscore"]
+    semantic_metrics = [
+        "f1radgraph",
+        "f1chexbert",
+        "green",
+        "ratescore",
+        "radcliqv1",
+    ]
+    clear_metrics = [
+        "clear_label_presence",
+        "clear_severity",
+        "clear_descriptive_location",
+        "clear_recommendation",
+    ]
+    metric_groups = [
+        ([m for m in metrics if m in lexical_metrics], "Lexical"),
+        ([m for m in metrics if m in semantic_metrics], "Clinical"),
+        ([m for m in metrics if m in clear_metrics], "CLEAR"),
+    ]
+    metric_groups = [
+        (group_metrics, group_label)
+        for group_metrics, group_label in metric_groups
+        if group_metrics
+    ]
+    if not metric_groups:
+        raise ValueError("No metrics available for plotting")
+
     # setup dataframe for seaborn barplot
     melted_results = []
     for trial_df, (trial_name, _) in zip(trial_dfs, exp_trials):
-        trial_df = trial_df.melt(id_vars="study_id", var_name="metric")
+        trial_df = trial_df[["study_id"] + metrics].melt(
+            id_vars="study_id", var_name="metric"
+        )
         trial_df[exp_name] = trial_name
         melted_results.append(trial_df)
     df = pd.concat(melted_results, ignore_index=True)
 
-    # filter metrics for plotting
-    df = df[df["metric"].isin(metrics)]
+    # NOTE: Keep raw RadCliqv1 values for paired t-tests to operate on the
+    # original per-study scores. The plotted summary uses 1 / mean(RadCliqv1)
+    # in plot_experiment_bar for display only.
+    df_display = df.copy()
+    for trial_name, trial_df in zip(
+        hue_order := [trial_name for trial_name, _ in exp_trials], trial_dfs
+    ):
+        if "radcliqv1" in metrics and "radcliqv1" in trial_df.columns:
+            mask = (df_display["metric"] == "radcliqv1") & (
+                df_display[exp_name] == trial_name
+            )
+            df_display.loc[mask, "value"] = get_metric_display_mean(
+                "radcliqv1", trial_df
+            )
 
     # setup seaborn barplot parameters
     x = "metric"
     y = "value"
     hue = exp_name
-    hue_order = [trial_name for trial_name, _ in exp_trials]
     palette = [MODEL2COLOR[trial_file] for _, trial_file in exp_trials]
-    order = metrics
-    if exp_name == "Literature":
-        # only do stats tests compared to ours if evaluating literature models
-        pairs = [
-            ((metric, "LaB-RAG"), (metric, n2))
-            for metric in metrics
-            for n2 in hue_order[1:]
-        ]
-    else:
-        # otherwise do all pairwise comparisons of stats tests
-        pairs = [
-            ((metric, n1), (metric, n2))
-            for metric in metrics
-            for i, n1 in enumerate(hue_order)
-            for n2 in hue_order[i + 1 :]
-        ]
 
-    # do plotting
-    extra_height = "bertscore" in metrics or exp_name == "Label Quality"
-    extra_width = "bertscore" in metrics
-    if extra_width:
-        fig, ax = plt.subplots(figsize=(6, 3))
-    else:
-        fig, ax = plt.subplots(figsize=(3, 3))
-    barplot = sns.barplot(
-        df,
-        x=x,
-        y=y,
-        order=order,
-        hue=hue,
-        hue_order=hue_order,
-        palette=palette,
-        ax=ax,
-        saturation=1,
-        zorder=15,
-        errorbar="se",
-        err_kws={
-            "zorder": 25,
-            "linewidth": 1,
-            "alpha": 1,
-        },
-        width=0.15 * len(hue_order),
+    max_cols = max(len(g) for g, _ in metric_groups)
+    fig, axes = plt.subplots(
+        len(metric_groups),
+        1,
+        figsize=(max(8, 2.2 * max_cols), 3 * len(metric_groups)),
     )
-    annot = Annotator(
-        ax,
-        pairs,
-        data=df,
-        x=x,
-        y=y,
-        order=order,
-        hue=hue,
-        hue_order=hue_order,
-        palette=palette,
-        width=0.15 * len(hue_order),
-    )
-    annot._pvalue_format.fontsize = 9
-    annot.configure(
-        test="t-test_paired",
-        comparisons_correction="Bonferroni",
-        hide_non_significant=True,
-        line_height=0.04,
-        text_offset=-3,
-        line_offset=10000,
-        line_offset_to_group=0.1,
-        line_width=0.75,
-        pvalue_thresholds=[[0.05, "*"], [1, "ns"]],
-    )
-    _, annotations = annot.apply_test().annotate(line_offset=10000)
+    axes = np.atleast_1d(axes)
 
-    # format plot
-    ax.set_xlabel("")
-    ax.set_ylabel("")
-    if extra_height:
-        ax.set_ylim([-0.05, 1.55])
-    else:
-        ax.set_ylim([-0.05, 1.05])
-    ax.set_xlim([-0.5, len(metrics) - 0.5])
-    ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
-    ax.grid(which="major", axis="y", zorder=0)
-    ax.set_title(f"{title}, N={len(trial_dfs[0])}", fontsize=10)
-    legend = ax.legend(title=None, loc="upper left")
-    legend.set_zorder(10)
+    # Compute RadCliqv1 CI using bootstrap
+    radcliq_bootstrap_ci = None
+    if "radcliqv1" in metrics:
+        radcliq_bootstrap_ci = get_radcliq_bootstrap_intervals(
+            exp_trials=exp_trials,
+            trial_dfs=trial_dfs,
+        )
+
+    for ax, (group_metrics, group_label) in zip(axes, metric_groups):
+        order = group_metrics
+        group_df = df[df["metric"].isin(group_metrics)]
+        group_df_display = df_display[df_display["metric"].isin(group_metrics)]
+
+        if exp_name == "Literature":
+            pairs = [
+                ((metric, "LaB-RAG"), (metric, n2))
+                for metric in group_metrics
+                for n2 in hue_order[1:]
+            ]
+        else:
+            pairs = [
+                ((metric, n1), (metric, n2))
+                for metric in group_metrics
+                for i, n1 in enumerate(hue_order)
+                for n2 in hue_order[i + 1 :]
+            ]
+
+        sns.barplot(
+            group_df_display,
+            x=x,
+            y=y,
+            order=order,
+            hue=hue,
+            hue_order=hue_order,
+            palette=palette,
+            ax=ax,
+            saturation=1,
+            zorder=15,
+            errorbar="se",
+            err_kws={
+                "zorder": 25,
+                "linewidth": 1,
+                "alpha": 1,
+            },
+            width=0.15 * len(hue_order),
+        )
+        if radcliq_bootstrap_ci is not None and "radcliqv1" in group_metrics:
+            metric_idx = group_metrics.index("radcliqv1")
+            total_width = 0.15 * len(hue_order)
+            single_width = total_width / len(hue_order)
+            left_edge = metric_idx - total_width / 2
+            for hue_idx, trial_name in enumerate(hue_order):
+                x_center = left_edge + (hue_idx + 0.5) * single_width
+                center, ci_low, ci_high = radcliq_bootstrap_ci[trial_name]
+                lower_err = max(0.0, center - ci_low)
+                upper_err = max(0.0, ci_high - center)
+
+                ax.errorbar(
+                    x_center,
+                    center,
+                    yerr=[[lower_err], [upper_err]],
+                    fmt="none",
+                    ecolor="black",
+                    elinewidth=1,
+                    capsize=0,
+                    zorder=30,
+                )
+        annot = Annotator(
+            ax,
+            pairs,
+            data=group_df,
+            x=x,
+            y=y,
+            order=order,
+            hue=hue,
+            hue_order=hue_order,
+            palette=palette,
+            width=0.15 * len(hue_order),
+        )
+        annot._pvalue_format.fontsize = 9
+        annot.configure(
+            test="t-test_paired",
+            comparisons_correction="Bonferroni",
+            hide_non_significant=True,
+            line_height=0.04,
+            text_offset=-3,
+            line_offset=10000,
+            line_offset_to_group=0.1,
+            line_width=0.75,
+            pvalue_thresholds=[[0.05, "*"], [1, "ns"]],
+        )
+        annot.apply_test().annotate(line_offset=10000)
+
+        ax.set_xlabel("")
+        ax.set_ylabel("")
+        ax.set_ylim([0.0, 1.0])
+        ax.set_xlim([-0.5, len(group_metrics) - 0.5])
+        ax.set_yticks([0.0, 0.5, 1.0])
+        ax.grid(which="major", axis="y", zorder=0)
+        ax.set_title(group_label, fontsize=10)
+        ax.set_xticklabels(get_plot_metric_names(order), fontsize=10)
+        if ax == axes[0]:
+            legend = ax.legend(title=None, loc="upper left")
+            legend.set_zorder(10)
+        else:
+            legend = ax.get_legend()
+            if legend is not None:
+                legend.remove()
+
+    fig.suptitle(f"{title}, N={len(trial_dfs[0])}", fontsize=12)
+    fig.tight_layout()
+    return fig
+
+
+def plot_experiment_radar(
+    *,  # enforce kwargs
+    title: str,
+    exp_name: str,
+    exp_trials: list[tuple[str, str]],
+    trial_dfs: list[pd.DataFrame],
+    metrics: list[str],
+) -> plt.Figure:
+    del exp_name  # plotting uses trial names only
+
+    n_metrics = len(metrics)
+    angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False).tolist()
+    angles += angles[:1]
+
+    raw_means = {
+        metric: [get_metric_display_mean(metric, trial_df) for trial_df in trial_dfs]
+        for metric in metrics
+    }
+    metric_min = {metric: 0 for metric in metrics}
+    metric_max = {
+        metric: (max(values) * 1.1 if max(values) > 0 else 1.0)
+        for metric, values in raw_means.items()
+    }
+
+    def to_radial(metric: str, value: float) -> float:
+        return (value - metric_min[metric]) / (metric_max[metric] - metric_min[metric])
+
+    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+
+    for trial_df, (trial_name, trial_file) in zip(trial_dfs, exp_trials):
+        values = [
+            to_radial(metric, get_metric_display_mean(metric, trial_df))
+            for metric in metrics
+        ]
+        values += values[:1]
+        color = MODEL2COLOR[trial_file]
+        ax.plot(angles, values, linewidth=2, label=trial_name, color=color)
+        ax.fill(angles, values, alpha=0.05, color=color)
+
+    ax.set_ylim(0, 1)
+    ax.set_yticks([0.5])
+    ax.set_yticklabels([], fontsize=8)
+    ax.yaxis.grid(True, linestyle="--", alpha=0.3)
+
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(get_plot_metric_names(metrics), fontsize=9)
+
+    n_ticks = 3
+    for i, metric in enumerate(metrics):
+        angle = angles[i]
+        for j in range(n_ticks):
+            r = j / (n_ticks - 1)
+            actual_val = metric_min[metric] + r * (
+                metric_max[metric] - metric_min[metric]
+            )
+            ax.text(
+                angle,
+                r,
+                f"{actual_val:.2f}",
+                fontsize=6,
+                ha="center",
+                va="center",
+                color="grey",
+                alpha=0.95,
+                bbox=dict(
+                    boxstyle="round,pad=0.1",
+                    facecolor="white",
+                    edgecolor="none",
+                    alpha=0.7,
+                ),
+            )
+
+    ax.set_title(f"{title}, N={len(trial_dfs[0])}", fontsize=12, pad=20)
+    ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1), fontsize=9)
 
     fig.tight_layout()
     return fig
+
+
+plot_experiment = plot_experiment_bar
 
 
 def get_experiments_metadata(

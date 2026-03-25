@@ -1,7 +1,7 @@
-REPO_ROOT=/opt/gpudata/steven/label-boosted-RAG-for-RRG
+REPO_ROOT=/opt/gpudata/trung/label-boosted-RAG-for-RRG
 MIMIC_CXR_DIR=/opt/gpudata/mimic-cxr
 CHEXPERTPLUS_DIR=/opt/gpudata/chexpertplus
-OUTPUT_DIR=/opt/gpudata/labrag
+OUTPUT_DIR=$REPO_ROOT/labrag
 
 BATCH_SIZE=64
 NUM_WORKERS=8
@@ -24,7 +24,7 @@ python $REPO_ROOT/rrg/extract.py \
 
 python $REPO_ROOT/rrg/extract.py \
 --model_type gloria \
---model_path $REPO_ROOT/chexpert_resnet50.ckpt \
+--model_path $REPO_ROOT/../../models/GLoRIA/chexpert_resnet50.ckpt \
 --input_path $CHEXPERTPLUS_DIR/PNG \
 --file_ext ".png" \
 --output_h5 $OUTPUT_DIR/chexpertplus-gloria.h5 \

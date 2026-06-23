@@ -31,7 +31,7 @@ setuptools.setup(
         "rouge==0.3.2",
         "scispacy==0.2.0",
         "spacy==2.1.3",
-        "stanza==1.1.1",
+        "stanza==1.12.2",
         "tensorboard==2.0.0",
         "torch==1.5.0",
         "torchvision==0.6.0",

@@ -1,0 +1,38 @@
+{
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu22.04",
+  "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind,consistency=cached",
+  "workspaceFolder": "${localWorkspaceFolder}",
+  "features": {
+    "ghcr.io/devcontainers/features/node:2": {},
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
+    "ghcr.io/rocker-org/devcontainer-features/miniforge:2": {}
+  },
+  "mounts": [
+    "source=claude-code-config-${localEnv:USER}-${localWorkspaceFolderBasename},target=/home/vscode/.claude,type=volume",
+    "source=${localEnv:HOME}/miniforge3/envs,target=${localEnv:HOME}/miniforge3/envs,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/labrag-outputs,target=${localEnv:HOME}/labrag-outputs,type=bind,consistency=cached,readonly",
+    "source=/opt/gpudata/cxr,target=/opt/gpudata/cxr,type=bind,consistency=cached,readonly"
+  ],
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
+    "CONDA_ENVS_PATH": "${localEnv:HOME}/miniforge3/envs"
+  },
+  "postCreateCommand": "sudo chown -R $(id -u):$(id -g) ~/.claude",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.black-formatter",
+        "ms-python.isort",
+        "ms-toolsai.jupyter",
+        "ms-toolsai.jupyter-renderers",
+        "christian-kohler.path-intellisense",
+        "Anthropic.claude-code"
+      ],
+      "settings": {
+        "workbench.colorTheme": "Dark+"
+      }
+    }
+  }
+}

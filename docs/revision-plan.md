@@ -1,23 +1,9 @@
-# LaB-RAG Journal Revision Plan (v7)
+# LaB-RAG Journal Revision Plan (v8)
 
-Status: **DRAFT v7, 2026-11-08. Design only; nothing implemented yet.**
+Status: **DRAFT v8, 2026-11-09. Design only; nothing implemented yet.**
 
 - **Target:** MDPI *Machine Learning and Knowledge Extraction* (MAKE), special issue "Multimodal Data Fusion for Complementary Feature Learning and Knowledge Discovery". Submit by April 2027.
 - **Title:** unchanged, so Google Scholar keeps merging it with the arXiv preprint.
-- **This version:** v7 adds the fine-tuning design (§6).
-  - **Labels only** now runs in B only, like filter only. Every later experiment compares retrieval only with LaB-RAG.
-  - OLMo 3 dropped from G. CRIMSON confirmed to run locally (§7).
-  - F gains a Qwen line (Qwen2.5-32B → Qwen3.8-27B). §4.1 explains why Qwen3.5 stays the main family.
-  - §6: Qwen3.5-4B with two recipes, plain SFT and SFT with reasoning traces. The traces are rationales of the reference report, written by Qwen3.5-397B.
-- **v6** applied Steven's review of v5:
-  - Story fixed: the "small models" are the label classifiers. The 4B fine-tuned model only shows that LaB-RAG works with fine-tuning.
-  - OpenI dropped.
-  - New condition: **filter only** (the preprint's naive-format arm). Template baseline and Jaccard filter confirmed.
-  - D split back into D (image access) and E (medical training).
-  - F uses engineered CoT prompting for older models instead of turning thinking off. CoT is the default for every model without native thinking.
-  - Metrics aligned with ReXrank, including its LLM judges. F1-CheXbert only appears in the error breakdown.
-  - Budget: a thinking-length pilot comes before C.
-  - Items marked *(proposed)* still need confirmation.
 
 ---
 
@@ -28,8 +14,9 @@ Status: **DRAFT v7, 2026-11-08. Design only; nothing implemented yet.**
 The revision tests the obvious objection: *"LLMs keep getting better. Won't labels from small models become unnecessary?"* Each experiment measures **how much labels add as a function of X**, where X is something that makes the LLM stronger: scale, thinking, access to the image, medical training, or model age. The framing is **not** "labels always win".
 
 - If the gain from labels shrinks as X grows, that is still a result.
-- **Cost argument:** the label classifiers are orders of magnitude smaller than every LLM in the plan, including the 4B student in §6. They help LLMs at every size we test, from a 4B model to ≈400B.
-- **Fine-tuning (§6)** only shows that LaB-RAG also works when the LLM is fine-tuned. It is not part of the cost argument.
+- **Cost argument:** the label classifiers are orders of magnitude smaller than every LLM in the plan, including the 4B student in §6. They help LLMs at every size we test, from 0.8B to ≈400B.
+- **Labels transfer cheaply (§5):** classifiers trained on another dataset (PadChest, from Spain, in its own label vocabulary) may improve generation on MIMIC-CXR and ReXGradient with no labels from those datasets and no tuning of the classifiers on them. That costs far less than fine-tuning an LLM on the target dataset.
+- **Fine-tuning (§6)** only shows that LaB-RAG also works when the LLM is fine-tuned. §6 itself is not a cost argument; §5.1 borrows its text retrieval-only arms as a cost reference.
 
 Fusion framing for the special issue: labels are a compact, interpretable, late-fused modality connecting separately pretrained vision and language models.
 
@@ -41,19 +28,15 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 |---|---|
 | **MIMIC-CXR** | Primary. RRG test (official split), classifiers, retrieval corpus, training data for fine-tuning |
 | **ReXGradient-160K** | Primary. RRG test (official patient-disjoint split, 67 sites; **full 10k test everywhere**), classifiers, retrieval corpus |
-| **CheXpert Plus** | Secondary RRG test (Findings and Impression only; the test set is small) |
+| **CheXpert Plus** | The **outside dataset**: never an RRG test. (1) **Pilot** (Appendix): every generation setting is chosen here, not on the evaluation datasets. (2) **Sole transfer source** for J (classifiers + corpus). Also in encoder pretraining. Its official valid split has only 61 Findings studies (61 patients), so the preprint's CheXpert Plus test results are not re-run. Say so in the paper. |
 | **PadChest-GR** | Richer-labels test bed (§5). **Official split: 3,185 train / 455 val / 915 test.** English finding sentences; labels are in the PadChest vocabulary (all 154 verified) |
 | **PadChest** | Labels only (its reports are stemmed Spanish). Trains the rich-label classifiers. Also used in encoder pretraining |
-
-**Dropped:**
-- **VinDr-CXR:** it has no reports.
-- **BRAX:** transfer (J) already covers external validation.
-- **OpenI:** its reports are public on the web, so it was never an RRG test. Its only remaining role was external classifier testing, and the cross-dataset classifier tests (§4.3) already cover that for CheXbert-14. It has no labels in the PadChest vocabulary, so it can't test the rich-label classifiers either.
 
 **Sections:** Findings; Impression (generated from the image only, not conditioned on Findings); Findings+Impression (joint).
 
 ### Leakage controls
-- **Our leakage-controlled RAD-DINO:** trained on the train splits of CheXpert Plus, MIMIC-CXR, ReXGradient and PadChest. It excludes every validation and test patient of those datasets, plus the PadChest-GR validation and test patients.
+- **CheXpert Plus pilot split:** 400 patients from CheXpert Plus train, each with exactly one Findings study (17,972 of the 26,634 train patients qualify), drawn once with a fixed seed. 200 are the **pilot set** and 200 the **prompt-tuning set** (§3), so the CoT prompt isn't tuned on the studies that then choose between settings. Both are excluded from encoder pretraining, the CheXpert Plus classifiers and every retrieval corpus.
+- **Our leakage-controlled RAD-DINO:** trained on the train splits of CheXpert Plus, MIMIC-CXR, ReXGradient and PadChest. It excludes every validation and test patient of those datasets, the 400 CheXpert Plus pilot patients, and the PadChest-GR validation and test patients.
 - **Classifiers:** fit on train, thresholds set on validation. Wherever predicted labels are used as training inputs, they are K-fold out-of-fold predictions.
 - **Retrieval:** never returns the target study or another study from the same patient.
 - **Audit in the paper:**
@@ -66,20 +49,31 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 
 | Condition | Image to model | Retrieved reports | Labels in prompt | What it isolates |
 |---|:-:|:-:|:-:|---|
-| No context | ✓ | – | – | the model alone. **Only defined when the model sees the image** (D) |
+| No context | ✓ | – | – | the model alone. **Only possible when the model sees the image** (D), otherwise the model is not conditioned on any input. |
 | Retrieval only (Standard RAG) | opt. | ✓ (image similarity) | – | retrieval without labels |
-| **Filter only** | opt. | ✓ (label filter) | – | labels used **only to choose the retrieved reports**. This is the preprint's "Label Filter only" arm (exact filter + naive prompt) |
+| Filter only | opt. | ✓ (label ranking) | – | labels used **only to choose the retrieved reports**. This is the preprint's "Label Filter only" arm (naive prompt), but with the Jaccard ranking |
 | Labels only | opt. | – | ✓ | labels used **only in the prompt**, with no retrieval: the LLM writes the report from the predicted labels |
-| LaB-RAG | opt. | ✓ (label filter) | ✓ (simple format) | the full method |
+| LaB-RAG | opt. | ✓ (label ranking) | ✓ (simple format) | the full method |
 | Template | – | – | ✓ | labels with **no LLM**: each label is rendered into a fixed sentence ("Cardiomegaly." / "No pleural effusion."). This is the small model alone, the floor the LLM has to beat (cf. Pragmatic RRG, Nguyen et al. 2023) |
 
 - **Text-only runs (the default)** use retrieval only, LaB-RAG and the template floor. **Filter only** and **labels only** separate the two roles labels play (choosing the retrieved reports, and appearing in the prompt), so they run **in B only**. Every later experiment asks "does LaB-RAG still beat retrieval only as X grows?" "No context" is omitted because a text-only LLM with no context gets no study-specific input.
+- **One LaB-RAG configuration everywhere (except A):**
+  - **Retrieval:** Jaccard-ranked label retrieval. Corpus studies are ranked by positive-label Jaccard overlap with the target's labels, with ties broken by image similarity. "No Finding" counts as a label, so a normal study has a non-empty label set.
+  - **Prompt:** based on the preprint's simple label format, needs tuning in the pilot study.
+  - The preprint's filter ablation (no filter / exact / partial) and format ablation (naive / simple / verbose / instruct) are **dropped**.
 - **Label source:** predicted by default. **Oracle** labels (extracted from the reference report) and **random** labels (sampled from label prevalence) are the controls.
 - **Reasoning:**
   - Models with native thinking use it; the default budget is chosen in the pilot (Appendix).
-  - Models without it (Mistral v0.1 and v0.3, Gemma 2, Gemma 3, MedGemma, Qwen2.5) get one **engineered CoT prompt**: reason first, then write the report after a fixed delimiter. The prompt is tuned on validation and shared across these models.
-  - Only the text after the delimiter is scored.
-  - A (reproduction) keeps the preprint prompts.
+  - Models without it (Mistral v0.1 and v0.3, Gemma 2, Gemma 3, Qwen2.5) get one **engineered CoT prompt**: reason first, then write the report after a fixed delimiter. The prompt is tuned on the CheXpert Plus prompt-tuning set (§2) and shared across these models.
+    - Only the text after the delimiter is scored.
+  - **MedGemma reasoning: chosen empirically in the pilot.** MedGemma 27B **has a trained thinking mode** (both checkpoints).
+    - **Google's documentation:** the official MedGemma notebooks (`Google-Health/medgemma`, `quick_start_with_hugging_face.ipynb`) say "MedGemma 1.5 4B and MedGemma 27B variants support thinking". Thinking is switched on by putting `SYSTEM INSTRUCTION: think silently if needed.` before the role line of the system prompt, e.g. "You are an expert radiologist."
+    - **Output format:** the model writes `<unused94>thought\n…<unused95>` and then the final response. The notebooks split on `<unused95>`.
+    - **Decoding:** greedy. The output cap goes from 300–1,000 tokens without thinking to 1,300–2,000 with it. There is no budget control beyond the cap.
+    - **Google's caveat:** thinking "may not benefit some use cases" and "may potentially improve results on challenging text-only tasks". They say to validate it.
+    - **Decision rule:** the pilot compares three settings on the CheXpert Plus pilot set: native thinking on, thinking off (direct answer), and our engineered CoT prompt. Each checkpoint uses its best setting in every D and E cell. The choice and the pilot numbers are reported.
+    - **Note for E:** if MedGemma ends up with native thinking while Gemma 3 uses the CoT prompt, the difference in reasoning training counts as part of what "medical training" means for MedGemma. That's the same argument F uses for model generations.
+    - **Implementation:** vLLM has no reasoning parser for this format, so split on `<unused95>` ourselves. The `<unused9x>` tokens must be kept when decoding.
 - **Statistics:** 1 seed. Paired bootstrap over studies, with 95% CIs on the difference between conditions.
 - **Rule:** no claim varies two factors unless the full cross of those factors is run.
 
@@ -91,42 +85,47 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 
 | Family | Models |
 |---|---|
-| Qwen3.5 | 4B · **27B (main)** · 122B-A10B · 397B-A17B |
+| Qwen3.5 | 0.8B · 2B · 4B · 9B · **27B (main)** · 122B-A10B · 397B-A17B |
 | Qwen (other releases, F only) | Qwen2.5-32B · Qwen3-32B · Qwen3.6-27B · Qwen3.8-27B |
 | gpt-oss | 20b · **120b (main)** |
-| Gemma | Gemma 2 27B · Gemma 3 27B · Gemma 4 31B · MedGemma 27B (multimodal checkpoint) |
-| Mistral | Mistral-7B-Instruct v0.1 · v0.3 (preprint anchor) · Ministral 3 8B (instruct and reasoning variants) · Mistral Small 4 |
+| Gemma | Gemma 2 27B · Gemma 3 27B · Gemma 4 31B · MedGemma 27B (multimodal and text-only checkpoints) |
+| Mistral | Mistral-7B-Instruct v0.1 · v0.3 (preprint anchor) · Ministral 3 8B Reasoning · Mistral Small 4 |
 | Others | Muse Glimmer 30B |
 
 - **Teacher** for the reasoning traces in §6: Qwen3.5-397B (same family as the 4B student, so the thinking format and tokenizer match).
 - **Main models:** Qwen3.5-27B (multimodal, controllable thinking) and gpt-oss-120b (strictly text-only, with low/medium/high effort).
 - **Why Qwen3.5 and not the newer Qwen3.6 / 3.8** (to state in the paper): Qwen3.5 is the newest Qwen release with open weights at every size from 0.8B to 397B. C needs that range, and §6 needs the 4B student and the 397B teacher from the same release. The open Qwen3.6 models are 27B and 35B-A3B only. The open Qwen3.8 models are 27B, a ≈180B MoE, and a 2.4T text-only model. The F Qwen line checks whether the main result carries over to the newest 27B.
+- **MedGemma checkpoints: both, in the text-only cells.** MedGemma 27B has a multimodal checkpoint (`medgemma-27b-it`) and a separate text-only one (`medgemma-27b-text-it`, trained on medical text only). The MedGemma technical report's headline 27B numbers come from the text-only checkpoint, and it calls the multimodal 27B results preliminary.
+  - The **multimodal checkpoint** runs in both input modes. D's within-model comparison then changes only the input, and the checkpoint matches Gemma 3 27B, which is also multimodal and runs text-only in E.
+  - The **text-only checkpoint** also runs every text-only MedGemma cell in D and E: retrieval only and LaB-RAG, about 25k generations. It is reported next to the multimodal checkpoint, so text-only MedGemma is shown at its best.
+- **Ministral 3 8B: one variant, the Reasoning one.** Mistral releases two post-trained 8B models. **Instruct** is tuned for chat (SFT + online DPO) and answers directly. **Reasoning** is post-trained separately from the base model (SFT on CoT data, then GRPO and online DPO), thinks before answering, and targets math, code and STEM. They also have different recommended sampling settings (Instruct temperature ≈0.1; Reasoning 0.7 / top-p 0.95). Only the Reasoning variant is used, in both F and G, which matches F's rule that each model reasons the way its era allowed. Sanity check in the pilot: Instruct with the CoT prompt on the same CheXpert Plus pilot studies. If Instruct is clearly better, it **replaces** Reasoning everywhere, so F and G never mix the two.
+- **MedGemma 1.5 is out of scope.** It is released only as a 4B multimodal model (Jan 2026), while D and E need a 27B medical model matched to Gemma 3 27B. MedGemma 1 27B, in both checkpoints, is still the current MedGemma at that size. To say in the paper if asked.
 - **To check at implementation time:** checkpoint availability, licences, chat templates, and how each model enforces a thinking budget.
 
 ### 4.2 Experiments
 
 **Datasets per experiment:**
-- **Main models (B):** all three sections, on MIMIC-CXR and ReXGradient (full test).
-- **All other experiments, including fine-tuning (§6):** Findings only, on the MIMIC-CXR and ReXGradient full test sets, unless stated otherwise. The one exception is A, which keeps Findings and Impression because it is checked against the preprint's tables.
+- **Main models (B):** all three sections, on MIMIC-CXR and ReXGradient.
+- **All other experiments, including fine-tuning (§6):** Findings only, on the MIMIC-CXR and ReXGradient test sets, unless stated otherwise. The one exception is A, which keeps Findings and Impression because it is checked against the preprint's tables.
 
 | # | Question | Design |
 |---|---|---|
-| **A. Reproduction** | Does the new stack reproduce the preprint? | Mistral-7B v0.3 with greedy decoding; the preprint's Standard RAG / filter only / format only / LaB-RAG configurations; MIMIC and CheXpert Plus × Findings and Impression. Reuses the surviving BioViL-T and GLoRIA embeddings and classifiers, and compares against the paper's tables (the old generations are gone). |
+| **A. Reproduction** | Does the new stack reproduce the preprint? | Mistral-7B v0.3 with greedy decoding; the preprint's Standard RAG / filter only / format only / LaB-RAG configurations; MIMIC × Findings and Impression. Reuses the surviving BioViL-T and GLoRIA embeddings and classifiers, and compares against the paper's tables (the old generations are gone). |
 | **B. Core** | Do labels boost current reasoning LLMs? | Both main models, **text only**, × {retrieval only, filter only, labels only, LaB-RAG} × {predicted, oracle, random} labels, plus the template floor. MIMIC and ReXGradient × all three sections. |
-| **C. Scale × thinking** | How does the gain from labels change with model size and thinking? | Fully crossed. **Qwen3.5:** {4B, 27B, 122B, 397B} × {thinking off, plus 3 thinking budgets with the same token caps at every size} × {retrieval only, LaB-RAG}. **gpt-oss:** {20b, 120b} × {low, medium, high} × the same two conditions. Budgets come from the pilot (Appendix). |
+| **C. Scale × thinking** | How does the gain from labels change with model size and thinking? | Fully crossed. **Qwen3.5:** {0.8B, 2B, 4B, 9B, 27B, 122B, 397B} × {thinking off, plus 3 thinking budgets with the same token caps at every size} × {retrieval only, LaB-RAG}. **gpt-oss:** {20b, 120b} × {low, medium, high} × the same two conditions. Budgets come from the pilot (Appendix). All Qwen3.5 sizes have the same thinking switch. The model cards and the guides disagree on whether the small models think by default, so `enable_thinking` is always set explicitly. The pilot checks that 0.8B and 2B don't loop or truncate under the larger caps. |
 | **D. Image access** | Do labels still help when the model sees the image? | {Qwen3.5-27B, MedGemma 27B} × {text only, with image} × {retrieval only, LaB-RAG}, plus **no context** in the image runs. Each model is compared with itself in the two input modes. MedGemma is the hardest case: a medical VLM that sees the image. The Qwen text-only cells reuse B. |
-| **E. Medical training** | Does medical tuning substitute for labels? | Full 2×2: {Gemma 3 27B, MedGemma 27B} × {with image, text only} × {retrieval only, LaB-RAG}, plus **no context** in the image runs. **Headline: with image**, which is how MedGemma is meant to run and where its medical training (largely visual) can actually substitute for labels. **Secondary: text only**, which mirrors the preprint's Mistral vs BioMistral comparison. One question (medical training), reported in both input modes. The multimodal MedGemma checkpoint is used in both modes (a footnote notes the separate text-only checkpoint), so all MedGemma cells are shared with D. **Leakage caveat:** MedGemma's chest X-ray training includes MIMIC-CXR with no stated test exclusion, so ReXGradient is the clean read. |
-| **F. Model age** | Does the gain from labels survive model progress at a fixed size? | Three lines, text only:<br>• Mistral-7B v0.1 → v0.3 → Ministral 3 8B<br>• Gemma 2 27B → Gemma 3 27B → Gemma 4 31B<br>• Qwen2.5-32B → Qwen3-32B → Qwen3.5-27B → Qwen3.6-27B → Qwen3.8-27B (Qwen2 is left out because it has no model near 30B).<br> **Each model reasons the way its era allowed:** the engineered CoT prompt for models without native thinking, native thinking for Ministral 3 8B (reasoning variant), Gemma 4 31B and Qwen3 onwards. The reasoning method counts as part of what a model generation is: older models can't think natively, and nobody runs CoT prompts on models that can. So it is not a second factor under the §3 rule. The Gemma 3 cells are shared with E; the Qwen3.5-27B cells are shared with B. |
-| **G. Generality** | Does LaB-RAG help across many models? | Retrieval only vs LaB-RAG on every generator, including Muse Glimmer 30B and Mistral Small 4. (OLMo 3 was dropped: it was only there for the corpus search in the removed memorization probe, and G already covers the widely used families.) Presented as one table or figure. |
-| **H. Preprint ablations** | Filter, format, number of retrieved reports | Run fresh, **on the best configuration only**: 7 one-at-a-time variants. Filter only is now a core condition (B). |
+| **E. Medical training** | Does medical tuning substitute for labels? | Full 2×2: {Gemma 3 27B, MedGemma 27B} × {with image, text only} × {retrieval only, LaB-RAG}, plus **no context** in the image runs. **Headline: with image**, which is how MedGemma is meant to run and where its medical training (largely visual) can actually substitute for labels. **Secondary: text only**, which mirrors the preprint's Mistral vs BioMistral comparison. One question (medical training), reported in both input modes. The text-only cells run both MedGemma checkpoints (§4.1). The MedGemma cells are shared with D. **Leakage caveat:** MedGemma's chest X-ray training includes MIMIC-CXR with no stated test exclusion, so ReXGradient is the clean read. |
+| **F. Model age** | Does the gain from labels survive model progress at a fixed size? | Three lines, text only (release year in brackets):<br>• Mistral-7B v0.1 (2023) → v0.3 (2024) → Ministral 3 8B Reasoning (2025)<br>• Gemma 2 27B (2024) → Gemma 3 27B (2025) → Gemma 4 31B (2026)<br>• Qwen2.5-32B (2024) → Qwen3-32B (2025) → Qwen3.5-27B (2026) → Qwen3.6-27B (2026) → Qwen3.8-27B (2026). Qwen2 is left out because it has no model near 30B. Three of the Qwen releases come from 2026, so plot against release date, not release index.<br> **Each model reasons the way its era allowed:** the engineered CoT prompt for models without native thinking, native thinking for Ministral 3 8B Reasoning, Gemma 4 31B and Qwen3 onwards. The reasoning method counts as part of what a model generation is: older models can't think natively, and nobody runs CoT prompts on models that can. So it is not a second factor under the §3 rule. The Gemma 3 cells are shared with E; the Qwen3.5-27B cells are shared with B. |
+| **G. Generality** | Does LaB-RAG help across many models? | Retrieval only vs LaB-RAG on every generator, including Muse Glimmer 30B and Mistral Small 4. Presented as one table or figure. |
+| **H. Retrieval depth** | Does the gain from labels depend on how many reports are retrieved? | One main model at its default thinking setting. **Number of retrieved reports k ∈ {1, 3, 5 (default), 10, 20} × {retrieval only, LaB-RAG}**. Both conditions are swept, so the label gain can be read at each k (§3 rule). k = 20 is new: modern long-context models can use more retrieved reports than Mistral-7B could. The filter and format ablations are dropped (§3). |
 | **I. Encoders** | Does the encoder choice matter? | Our leakage-controlled RAD-DINO (default) vs public RAD-DINO, MedSigLIP, DINOv3, and BioViL-T / GLoRIA. All of them get classifier metrics; one main model also runs retrieval only vs LaB-RAG with each. |
-| **J. Transfer** | Do the classifiers and corpus transfer to other datasets? | One main model × {retrieval only, LaB-RAG}. **Symmetric:** both MIMIC and ReXGradient act as the source, and each transfers to the other primary dataset plus CheXpert Plus and PadChest-GR (CheXbert-14 labels). Two settings: (1) **source only**: source classifiers and source corpus; (2) **corpus swap**: source classifiers with the target's train corpus. Caveat: CheXpert Plus Findings test is 61 studies, so its CIs are wide. |
+| **J. Transfer** | Do the classifiers and corpus transfer to other datasets? | One main model × {retrieval only, LaB-RAG}. **Source: CheXpert Plus only** (classifiers trained on CheXpert Plus train, thresholds on its valid split; corpus = its ≈46k train Findings studies minus the pilot patients). **Targets:** MIMIC, ReXGradient and PadChest-GR (CheXbert-14 labels). Two settings: (1) **source only**: source classifiers and source corpus; (2) **corpus swap**: source classifiers with the target's train corpus. For MIMIC and ReXGradient, B's in-domain result on the same test set is the reference. Retrieval only in the corpus-swap setting doesn't use the classifiers, so it is shared with B and §5. Caveat to report: the source corpus is ≈3× smaller than MIMIC's or ReXGradient's. |
 
 ### 4.3 Supporting analyses
 - **Classifier quality:**
   - per-label AUROC and F1, plus retrieval label-precision@k, for every encoder × label set
-  - in-domain test sets: MIMIC, ReXGradient and CheXpert Plus
-  - **cross-dataset** (replaces OpenI): each source's classifiers on the other datasets, the same pairs as J
+  - in-domain test sets: MIMIC and ReXGradient
+  - **cross-dataset**: the CheXpert Plus classifiers on MIMIC, ReXGradient and PadChest-GR, the same pairs as J
   - PadChest-GR test for the rich labels
 - **Literature baselines:** 3–5 strong current public models (chosen using ReXrank; weights to be verified), on MIMIC and ReXGradient only. Modern models only; overlap with the preprint's baselines is fine. No ReXrank submission.
 
@@ -148,20 +147,42 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 | PadChest top-30 / top-60 findings | richer |
 | PadChest findings + diagnoses + locations | richest |
 
-- **Retrieval filter:**
-  - Exact label-set match stops working as the vocabulary grows: almost no corpus study shares an exact 60- or 250-label vector with the target.
-  - At **every** level, use a soft filter: rank candidates by positive-label **Jaccard** overlap with the target, breaking ties by image similarity.
-  - The existing `partial` filter counts shared positives only, so it favours corpus reports with many positives. Jaccard penalizes the extra positives.
-  - Exact vs soft is compared at the CheXbert-14 level only, which links §5 back to the default pipeline.
+- **Retrieval:** the default Jaccard ranking (§3) at every level. This is also why Jaccard is the default: exact label-set match stops working as the vocabulary grows, since almost no corpus study shares an exact 60- or 250-label vector with the target. (The preprint's `partial` filter counts shared positives only, so it favours corpus reports with many positives. Jaccard penalizes the extra positives.)
 - **Design:** both main models × LaB-RAG × {predicted, oracle} × each level, plus one retrieval-only cell per model (retrieval only does not depend on the label level).
-- **Secondary:** MIMIC-CXR and ReXGradient, where corpus labels in the rich vocabularies come from classifiers run on the corpus images.
+
+### 5.1 Cross-dataset labels: PadChest classifiers on MIMIC-CXR and ReXGradient
+This is promoted from a secondary check to a finding in its own right. Can a classifier cheaply trained on **another dataset**, in **a richer label vocabulary**, improve generation on MIMIC-CXR and ReXGradient, with no labels from them and no tuning of the classifiers on them? If so, it is a much cheaper way to adapt to a new dataset than fine-tuning an LLM on it (§6).
+
+- **Nothing from the target dataset's labels is used.**
+  - The classifiers are trained on PadChest, with thresholds set on PadChest-GR validation.
+  - The corpus labels are predicted by the same classifiers from the corpus images, so no report labeler is needed either.
+  - The only target-domain input is the corpus reports themselves, which every retrieval condition uses anyway.
+  - Caveat to state: the encoder's self-supervised pretraining includes the unlabelled MIMIC-CXR and ReXGradient train images (as with public RAD-DINO). The classifier heads and labels never see the target data.
+- **Design:** MIMIC-CXR and ReXGradient Findings test, both main models, predicted labels only (these datasets have no gold labels in the PadChest vocabulary):
+  - retrieval only *(shared with B)*
+  - LaB-RAG with in-domain CheXbert-14 labels *(shared with B)*. This is the in-domain reference.
+  - LaB-RAG with PadChest-trained labels at each PadChest level (collapsed-14, top-30, top-60, richest)
+- **Reading:** PadChest labels vs retrieval only is the transfer gain. PadChest labels vs in-domain CheXbert-14 shows how much of the in-domain gain the foreign labels recover. Collapsed-14 vs richer levels shows whether vocabulary size matters when the labels are foreign.
+- **Relation to J:** J transfers CheXbert-14 classifiers between datasets that use the **same** vocabulary. Here the source differs in country, report language and vocabulary.
+- **Cost comparison with fine-tuning (2×2):** two ways to adapt the same Qwen3.5-4B to MIMIC-CXR and ReXGradient, each with and without reasoning.
+
+| Adaptation | Thinking off | Teacher's thinking budget |
+|---|:-:|:-:|
+| Frozen 4B + LaB-RAG with PadChest labels *(2 new cells)* | ✓ | ✓ |
+| Fine-tuned 4B, text retrieval only *(from §6)* | plain SFT | SFT with reasoning |
+
+  - Reasoning modes are matched as in §6's frozen reference rows: plain SFT runs with thinking off, and SFT with reasoning thinks at the teacher's budget.
+  - The PadChest level is the one that is best on the CheXpert Plus pilot set (PadChest classifiers run on its images and its corpus), so §5.1 uses nothing from the target except the corpus reports.
+  - Report the compute for each: minutes of classifier training vs H200-hours of LoRA (plus the teacher rationales for SFT with reasoning).
+  - Fully crossed, so the effect of reasoning can be read for each adaptation method (§3 rule). Each method is a bundle (classifiers + label ranking + labels in the prompt, vs fine-tuned weights), so the claim is about the two methods as wholes.
+
 - **Note:** with the PadChest vocabularies, the boosting labels no longer come from CheXbert, so the SembScore and RadCliQ overlap (§7) does not apply. This makes §5 a check on the CheXbert-14 results that does not share the labeler.
 
 ---
 
 ## 6. Fine-tuning
 
-Purpose: show that LaB-RAG still works after the LLM is fine-tuned. This is not a cost argument (§1).
+Purpose: show that LaB-RAG still works after the LLM is fine-tuned. This is not a cost argument (§1), although §5.1 uses the text retrieval-only arms as a cost reference.
 
 - **Student:** Qwen3.5-4B (multimodal, same family as the main model), trained with LoRA.
 - **Findings only**, for both training and evaluation (§4.2). Full Findings train is 152k MIMIC-CXR + 140k ReXGradient ≈ 292k studies.
@@ -195,7 +216,7 @@ Settled:
   - **Label-reliance check:** the models trained with labels are also tested with **oracle** and **random** labels, and compared with the frozen 4B (in the matching reasoning mode) under the same swap. If random labels hurt the fine-tuned model much more than the frozen one, fine-tuning taught it to trust labels blindly.
 - **Hyperparameters:** one small learning-rate sweep on validation using one arm. Then the same LoRA settings and step count for every arm, with the checkpoint chosen by validation loss. Arms are not tuned one by one, so differences between them can't be attributed to tuning.
 
-- **No transfer sets for the fine-tuned models.** CheXpert Plus Findings test (61 studies) is too small to separate fine-tuned arms. PadChest-GR's references are sentence lists, so the metrics would mostly measure the style mismatch with MIMIC-CXR and ReXGradient. Transfer would also need its own choice of source vs target corpus. §6's claim is in-domain; J covers transfer for the frozen models.
+- **No transfer sets for the fine-tuned models.** PadChest-GR's references are sentence lists, so the metrics would mostly measure the style mismatch with MIMIC-CXR and ReXGradient. Transfer would also need its own choice of source vs target corpus. §6's claim is in-domain; J covers transfer for the frozen models.
 
 ---
 
@@ -232,18 +253,6 @@ Settled:
 
 ---
 
-## 9. Timeline
-| Window | Milestones |
-|---|---|
-| Nov 2026 | finalize the design (§6); exclusion list → start leakage-controlled RAD-DINO training; envs and pipeline; reproduction (A); metric suite; **thinking-length pilot**; CoT prompt for older models |
-| Dec 2026 | classifiers; core (B) with public RAD-DINO, then swap to our checkpoint; scale × thinking (C) |
-| Jan 2027 | D, E, F, G; transfer (J); richer-labels classifiers; teacher rationales |
-| Feb 2027 | fine-tuning and distillation; richer-labels generation; H, I; literature baselines |
-| Mar 2027 | analysis and writing (MDPI template); related-work update |
-| early Apr 2027 | co-author review, submit |
-
----
-
 ## Appendix: rough generation budget
 
 Assumptions:
@@ -251,37 +260,41 @@ Assumptions:
 - Test sizes in studies (F = Findings, I = Impression, F+I = Findings+Impression):
   - MIMIC test: F 2,347 · I 2,224 · F+I 1,624
   - ReXGradient test: 10,000 per section
-  - CheXpert Plus: F 61 · I 200
   - PadChest-GR test: 915
 - "Findings default" = MIMIC + ReXGradient full test, Findings only = 12,347 studies.
 
 | Experiment | ≈ Generations |
 |---|---|
-| A. Reproduction | 19k |
+| A. Reproduction (MIMIC only) | 18k |
 | B. Core: 2 models × 10 condition/label cells × 36k studies (3 sections) | 724k |
-| C. Scale × thinking (44 cells, minus 4 shared with B) | 494k |
+| C. Scale × thinking (68 cells, minus 4 shared with B; the 0.8B–9B cells are cheap) | 790k |
 | D. Image access (8 new cells) | 99k |
-| E. Medical training (5 new Gemma 3 cells; MedGemma shared with D) | 62k |
+| E. Medical training (5 new Gemma 3 cells + 2 text-only MedGemma checkpoint cells; multimodal MedGemma shared with D) | 86k |
 | F. Model age (18 new cells; Gemma 3 shared with E, Qwen3.5-27B with B) | 222k |
 | G. Generality: the 2 extra models only; the rest reuse runs above | 49k |
-| H. Preprint ablations | 86k |
+| H. Retrieval depth (8 k cells) | 99k |
 | I. Encoders (5 alternatives × 2 conditions) | 123k |
-| J. Transfer (symmetric) | 57k |
-| §5 Richer labels (headline + secondary; rough, after dropping labels only) | ≈85k |
-| **Total, excluding fine-tuning (§6)** | **≈2.0M** |
+| J. Transfer (CheXpert Plus source → 3 targets; corpus-swap retrieval only shared with B and §5) | 40k |
+| §5 Richer labels: headline 20k + §5.1 cross-dataset 99k + the two 4B cost-comparison cells 25k | ≈144k |
+| **Total, excluding fine-tuning (§6)** | **≈2.4M** |
 
 ### Thinking length is the main unknown
 Steven's preliminary runs show that Qwen's highest thinking modes are slow. The v5 estimate assumed 2.5k output tokens per generation, which is probably too low for the top budget.
 
-- **Pilot (Nov, before C):**
-  - About 200 MIMIC validation studies per Qwen3.5 size × candidate budget, plus gpt-oss at each effort level.
-  - Measure thinking tokens (mean and p95), truncation rate, H200 throughput, and validation quality.
-- **Budgets are hard token caps** (e.g. ≈1k / 4k / 16k, set from the pilot), not the model's open-ended top mode. The top cap is where validation quality levels off or where cost becomes prohibitive, whichever comes first.
+- **Pilot (after our RAD-DINO is trained, before C), on CheXpert Plus only (§2):**
+  - **Why CheXpert Plus:** every generation setting is chosen on a dataset we never evaluate on, so the MIMIC and ReXGradient results are not tuned to them. To state in the paper.
+  - The 200-study CheXpert Plus pilot set, per Qwen3.5 size × candidate budget, plus gpt-oss at each effort level. Labels come from the CheXpert Plus classifiers (J), and the corpus is CheXpert Plus train minus the pilot patients.
+  - The pilot uses our leakage-controlled RAD-DINO, like every other experiment, so the pilot patients are never seen by the encoder.
+  - Measure thinking tokens (mean and p95), truncation rate, H200 throughput, and pilot quality.
+  - The same pilot studies are used for **Ministral 3 8B Reasoning vs Instruct + CoT** (§4.1), the **§5.1 PadChest level**, and the 0.8B/2B loop check (C).
+  - **MedGemma reasoning setting:** native thinking on vs thinking off vs our CoT prompt, for both 27B checkpoints, on the same pilot studies. Measure pilot quality, thinking length and truncation at Google's caps, then pick per checkpoint (§3).
+  - **Still tuned on target validation** (part of training on that data, not a generation setting): classifier thresholds, and §6's LoRA learning rate, checkpoint and training-set size.
+- **Budgets are hard token caps** (e.g. ≈1k / 4k / 16k, set from the pilot), not the model's open-ended top mode. The top cap is where pilot quality levels off or where cost becomes prohibitive, whichever comes first.
 - **The default thinking setting for B** (and D–J) is a middle budget, not the top one.
-- **Rough sensitivity:** if the top-budget cells average ≈10k tokens, those 148k generations alone add ≈1.5B tokens. The total would then be ≈6B output tokens, or ≈350–700 H200-hours. Re-estimate after the pilot.
+- **Rough sensitivity:** if the top-budget cells average ≈10k tokens, those ≈220k generations take ≈2.2B tokens, ≈1.7B more than the 2.5k-token assumption. The total would then be ≈7.7B output tokens, or ≈450–850 H200-hours (tokens from the 0.8B–9B models are far cheaper than the rest). Re-estimate after the pilot.
 - **Cuts, in order, if the pilot says it's too slow:**
   1. No top budget at 397B.
-  2. 3 thinking budgets → 2 (≈−100k).
+  2. 3 thinking budgets → 2 (≈−173k: 7 Qwen3.5 sizes × 2 conditions).
   3. Filter only in B for Findings only (≈−143k).
 
   All of these are better than going back to a ReXGradient subset.
@@ -289,5 +302,5 @@ Steven's preliminary runs show that Qwen's highest thinking modes are slow. The 
   - the LLM judges: ≈1.9M generations each, but short and on small models
   - the other evaluation metrics
   - leakage-controlled RAD-DINO pretraining
-  - the teacher rationales and the LoRA runs (§6)
+  - §6: the teacher rationales, the LoRA runs, and the test generations of the fine-tuned arms and their new frozen-4B reference rows (the image cells and the oracle/random label-reliance cells)
   - the template floor (no GPU)

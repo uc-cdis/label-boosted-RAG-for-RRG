@@ -1,6 +1,6 @@
-# LaB-RAG Journal Revision Plan (v8)
+# LaB-RAG Journal Revision Plan (v10)
 
-Status: **DRAFT v9, 2026-11-09. Design only; nothing implemented yet.**
+Status: **DRAFT v10, 2026-11-09.** v10 drops training our own RAD-DINO: the public checkpoint is checked to be leakage-free for our test sets (§2).
 
 - **Target:** MDPI *Machine Learning and Knowledge Extraction* (MAKE), special issue "Multimodal Data Fusion for Complementary Feature Learning and Knowledge Discovery". Submit by April 2027.
 - **Title:** unchanged, so Google Scholar keeps merging it with the arXiv preprint.
@@ -28,20 +28,25 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 |---|---|
 | **MIMIC-CXR** | Primary. RRG test (official split), classifiers, retrieval corpus, training data for fine-tuning |
 | **ReXGradient-160K** | Primary. RRG test (official patient-disjoint split, 67 sites; **full 10k test everywhere**), classifiers, retrieval corpus |
-| **CheXpert Plus** | The **outside dataset**: never an RRG test. (1) **Pilot** (Appendix): every generation setting is chosen here, not on the evaluation datasets. (2) **Sole transfer source** for J (classifiers + corpus). Also in encoder pretraining. Its official valid split has only 61 Findings studies (61 patients), so the preprint's CheXpert Plus test results are not re-run. Say so in the paper. |
+| **CheXpert Plus** | The **outside dataset**: never an RRG test. (1) **Pilot** (Appendix): every generation setting is chosen here, not on the evaluation datasets. (2) **Sole transfer source** for J (classifiers + corpus). Its official valid split has only 61 Findings studies (61 patients), so the preprint's CheXpert Plus test results are not re-run. |
 | **PadChest-GR** | Richer-labels test bed (§5). **Official split: 3,185 train / 455 val / 915 test.** English finding sentences; labels are in the PadChest vocabulary (all 154 verified) |
-| **PadChest** | Labels only (its reports are stemmed Spanish). Trains the rich-label classifiers. Also used in encoder pretraining |
+| **PadChest** | Labels only (its reports are stemmed Spanish). Trains the rich-label classifiers. |
 
 **Sections:** Findings; Impression (generated from the image only, not conditioned on Findings); Findings+Impression (joint).
 
 ### Leakage controls
-- **CheXpert Plus pilot split:** 400 patients from CheXpert Plus train, each with exactly one Findings study (17,972 of the 26,634 train patients qualify), drawn once with a fixed seed. 200 are the **pilot set** and 200 the **prompt-tuning set** (§3), so the CoT prompt isn't tuned on the studies that then choose between settings. Both are excluded from encoder pretraining, the CheXpert Plus classifiers and every retrieval corpus.
-- **Our leakage-controlled RAD-DINO:** trained on the train splits of CheXpert Plus, MIMIC-CXR, ReXGradient and PadChest. It excludes every validation and test patient of those datasets, the 400 CheXpert Plus pilot patients, and the PadChest-GR validation and test patients.
+- **CheXpert Plus pilot split:** 400 patients from CheXpert Plus train, each with exactly one Findings study (17,972 of the 26,634 train patients qualify), drawn once with a fixed seed. 200 are the **pilot set** and 200 the **prompt-tuning set** (§3), so the CoT prompt isn't tuned on the studies that then choose between settings. Both are excluded from the CheXpert Plus classifiers and every retrieval corpus.
+  - **Encoder caveat:** all 400 pilot patients are in public RAD-DINO's pretraining set, which contains all of CheXpert (both train and valid) as unlabelled images for self-supervised training. This is the same exposure the corpus images have, and the pilot only chooses generation settings and is never reported as a result. To state in the paper.
+- **Encoder: public RAD-DINO, not retrained.** Its published `training_images.csv` (882,775 images) was checked against our evaluation sets:
+  - **MIMIC-CXR:** no validation or test images.
+  - **PadChest-GR:** no validation or test images.
+  - **ReXGradient:** not in its training data at all.
+  - It does include MIMIC-CXR train, PadChest and CheXpert images, so the classifier and corpus images were seen without labels during pretraining (§5.1).
 - **Classifiers:** fit on train, thresholds set on validation. Wherever predicted labels are used as training inputs, they are K-fold out-of-fold predictions.
 - **Retrieval:** never returns the target study or another study from the same patient.
 - **Audit in the paper:**
-  - the public RAD-DINO `training_images.csv` checked against our test sets
-  - the stated pretraining data of the baseline models
+  - the RAD-DINO `training_images.csv` check above
+  - the stated pretraining data of the other encoders (I) and the baseline models
 
 ---
 
@@ -117,7 +122,7 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 | **F. Model age** | Does the gain from labels survive model progress at a fixed size? | Three lines, text only (release year in brackets):<br>• Mistral-7B v0.1 (2023) → v0.3 (2024) → Ministral 3 8B Reasoning (2025)<br>• Gemma 2 27B (2024) → Gemma 3 27B (2025) → Gemma 4 31B (2026)<br>• Qwen2.5-32B (2024) → Qwen3-32B (2025) → Qwen3.5-27B (2026) → Qwen3.6-27B (2026) → Qwen3.8-27B (2026). Qwen2 is left out because it has no model near 30B. Three of the Qwen releases come from 2026, so plot against release date, not release index.<br> **Each model reasons the way its era allowed:** the engineered CoT prompt for models without native thinking, native thinking for Ministral 3 8B Reasoning, Gemma 4 31B and Qwen3 onwards. The reasoning method counts as part of what a model generation is: older models can't think natively, and nobody runs CoT prompts on models that can. So it is not a second factor under the §3 rule. The Gemma 3 cells are shared with E; the Qwen3.5-27B cells are shared with B. |
 | **G. Generality** | Does LaB-RAG help across many models? | Retrieval only vs LaB-RAG on every generator, including Muse Glimmer 30B and Mistral Small 4. Presented as one table or figure. |
 | **H. Retrieval depth** | Does the gain from labels depend on how many reports are retrieved? | One main model at its default thinking setting. **Number of retrieved reports k ∈ {1, 3, 5 (default), 10, 20} × {retrieval only, LaB-RAG}**. Both conditions are swept, so the label gain can be read at each k (§3 rule). k = 20 is new: modern long-context models can use more retrieved reports than Mistral-7B could. The filter and format ablations are dropped (§3). |
-| **I. Encoders** | Does the encoder choice matter? | Our leakage-controlled RAD-DINO (default) vs public RAD-DINO, MedSigLIP and DINOv3. All of them get classifier metrics; one main model also runs retrieval only vs LaB-RAG with each. The preprint's BioViL-T and GLoRIA are dropped: they were strongly dataset-specific in the preprint. (Google's CXR Foundation was considered and rejected: its model card calls it legacy and recommends MedSigLIP, and it runs only in TensorFlow.) **Leakage caveat:** MedSigLIP trains on MIMIC-CXR with no stated test exclusion, so ReXGradient is the clean read. |
+| **I. Encoders** | Does the encoder choice matter? | Public RAD-DINO (default) vs MedSigLIP and DINOv3. All of them get classifier metrics; one main model also runs retrieval only vs LaB-RAG with each. The preprint's BioViL-T and GLoRIA are dropped: they were strongly dataset-specific in the preprint. (Google's CXR Foundation was considered and rejected: its model card calls it legacy and recommends MedSigLIP, and it runs only in TensorFlow.) **Leakage caveat:** MedSigLIP trains on MIMIC-CXR with no stated test exclusion, so ReXGradient is the clean read. |
 | **J. Transfer** | Do the classifiers and corpus transfer to other datasets? | One main model × {retrieval only, LaB-RAG}. **Source: CheXpert Plus only** (classifiers trained on CheXpert Plus train, thresholds on its valid split; corpus = its ≈46k train Findings studies minus the pilot patients). **Targets:** MIMIC, ReXGradient and PadChest-GR (CheXbert-14 labels). Two settings: (1) **source only**: source classifiers and source corpus; (2) **corpus swap**: source classifiers with the target's train corpus. For MIMIC and ReXGradient, B's in-domain result on the same test set is the reference. Retrieval only in the corpus-swap setting doesn't use the classifiers, so it is shared with B and §5. Caveat to report: the source corpus is ≈3× smaller than MIMIC's or ReXGradient's. |
 
 ### 4.3 Supporting analyses
@@ -136,7 +141,7 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
   - The reference report is the study's English sentences (positive and negative).
   - The retrieval corpus is PadChest-GR train, with its **gold** labels. This mirrors how CheXbert labels extracted from reports serve the default pipeline.
   - Target labels are predicted by classifiers trained on PadChest (excluding the PadChest-GR validation and test patients). Their thresholds are set on **PadChest-GR validation** (gold labels). Oracle runs use the target's gold labels.
-  - **Why this exclusion is enough:** PadChest-GR is a subset of PadChest, so without it the encoder and the rich-label classifiers would train on the PadChest-GR test images. PadChest itself is never an RRG test set, so nothing else needs holding out. PadChest-GR train patients stay in, because they are the retrieval corpus. The same exclusion protects J's transfer to PadChest-GR and the PadChest-GR rows in §4.3.
+  - **Why this exclusion is enough:** PadChest-GR is a subset of PadChest, so without it the rich-label classifiers would train on the PadChest-GR test images. (The encoder is already clean: public RAD-DINO has no PadChest-GR validation or test images, §2.) PadChest itself is never an RRG test set, so nothing else needs holding out. PadChest-GR train patients stay in, because they are the retrieval corpus. The same exclusion protects J's transfer to PadChest-GR and the PadChest-GR rows in §4.3.
 - **Label levels:**
 
 | Level | Vocabulary |
@@ -156,7 +161,7 @@ This is promoted from a secondary check to a finding in its own right. Can a cla
   - The classifiers are trained on PadChest, with thresholds set on PadChest-GR validation.
   - The corpus labels are predicted by the same classifiers from the corpus images, so no report labeler is needed either.
   - The only target-domain input is the corpus reports themselves, which every retrieval condition uses anyway.
-  - Caveat to state: the encoder's self-supervised pretraining includes the unlabelled MIMIC-CXR and ReXGradient train images (as with public RAD-DINO). The classifier heads and labels never see the target data.
+  - Caveat to state: public RAD-DINO's self-supervised pretraining includes the unlabelled MIMIC-CXR train images (but no ReXGradient images, so ReXGradient is the clean read). The classifier heads and labels never see the target data.
 - **Design:** MIMIC-CXR and ReXGradient Findings test, both main models, predicted labels only (these datasets have no gold labels in the PadChest vocabulary):
   - retrieval only *(shared with B)*
   - LaB-RAG with in-domain CheXbert-14 labels *(shared with B)*. This is the in-domain reference.
@@ -271,25 +276,25 @@ Assumptions:
 | F. Model age (18 new cells; Gemma 3 shared with E, Qwen3.5-27B with B) | 222k |
 | G. Generality: the 2 extra models only; the rest reuse runs above | 49k |
 | H. Retrieval depth (8 k cells) | 99k |
-| I. Encoders (3 alternatives × 2 conditions) | 74k |
+| I. Encoders (2 alternatives × 2 conditions) | 49k |
 | J. Transfer (CheXpert Plus source → 3 targets; corpus-swap retrieval only shared with B and §5) | 40k |
 | §5 Richer labels: headline 20k + §5.1 cross-dataset 99k + the two 4B cost-comparison cells 25k | ≈144k |
-| **Total, excluding fine-tuning (§6)** | **≈2.4M** |
+| **Total, excluding fine-tuning (§6)** | **≈2.3M** |
 
 ### Thinking length is the main unknown
 Steven's preliminary runs show that Qwen's highest thinking modes are slow. The v5 estimate assumed 2.5k output tokens per generation, which is probably too low for the top budget.
 
-- **Pilot (after our RAD-DINO is trained, before C), on CheXpert Plus only (§2):**
+- **Pilot (before C), on CheXpert Plus only (§2):**
   - **Why CheXpert Plus:** every generation setting is chosen on a dataset we never evaluate on, so the MIMIC and ReXGradient results are not tuned to them. To state in the paper.
   - The 200-study CheXpert Plus pilot set, per Qwen3.5 size × candidate budget, plus gpt-oss at each effort level. Labels come from the CheXpert Plus classifiers (J), and the corpus is CheXpert Plus train minus the pilot patients.
-  - The pilot uses our leakage-controlled RAD-DINO, like every other experiment, so the pilot patients are never seen by the encoder.
+  - The pilot uses public RAD-DINO, like every other experiment (see the encoder caveat in §2).
   - Measure thinking tokens (mean and p95), truncation rate, H200 throughput, and pilot quality.
   - The same pilot studies are used for **Ministral 3 8B Reasoning vs Instruct + CoT** (§4.1), the **§5.1 PadChest level**, and the 0.8B/2B loop check (C).
   - **MedGemma reasoning setting:** native thinking on vs thinking off vs our CoT prompt, for both 27B checkpoints, on the same pilot studies. Measure pilot quality, thinking length and truncation at Google's caps, then pick per checkpoint (§3).
   - **Still tuned on target validation** (part of training on that data, not a generation setting): classifier thresholds, and §6's LoRA learning rate, checkpoint and training-set size.
 - **Budgets are hard token caps** (e.g. ≈1k / 4k / 16k, set from the pilot), not the model's open-ended top mode. The top cap is where pilot quality levels off or where cost becomes prohibitive, whichever comes first.
 - **The default thinking setting for B** (and D–J) is a middle budget, not the top one.
-- **Rough sensitivity:** if the top-budget cells average ≈10k tokens, those ≈220k generations take ≈2.2B tokens, ≈1.7B more than the 2.5k-token assumption. The total would then be ≈7.7B output tokens, or ≈450–850 H200-hours (tokens from the 0.8B–9B models are far cheaper than the rest). Re-estimate after the pilot.
+- **Rough sensitivity:** if the top-budget cells average ≈10k tokens, those ≈220k generations take ≈2.2B tokens, ≈1.7B more than the 2.5k-token assumption. The total would then be ≈7.5B output tokens, or ≈450–850 H200-hours (tokens from the 0.8B–9B models are far cheaper than the rest). Re-estimate after the pilot.
 - **Cuts, in order, if the pilot says it's too slow:**
   1. No top budget at 397B.
   2. 3 thinking budgets → 2 (≈−173k: 7 Qwen3.5 sizes × 2 conditions).
@@ -299,6 +304,5 @@ Steven's preliminary runs show that Qwen's highest thinking modes are slow. The 
 - **Not counted:**
   - the LLM judges: ≈1.9M generations each, but short and on small models
   - the other evaluation metrics
-  - leakage-controlled RAD-DINO pretraining
   - §6: the teacher rationales, the LoRA runs, and the test generations of the fine-tuned arms and their new frozen-4B reference rows (the image cells and the oracle/random label-reliance cells)
   - the template floor (no GPU)

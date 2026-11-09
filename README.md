@@ -1,19 +1,23 @@
 # Label Boosted RAG for RRG
-LaB-RAG (**La**bel **B**oosted **R**etrieval **A**ugmented **G**eneration): a generalizable framework for captioning using categorical labels as image descriptors. This repo contains code to reproduce our experiments on LaB-RAG in the context of radiology report generation (RRG).
 
-![detailed overview figure](figs/overview/inference.png)
+LaB-RAG (**La**bel **B**oosted **R**etrieval **A**ugmented **G**eneration): small models
+predict structured labels from the image, and the labels boost frozen, text-only LLMs
+for radiology report generation (RRG).
 
-### Environment setup
-Using your favorite `conda` distribution (we prefer [miniforge](https://github.com/conda-forge/miniforge)), create and activate the environment:
-```
-conda env create -f env.yml
-conda activate labrag
-```
+This branch is a rewrite for the journal revision; see
+[docs/revision-plan.md](docs/revision-plan.md). The code for the original preprint is
+on `main` (tag `paper-v1`).
 
-## Table of Contents
-1. [Data Ingest](https://github.com/StevenSong/cxr-data-ingest): Data download and extraction
-1. [Experiments](docs/experiments.md): Replicate experiment results
-1. [Baselines](docs/baselines.md): Replicate baseline results
+## Layout
+- `src/labrag/`: the pipeline package (`labrag` CLI)
+- `splits/`: frozen, committed split files with provenance ([splits/README.md](splits/README.md))
+- `tests/`: checks, including exact reproduction of the frozen splits
+- `docs/`: design docs
+
+## Data
+Only source files released by the dataset authors are read (root: `LABRAG_CXR_ROOT`,
+default `/opt/gpudata/cxr`). Everything derived from them is produced by this repo.
+Outputs go to `LABRAG_OUT_ROOT` (default `/home/songs1/labrag-outputs`).
 
 ## Citation
 ```

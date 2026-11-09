@@ -22,3 +22,11 @@ repos:
     rev: 0.7.1
     hooks:
       - id: nbstripout
+  - repo: local
+    hooks:
+      - id: codeowners-coverage
+        name: CODEOWNERS covers every tracked file
+        entry: python3 .github/hooks/codeowners-coverage.py
+        language: system
+        pass_filenames: false
+        always_run: true

@@ -10,7 +10,8 @@
   "mounts": [
     "source=claude-code-config-${localEnv:USER}-${localWorkspaceFolderBasename},target=/home/vscode/.claude,type=volume",
     "source=${localEnv:HOME}/miniforge3/envs,target=${localEnv:HOME}/miniforge3/envs,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/labrag-outputs,target=${localEnv:HOME}/labrag-outputs,type=bind,consistency=cached,readonly",
+    "source=${localEnv:HOME}/labrag-outputs,target=${localEnv:HOME}/labrag-outputs,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/labrag-outputs-v1,target=${localEnv:HOME}/labrag-outputs-v1,type=bind,consistency=cached,readonly",
     "source=/opt/gpudata/cxr,target=/opt/gpudata/cxr,type=bind,consistency=cached,readonly"
   ],
   "containerEnv": {

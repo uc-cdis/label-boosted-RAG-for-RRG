@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "labrag"
+version = "0.2.0.dev0"
+description = "LaB-RAG: label-boosted retrieval augmented generation for radiology report generation"
+requires-python = ">=3.10"
+dependencies = ["numpy", "pandas"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pre-commit"]
+
+[project.scripts]
+labrag = "labrag.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.isort]
+profile = "black"

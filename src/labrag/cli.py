@@ -1,0 +1,48 @@
+"""Command-line entry point: ``labrag <command> ...``."""
+
+import argparse
+import sys
+from pathlib import Path
+
+from labrag import paths
+from labrag.data import chexpertplus
+
+PILOT_SPLIT_FILE = "chexpertplus_pilot_split.csv"
+
+
+def splits_pilot(args: argparse.Namespace) -> None:
+    """Redraw the CheXpert Plus pilot split and check it against the committed file.
+
+    The committed file is frozen: it is never overwritten unless --overwrite is given.
+    """
+    out = args.out
+    drawn = chexpertplus.draw_pilot_split(chexpertplus.load_images(args.cxr_root))
+    text = drawn.to_csv(index=False)
+    if out.exists() and not args.overwrite:
+        if out.read_text() == text:
+            print(f"OK: redraw matches {out}")
+            return
+        sys.exit(f"MISMATCH: redraw differs from {out} (file left untouched)")
+    out.write_text(text)
+    print(f"Wrote {out} ({len(drawn)} patients)")
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(prog="labrag")
+    sub = ap.add_subparsers(dest="command", required=True)
+
+    splits = sub.add_parser("splits", help="frozen split files").add_subparsers(
+        dest="split", required=True
+    )
+    p = splits.add_parser("pilot", help=splits_pilot.__doc__.splitlines()[0])
+    p.add_argument("--cxr-root", type=Path, default=paths.CXR_ROOT)
+    p.add_argument("--out", type=Path, default=paths.SPLITS_DIR / PILOT_SPLIT_FILE)
+    p.add_argument("--overwrite", action="store_true", help="replace the frozen file")
+    p.set_defaults(func=splits_pilot)
+
+    args = ap.parse_args(argv)
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

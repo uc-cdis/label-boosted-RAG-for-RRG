@@ -1,6 +1,6 @@
 # LaB-RAG Journal Revision Plan (v8)
 
-Status: **DRAFT v8, 2026-11-09. Design only; nothing implemented yet.**
+Status: **DRAFT v9, 2026-11-09. Design only; nothing implemented yet.**
 
 - **Target:** MDPI *Machine Learning and Knowledge Extraction* (MAKE), special issue "Multimodal Data Fusion for Complementary Feature Learning and Knowledge Discovery". Submit by April 2027.
 - **Title:** unchanged, so Google Scholar keeps merging it with the arXiv preprint.
@@ -57,7 +57,7 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 | Template | – | – | ✓ | labels with **no LLM**: each label is rendered into a fixed sentence ("Cardiomegaly." / "No pleural effusion."). This is the small model alone, the floor the LLM has to beat (cf. Pragmatic RRG, Nguyen et al. 2023) |
 
 - **Text-only runs (the default)** use retrieval only, LaB-RAG and the template floor. **Filter only** and **labels only** separate the two roles labels play (choosing the retrieved reports, and appearing in the prompt), so they run **in B only**. Every later experiment asks "does LaB-RAG still beat retrieval only as X grows?" "No context" is omitted because a text-only LLM with no context gets no study-specific input.
-- **One LaB-RAG configuration everywhere (except A):**
+- **One LaB-RAG configuration everywhere:**
   - **Retrieval:** Jaccard-ranked label retrieval. Corpus studies are ranked by positive-label Jaccard overlap with the target's labels, with ties broken by image similarity. "No Finding" counts as a label, so a normal study has a non-empty label set.
   - **Prompt:** based on the preprint's simple label format, needs tuning in the pilot study.
   - The preprint's filter ablation (no filter / exact / partial) and format ablation (naive / simple / verbose / instruct) are **dropped**.
@@ -106,11 +106,10 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 
 **Datasets per experiment:**
 - **Main models (B):** all three sections, on MIMIC-CXR and ReXGradient.
-- **All other experiments, including fine-tuning (§6):** Findings only, on the MIMIC-CXR and ReXGradient test sets, unless stated otherwise. The one exception is A, which keeps Findings and Impression because it is checked against the preprint's tables.
+- **All other experiments, including fine-tuning (§6):** Findings only, on the MIMIC-CXR and ReXGradient test sets, unless stated otherwise.
 
 | # | Question | Design |
 |---|---|---|
-| **A. Reproduction** | Does the new stack reproduce the preprint? | Mistral-7B v0.3 with greedy decoding; the preprint's Standard RAG / filter only / format only / LaB-RAG configurations; MIMIC × Findings and Impression. Reuses the surviving BioViL-T and GLoRIA embeddings and classifiers, and compares against the paper's tables (the old generations are gone). |
 | **B. Core** | Do labels boost current reasoning LLMs? | Both main models, **text only**, × {retrieval only, filter only, labels only, LaB-RAG} × {predicted, oracle, random} labels, plus the template floor. MIMIC and ReXGradient × all three sections. |
 | **C. Scale × thinking** | How does the gain from labels change with model size and thinking? | Fully crossed. **Qwen3.5:** {0.8B, 2B, 4B, 9B, 27B, 122B, 397B} × {thinking off, plus 3 thinking budgets with the same token caps at every size} × {retrieval only, LaB-RAG}. **gpt-oss:** {20b, 120b} × {low, medium, high} × the same two conditions. Budgets come from the pilot (Appendix). All Qwen3.5 sizes have the same thinking switch. The model cards and the guides disagree on whether the small models think by default, so `enable_thinking` is always set explicitly. The pilot checks that 0.8B and 2B don't loop or truncate under the larger caps. |
 | **D. Image access** | Do labels still help when the model sees the image? | {Qwen3.5-27B, MedGemma 27B} × {text only, with image} × {retrieval only, LaB-RAG}, plus **no context** in the image runs. Each model is compared with itself in the two input modes. MedGemma is the hardest case: a medical VLM that sees the image. The Qwen text-only cells reuse B. |
@@ -118,7 +117,7 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 | **F. Model age** | Does the gain from labels survive model progress at a fixed size? | Three lines, text only (release year in brackets):<br>• Mistral-7B v0.1 (2023) → v0.3 (2024) → Ministral 3 8B Reasoning (2025)<br>• Gemma 2 27B (2024) → Gemma 3 27B (2025) → Gemma 4 31B (2026)<br>• Qwen2.5-32B (2024) → Qwen3-32B (2025) → Qwen3.5-27B (2026) → Qwen3.6-27B (2026) → Qwen3.8-27B (2026). Qwen2 is left out because it has no model near 30B. Three of the Qwen releases come from 2026, so plot against release date, not release index.<br> **Each model reasons the way its era allowed:** the engineered CoT prompt for models without native thinking, native thinking for Ministral 3 8B Reasoning, Gemma 4 31B and Qwen3 onwards. The reasoning method counts as part of what a model generation is: older models can't think natively, and nobody runs CoT prompts on models that can. So it is not a second factor under the §3 rule. The Gemma 3 cells are shared with E; the Qwen3.5-27B cells are shared with B. |
 | **G. Generality** | Does LaB-RAG help across many models? | Retrieval only vs LaB-RAG on every generator, including Muse Glimmer 30B and Mistral Small 4. Presented as one table or figure. |
 | **H. Retrieval depth** | Does the gain from labels depend on how many reports are retrieved? | One main model at its default thinking setting. **Number of retrieved reports k ∈ {1, 3, 5 (default), 10, 20} × {retrieval only, LaB-RAG}**. Both conditions are swept, so the label gain can be read at each k (§3 rule). k = 20 is new: modern long-context models can use more retrieved reports than Mistral-7B could. The filter and format ablations are dropped (§3). |
-| **I. Encoders** | Does the encoder choice matter? | Our leakage-controlled RAD-DINO (default) vs public RAD-DINO, MedSigLIP, DINOv3, and BioViL-T / GLoRIA. All of them get classifier metrics; one main model also runs retrieval only vs LaB-RAG with each. |
+| **I. Encoders** | Does the encoder choice matter? | Our leakage-controlled RAD-DINO (default) vs public RAD-DINO, MedSigLIP and DINOv3. All of them get classifier metrics; one main model also runs retrieval only vs LaB-RAG with each. The preprint's BioViL-T and GLoRIA are dropped: they were strongly dataset-specific in the preprint. (Google's CXR Foundation was considered and rejected: its model card calls it legacy and recommends MedSigLIP, and it runs only in TensorFlow.) **Leakage caveat:** MedSigLIP trains on MIMIC-CXR with no stated test exclusion, so ReXGradient is the clean read. |
 | **J. Transfer** | Do the classifiers and corpus transfer to other datasets? | One main model × {retrieval only, LaB-RAG}. **Source: CheXpert Plus only** (classifiers trained on CheXpert Plus train, thresholds on its valid split; corpus = its ≈46k train Findings studies minus the pilot patients). **Targets:** MIMIC, ReXGradient and PadChest-GR (CheXbert-14 labels). Two settings: (1) **source only**: source classifiers and source corpus; (2) **corpus swap**: source classifiers with the target's train corpus. For MIMIC and ReXGradient, B's in-domain result on the same test set is the reference. Retrieval only in the corpus-swap setting doesn't use the classifiers, so it is shared with B and §5. Caveat to report: the source corpus is ≈3× smaller than MIMIC's or ReXGradient's. |
 
 ### 4.3 Supporting analyses
@@ -265,7 +264,6 @@ Assumptions:
 
 | Experiment | ≈ Generations |
 |---|---|
-| A. Reproduction (MIMIC only) | 18k |
 | B. Core: 2 models × 10 condition/label cells × 36k studies (3 sections) | 724k |
 | C. Scale × thinking (68 cells, minus 4 shared with B; the 0.8B–9B cells are cheap) | 790k |
 | D. Image access (8 new cells) | 99k |
@@ -273,7 +271,7 @@ Assumptions:
 | F. Model age (18 new cells; Gemma 3 shared with E, Qwen3.5-27B with B) | 222k |
 | G. Generality: the 2 extra models only; the rest reuse runs above | 49k |
 | H. Retrieval depth (8 k cells) | 99k |
-| I. Encoders (5 alternatives × 2 conditions) | 123k |
+| I. Encoders (3 alternatives × 2 conditions) | 74k |
 | J. Transfer (CheXpert Plus source → 3 targets; corpus-swap retrieval only shared with B and §5) | 40k |
 | §5 Richer labels: headline 20k + §5.1 cross-dataset 99k + the two 4B cost-comparison cells 25k | ≈144k |
 | **Total, excluding fine-tuning (§6)** | **≈2.4M** |

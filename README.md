@@ -10,6 +10,9 @@ on `main` (tag `paper-v1`).
 
 ## Layout
 - `src/labrag/`: the pipeline package (`labrag` CLI)
+- `envs/`: env build script and lock file. `envs/build.sh labrag` builds the pipeline env;
+  add `--from-lock` to reproduce it exactly. vLLM and the metrics run as containers.
+- `external/`: upstream code as git submodules (`mimic-cxr`: MIT-LCP's report section parser)
 - `splits/`: frozen, committed split files with provenance ([splits/README.md](splits/README.md))
 - `tests/`: checks, including exact reproduction of the frozen splits
 - `docs/`: design docs

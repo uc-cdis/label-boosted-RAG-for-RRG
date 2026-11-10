@@ -1,0 +1,3 @@
+[submodule "external/mimic-cxr"]
+	path = external/mimic-cxr
+	url = https://github.com/MIT-LCP/mimic-cxr.git

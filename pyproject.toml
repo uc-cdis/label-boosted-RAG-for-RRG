@@ -6,11 +6,28 @@ build-backend = "setuptools.build_meta"
 name = "labrag"
 version = "0.2.0.dev0"
 description = "LaB-RAG: label-boosted retrieval augmented generation for radiology report generation"
-requires-python = ">=3.10"
-dependencies = ["numpy", "pandas"]
+requires-python = ">=3.12"
+dependencies = ["numpy", "pandas", "pyarrow", "pyyaml", "tqdm"]
 
+# One env (envs/build.sh labrag) = [pipeline,dev]; exact versions in envs/labrag.lock.txt,
+# the bounds here are loose. vLLM and the evaluation metrics are not installed here: they
+# run as containers (one image per upstream metric implementation).
 [project.optional-dependencies]
-dev = ["pytest", "pre-commit"]
+pipeline = [
+    "torch>=2.10",
+    "torchvision",
+    "transformers>=5.0",
+    "accelerate",
+    "safetensors",
+    "huggingface_hub>=1.0",
+    "pillow",
+    "scikit-learn>=1.8",
+    "scipy",
+    "h5py",  # reads the v1 outputs (embeddings .h5) for comparison
+    "openai>=2.26",  # async client for `vllm serve`
+    "httpx",
+]
+dev = ["pytest", "pre-commit", "ipykernel", "matplotlib"]
 
 [project.scripts]
 labrag = "labrag.cli:main"

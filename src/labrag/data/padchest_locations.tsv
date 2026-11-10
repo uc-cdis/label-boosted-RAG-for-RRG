@@ -1,0 +1,129 @@
+# PadChest anatomical location hierarchy, transcribed by hand from Bustos et al., "PadChest:
+# A large chest x-ray image dataset with multi-label annotated reports", arXiv:1901.07441v2,
+# Appendix A.1.3 (pp. 30-32). One row per line of the printed tree, in printed order.
+# The tree is a DAG printed as a tree: some locations appear under two parents (e.g. under
+# `lobar` and under `lung field`), so names repeat. studies / studies_with_children are
+# the paper's "study counts" / "study counts with child labels"; cui is blank where the
+# paper gives none. Not in the paper but in the label CSV: `lumbar vertebrae`.
+id	parent_id	depth	name	cui	studies	studies_with_children	page
+0		0	localization				30
+1	0	1	extracorporal	C0424529	0	0	30
+2	0	1	cervical	C0920882	992	992	30
+3	0	1	soft tissue	C0225317	413	3567	30
+4	3	2	subcutaneous	C0443315	330	330	30
+5	3	2	axilar	C0004454	863	863	30
+6	3	2	pectoral	C0230111	1081	1961	30
+7	6	3	nipple	C0028109	880	880	30
+8	0	1	bone	C0262950	1472	12862	30
+9	8	2	shoulder	C0037004	287	2149	30
+10	9	3	acromioclavicular joint	C0001208	69	69	30
+11	9	3	rotator cuff	C0085515	67	67	30
+12	9	3	supraspisnous	C0225001	43	43	30
+13	9	3	humerus	C0020164	1051	1683	30
+14	13	4	humeral head	C0223683	430	430	30
+15	13	4	humeral neck	C0448034	88	88	30
+16	13	4	glenohumeral joint	C0225063	114	114	30
+17	8	2	clavicle	C0008913	388	388	30
+18	8	2	scapula	C0036277	171	171	30
+19	8	2	costoesternal	C0450216	36	36	30
+20	8	2	column	C0037949	1431	3783	30
+21	20	3	intersomatic space	C0223088	52	52	30
+22	20	3	dorsal vertebrae	C0039987	1979	1979	30
+23	20	3	cervical vertebrae	C3665420	100	100	30
+24	20	3	paravertebral	C0442150	221	221	30
+25	8	2	rib	C0035561	3756	4863	30
+26	25	3	anterior rib	C4323264	320	320	30
+27	25	3	posterior rib	C4323265	750	750	30
+28	25	3	rib cartilage	C0222787	37	37	30
+29	0	1	hemithorax	C0934569	5119	5119	30
+30	0	1	extrapleural	C0442091	73	73	30
+31	0	1	extrapulmonary		46	46	30
+32	0	1	pleural	C0032225	13935	13935	30
+33	0	1	subpleural	C0225775	115	115	30
+34	0	1	fissure	C0458078	734	1318	30
+35	34	2	minor fissure	C0734040	486	486	30
+36	34	2	major fissure	C4253583	98	98	30
+37	0	1	lobar	C0225752	2413	14864	30
+38	37	2	upper lobe	C0225756	1222	6720	30
+39	38	3	left upper lobe	C1261076	1574	2477	30
+40	39	4	lingula	C0225740	903	903	30
+41	38	3	right upper lobe	C1261074	3021	3021	30
+42	37	2	lower lobe	C0225758	792	4144	30
+43	42	3	left lower lobe	C1261077	1994	1994	30
+44	42	3	right lower lobe	C1261075	1358	1358	30
+45	37	2	middle lobe	C4281590	1587	1587	30
+46	0	1	subsegmental	C0929165	1850	1850	30
+47	0	1	bronchi	C0006255	3315	3315	30
+48	0	1	peribronchi	C0225607	114	114	30
+49	0	1	lung field	C0225759	819	78888	30
+50	49	2	pleural	C0032225	13935	13935	30
+51	49	2	subpleural	C0225775	115	115	31
+52	49	2	major fissure	C4253583	98	98	31
+53	49	2	subsegmental	C0929165	1850	1850	31
+54	49	2	bronchi	C0006255	3315	3315	31
+55	49	2	peribronchi	C0225607	114	114	31
+56	49	2	upper lung field	C0929227	494	10442	31
+57	56	3	upper lobe	C0225756	1222	9948	31
+58	57	4	left upper lobe	C1261076	1574	1574	31
+59	57	4	right upper lobe	C1261074	3021	3021	31
+60	57	4	apical	C0734296	3884	3884	31
+61	57	4	suprahilar	C0934260	247	247	31
+62	49	2	middle lung field	C0929434	1591	13539	31
+63	62	3	aortopulmonary window	C1282038	113	113	31
+64	62	3	hilar	C0205150	6678	11349	31
+65	64	4	pulmonary artery	C0034052	215	215	31
+66	64	4	hilar bilateral		690	690	31
+67	64	4	perihilar	C0225702	3766	3766	31
+68	62	3	minor fissure	C0734040	486	486	31
+69	49	2	lower lung field		1352	34661	31
+70	69	3	basal	C1282378	9632	9632	31
+71	69	3	lower lobe	C0225758	792	4144	31
+72	71	4	left lower lobe	C1261077	1994	1994	31
+73	71	4	right lower lobe	C1261075	1358	1358	31
+74	69	3	middle lobe	C4281590	1587	1587	31
+75	69	3	infrahilar		675	675	31
+76	69	3	lingula	C0225740	903	903	31
+77	69	3	supradiaphragm		19	19	31
+78	69	3	diaphragm	C0011980	3798	3798	31
+79	69	3	infradiaphragm		2934	2934	31
+80	69	3	cardiophrenic angle		287	287	31
+81	69	3	costophrenic angle	C0230151	5805	9330	31
+82	81	4	right costophrenic angle	C0504099	1445	1445	31
+83	81	4	left costophrenic angle	C0504100	2019	2019	31
+84	81	4	bilateral costophrenic angle		61	61	31
+85	0	1	central	C0205099	5488	5488	31
+86	0	1	mediastinum	C0025066	2686	39134	31
+87	86	2	superior mediastinum	C0230147	645	8449	31
+88	87	3	carotid artery	C0007272	4	4	31
+89	87	3	brachiocephalic veins	C0006095	203	203	31
+90	87	3	supra aortic		1123	1123	31
+91	87	3	aortic button	C0003489	348	348	31
+92	87	3	superior cave vein	C3165182	3663	3663	31
+93	87	3	subclavian vein	C0038532	2463	2463	31
+94	86	2	lower mediastinum	C1261193	200	18497	31
+95	94	3	anterior mediastinum	C0230148	64	162	31
+96	95	4	thymus	C0040113	98	98	31
+97	94	3	middle mediastinum	C0230149	32	15740	31
+98	97	4	cardiac	C1522601	15663	15708	31
+99	98	5	coronary	C1522318	45	45	31
+100	94	3	posterior mediastinum	C0230150	16	2395	31
+101	100	4	retrocardiac		2379	2379	31
+102	86	2	aortic	C0003483	9502	9502	31
+103	0	1	paratracheal	C0442143	480	480	31
+104	0	1	airways	C0458827	18	8685	31
+105	104	2	tracheal	C0040578	5352	5352	31
+106	104	2	bronchi	C0006255	3315	3315	31
+107	0	1	esophageal	C1522619	239	239	31
+108	0	1	paramediastinum		70	70	31
+109	0	1	paracardiac		188	188	31
+110	0	1	epigastric		42	42	32
+111	0	1	gastric chamber	C3714551	887	887	32
+112	0	1	hypochondrium	C0230186	193	455	32
+113	112	2	right hypochondrium	C0738590	122	196	32
+114	113	3	gallbladder	C0016976	74	74	32
+115	112	2	left hypochondrium	C0738591	66	66	32
+116	0	1	right	C0444532	23628	23628	32
+117	0	1	left	C0443246	17133	17133	32
+118	0	1	bilateral	C0238767	11034	15982	32
+119	118	2	diffuse bilateral		1636	1636	32
+120	118	2	basal bilateral		3312	3312	32

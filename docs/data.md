@@ -4,12 +4,14 @@ The pipeline reads **only files released by the dataset authors**, under `/opt/g
 Everything derived from them (sections, labels, splits) is computed in this repo. Older local
 derivations live in `<dataset>/derived/` and are never read. Audit of kg35-nvl01: 2026-11-10;
 the other nodes are checked against it with [tools/data-audit/](../tools/data-audit/README.md).
+The PhysioNet `SHA256SUMS.txt` files were deleted after the audit. The hashes of the verified
+files remain in the kg35-nvl01 reference manifests.
 
 ## Inputs and verification
 
 | Dataset | Files the pipeline reads | Verified against |
 |---|---|---|
-| MIMIC-CXR-JPG 2.1.0 | `files/` (377,110 JPGs), `mimic-cxr-2.0.0-{split,metadata,chexpert,negbio}.csv.gz`, `mimic-cxr-2.1.0-test-set-labeled.csv` | PhysioNet `SHA256SUMS.txt`: every listed file is present and matches. The local uncompressed `mimic-cxr-2.0.0-*.csv` equal the decompressed `.gz`; adapters read the `.gz` |
+| MIMIC-CXR-JPG 2.1.0 | `files/` (377,110 JPGs), `mimic-cxr-2.0.0-{split,metadata,chexpert,negbio}.csv.gz`, `mimic-cxr-2.1.0-test-set-labeled.csv` | PhysioNet `SHA256SUMS.txt`: every listed file is present and matches |
 | MIMIC-CXR 2.1.0 (reports) | `notes/` (227,835 reports, the unzipped `mimic-cxr-reports.zip`) | PhysioNet `SHA256SUMS.txt` of the DICOM release, which hashes each report: all match |
 | MIMIC-CXR sections | computed from `notes/` with MIT-LCP's `section_parser.py` and custom rules ([external/mimic-cxr](../external/mimic-cxr)) | no author file exists |
 | CheXpert Plus | `df_chexpert_plus_240401.csv`, `PNG/` (223,461 PNGs) | no author checksums. The PNG set equals the csv's image list. The extracted `*_fixed.json` and `section_*.json` equal the members of the author zips |
@@ -37,7 +39,8 @@ the other nodes are checked against it with [tools/data-audit/](../tools/data-au
 - `derived/` (top level, from 2025-12): old section and label csvs for CheXpert Plus, MIMIC and
   OpenI. Split by name prefix into each dataset's `derived/`.
 - MIMIC-CXR: `mimic_cxr_sectioned.csv`, `mimic_cxr_selected_section.csv` (old modified
-  section script), `chexbert_labels.csv`.
+  section script), `chexbert_labels.csv`, and `mimic-cxr-2.0.0-{chexpert,metadata,negbio,split}.csv`
+  (uncompressed copies, identical to the author `.gz`).
 - CheXpert Plus: `split.csv` (an old carve-out: "validate" is part of official train, "test"
   is official valid), `metadata.csv`, `report.csv`.
 - ReXGradient: `metadata/*_chexbert_labels.csv`, `by-site/`.

@@ -22,6 +22,9 @@ add openi/derived         derived/openi-*
 # Mixed into the dataset dirs.
 add mimic-cxr/derived     mimic-cxr/mimic_cxr_sectioned.csv mimic-cxr/mimic_cxr_selected_section.csv \
                           mimic-cxr/chexbert_labels.csv
+# Uncompressed copies of the author .csv.gz files (identical content; adapters read the .gz).
+add mimic-cxr/derived     mimic-cxr/mimic-cxr-2.0.0-chexpert.csv mimic-cxr/mimic-cxr-2.0.0-metadata.csv \
+                          mimic-cxr/mimic-cxr-2.0.0-negbio.csv mimic-cxr/mimic-cxr-2.0.0-split.csv
 add chexpertplus/derived  chexpertplus/split.csv chexpertplus/metadata.csv chexpertplus/report.csv
 add rexgradient/derived   rexgradient/metadata/train_chexbert_labels.csv \
                           rexgradient/metadata/valid_chexbert_labels.csv \

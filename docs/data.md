@@ -18,7 +18,7 @@ the other nodes are checked against it with [tools/data-audit/](../tools/data-au
 | PadChest-GR | `grounded_reports_20240819.json`, `master_table.csv`, `PadChest_GR/` (4,555), `PadChest_GR_progression_prior_studies/` (1,446) | no author checksums. The image sets equal the JSON, and every image is byte-identical to its PadChest copy |
 | BRAX | not used | author `SHA256SUMS.txt`: every file matches |
 | VinDr-CXR | not used | author `SHA256SUMS.txt`: every file matches |
-| OpenI (IU X-ray) | not used | NLM gives no checksums. `pngs/` and `reports/` equal the members of `NLMCXR_{png,reports}.tgz` (except a `Thumbs.db`) |
+| OpenI (IU X-ray) | not used | NLM gives no checksums. `pngs/` and `reports/` equal the members of `NLMCXR_{png,reports}.tgz` (except a `Thumbs.db`). `NLMCXR_dcm.tgz` passes `gzip -t` |
 
 ## Known issues (handled in the adapters)
 

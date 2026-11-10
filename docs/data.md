@@ -4,6 +4,7 @@ The pipeline reads **only files released by the dataset authors**, under `/opt/g
 Everything derived from them (sections, labels, splits) is computed in this repo. Older local
 derivations live in `<dataset>/derived/` and are never read. Audit of kg35-nvl01: 2026-11-10;
 the other nodes are checked against it with [tools/data-audit/](../tools/data-audit/README.md).
+kg35-nvl03 and kg35-nvl04 are byte-identical to it (2026-11-10). kg35-nvl02 has no copy of the data.
 The PhysioNet `SHA256SUMS.txt` files were deleted after the audit. The hashes of the verified
 files remain in the kg35-nvl01 reference manifests.
 

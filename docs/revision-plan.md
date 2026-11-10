@@ -1,6 +1,6 @@
-# LaB-RAG Journal Revision Plan (v11)
+# LaB-RAG Journal Revision Plan (v12)
 
-Status: **v11, 2026-11-09.** Beginning implementation.
+Status: **v12, 2026-11-10.** Data prep stage.
 
 - **Target:** MDPI *Machine Learning and Knowledge Extraction* (MAKE), special issue "Multimodal Data Fusion for Complementary Feature Learning and Knowledge Discovery". Submit by April 2027.
 - **Title:** unchanged, so Google Scholar keeps merging it with the arXiv preprint.
@@ -16,7 +16,7 @@ The revision tests the obvious objection: *"LLMs keep getting better. Won't labe
 - If the gain from labels shrinks as X grows, that is still a result.
 - **Cost argument:** the label classifiers are orders of magnitude smaller than every LLM in the plan, including the 4B student in §6. They help LLMs at every size we test, from 0.8B to ≈400B.
 - **Labels transfer cheaply (§5):** classifiers trained on another dataset (PadChest, from Spain, in its own label vocabulary) may improve generation on MIMIC-CXR and ReXGradient with no labels from those datasets and no tuning of the classifiers on them. That costs far less than fine-tuning an LLM on the target dataset.
-- **Fine-tuning (§6)** only shows that LaB-RAG also works when the LLM is fine-tuned. §6 itself is not a cost argument; §5.1 borrows its text retrieval-only arms as a cost reference.
+- **Fine-tuning (§6)** only shows that LaB-RAG also works when the LLM is fine-tuned. §6 itself is not a cost argument; §5.2 borrows its text retrieval-only arms as a cost reference.
 
 Fusion framing for the special issue: labels are a compact, interpretable, late-fused modality connecting separately pretrained vision and language models.
 
@@ -30,9 +30,16 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 | **ReXGradient-160K** | Primary. RRG test (official patient-disjoint split, 67 sites; **full 10k test everywhere**), classifiers, retrieval corpus |
 | **CheXpert Plus** | The **outside dataset**: never an RRG test. (1) **Pilot** (Appendix): every generation setting is chosen here, not on the evaluation datasets. (2) **Sole transfer source** for J (classifiers + corpus). Its official valid split has only 61 Findings studies (61 patients), so the preprint's CheXpert Plus test results are not re-run. |
 | **PadChest-GR** | Richer-labels test bed (§5). **Official split: 3,185 train / 455 val / 915 test.** English finding sentences; labels are in the PadChest vocabulary (all 154 verified) |
-| **PadChest** | Labels only (its reports are stemmed Spanish). Trains the rich-label classifiers. |
+| **PadChest** | Labels only (its reports are stemmed Spanish). Trains the rich-label and localized-label classifiers (§5). About 76% of its studies were labelled by the authors' RNN model, not by physicians. To state in the paper. |
 
 **Sections:** Findings; Impression (generated from the image only, not conditioned on Findings); Findings+Impression (joint).
+
+### Data provenance
+- **Inputs are only the files the dataset authors released.** Every derived file (sections, labels, splits) is produced by code in this repo. Locally derived files from earlier work are never read.
+- **MIMIC-CXR sections:** the dataset authors' own section parser (MIT-LCP `mimic-cxr`), used unmodified as a pinned submodule under `external/`.
+- **CheXpert Plus reports:** the release has one report row per image, and images of the same study can carry slightly different anonymized text (Stanford-AIMI/chexpert-plus#13; the clinical content is the same). We keep one canonical text per study: the first image row in a fixed order. Labels are computed on that text.
+- **MIMIC-CXR labelled test set** (`mimic-cxr-2.1.0-test-set-labeled.csv`, 687 studies): 9 of its studies are in the official validation split and 2 are not in MIMIC-CXR. It is filtered to official test.
+- **Reference labels** (CheXbert-14 on the reference reports) are computed in-repo, in the pipeline env.
 
 ### Leakage controls
 - **CheXpert Plus pilot split:** 400 patients from CheXpert Plus train, each with exactly one Findings study (17,972 of the 26,634 train patients qualify), drawn once with a fixed seed. 200 are the **pilot set** and 200 the **prompt-tuning set** (§3), so the CoT prompt isn't tuned on the studies that then choose between settings. Both are excluded from the CheXpert Plus classifiers and every retrieval corpus.
@@ -41,7 +48,7 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
   - **MIMIC-CXR:** no validation or test images.
   - **PadChest-GR:** no validation or test images.
   - **ReXGradient:** not in its training data at all.
-  - It does include MIMIC-CXR train, PadChest and CheXpert images, so the classifier and corpus images were seen without labels during pretraining (§5.1).
+  - It does include MIMIC-CXR train, PadChest and CheXpert images, so the classifier and corpus images were seen without labels during pretraining (§5.2).
 - **Classifiers:** fit on train, thresholds set on validation. Wherever predicted labels are used as training inputs, they are K-fold out-of-fold predictions.
 - **Retrieval:** never returns the target study or another study from the same patient.
 - **Audit in the paper:**
@@ -131,43 +138,60 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
   - per-label AUROC and F1, plus retrieval label-precision@k, for every encoder × label set
   - in-domain test sets: MIMIC and ReXGradient
   - **cross-dataset**: the CheXpert Plus classifiers on MIMIC, ReXGradient and PadChest-GR, the same pairs as J
-  - PadChest-GR test for the rich labels
+  - PadChest-GR test for the rich labels and the localized labels (§5). The only dataset where localized labels can be checked, since MIMIC and ReXGradient have no gold localized labels.
 - **Literature baselines:** 3–5 strong current public models (chosen using ReXrank; weights to be verified), on MIMIC and ReXGradient only. Modern models only; overlap with the preprint's baselines is fine. No ReXrank submission.
 
 ---
 
-## 5. Richer labels (PadChest-GR)
+## 5. Richer labels
 
-- **Headline:** the official PadChest-GR test split (915 studies), Findings only.
-  - The reference report is the study's English sentences (positive and negative).
-  - The retrieval corpus is PadChest-GR train, with its **gold** labels. This mirrors how CheXbert labels extracted from reports serve the default pipeline.
-  - Target labels are predicted by classifiers trained on PadChest (excluding the PadChest-GR validation and test patients). Their thresholds are set on **PadChest-GR validation** (gold labels). Oracle runs use the target's gold labels.
-  - **Why this exclusion is enough:** PadChest-GR is a subset of PadChest, so without it the rich-label classifiers would train on the PadChest-GR test images. (The encoder is already clean: public RAD-DINO has no PadChest-GR validation or test images, §2.) PadChest itself is never an RRG test set, so nothing else needs holding out. PadChest-GR train patients stay in, because they are the retrieval corpus. The same exclusion protects J's transfer to PadChest-GR and the PadChest-GR rows in §4.3.
-- **Label levels:**
+**Question:** do richer labels help more than the 14 CheXbert labels? "Richer" means two things:
+- **a larger vocabulary** (up to all PadChest findings), and
+- **localized labels**, which say where a finding is ("pleural effusion, left"), not only that it is there.
 
-| Level | Vocabulary |
-|---|---|
-| CheXbert-14 | the default label set (CheXbert run on the PadChest-GR sentences) |
-| PadChest collapsed to 14 | control: same size as the default, different source |
-| PadChest top-30 / top-60 findings | richer |
-| PadChest findings + diagnoses + locations | richest |
+All rich labels come from classifiers trained on **PadChest**, the only dataset labelled in this vocabulary and with locations. They are tested twice:
+- **§5.1 PadChest-GR:** in-domain, with gold labels.
+- **§5.2 Transfer:** the same classifiers on MIMIC-CXR and ReXGradient, which have no PadChest labels at all.
 
-- **Retrieval:** the default Jaccard ranking (§3) at every level. This is also why Jaccard is the default: exact label-set match stops working as the vocabulary grows, since almost no corpus study shares an exact 60- or 250-label vector with the target. (The preprint's `partial` filter counts shared positives only, so it favours corpus reports with many positives. Jaccard penalizes the extra positives.)
-- **Design:** both main models × LaB-RAG × {predicted, oracle} × each level, plus one retrieval-only cell per model (retrieval only does not depend on the label level).
+### Label sets
 
-### 5.1 Cross-dataset labels: PadChest classifiers on MIMIC-CXR and ReXGradient
-This is promoted from a secondary check to a finding in its own right. Can a classifier cheaply trained on **another dataset**, in **a richer label vocabulary**, improve generation on MIMIC-CXR and ReXGradient, with no labels from them and no tuning of the classifiers on them? If so, it is a much cheaper way to adapt to a new dataset than fine-tuning an LLM on it (§6).
+| Vocabulary | Findings | Unlocalized | By side/zone | By location |
+|---|---|:-:|:-:|:-:|
+| CheXbert-14 | the default 14 labels | ✓ | n/a | n/a |
+| PadChest-14 | PadChest collapsed to 14: same size as the default, different source | ✓ | ✓ | ✓ |
+| PadChest-30 | the 30 most common PadChest findings | ✓ | later | later |
+| PadChest-60 | the 60 most common PadChest findings | ✓ | ✓ | ✓ |
+| PadChest-all | all PadChest findings | ✓ | later | later |
 
-- **Nothing from the target dataset's labels is used.**
-  - The classifiers are trained on PadChest, with thresholds set on PadChest-GR validation.
-  - The corpus labels are predicted by the same classifiers from the corpus images, so no report labeler is needed either.
-  - The only target-domain input is the corpus reports themselves, which every retrieval condition uses anyway.
-  - Caveat to state: public RAD-DINO's self-supervised pretraining includes the unlabelled MIMIC-CXR train images (but no ReXGradient images, so ReXGradient is the clean read). The classifier heads and labels never see the target data.
-- **Design:** MIMIC-CXR and ReXGradient Findings test, both main models, predicted labels only (these datasets have no gold labels in the PadChest vocabulary):
+- **Localization columns** (cuts of the location tree, §5.3):
+  - **By side/zone:** "pleural effusion, left", "opacity, left lower zone".
+  - **By location:** the most specific location the data supports: "opacity, left lower lobe".
+  - **n/a:** CheXbert has no locations.
+- **9 label sets in all:** 5 unlocalized + 4 localized (PadChest-14 and PadChest-60, each cut two ways).
+- **Decision for later:** whether to also localize PadChest-30 and PadChest-all, based on how the 4 localized sets do.
+- **Same everywhere:**
+  - **Classifier:** the default logistic regression on the global image embedding, for every label set, so localized vs unlocalized never also compares classifier types. A localization adapter on the encoder is out of scope for now.
+  - **Training data:** PadChest, minus the PadChest-GR validation and test patients. Thresholds are set on PadChest-GR validation (gold labels). PadChest-GR is a subset of PadChest, so this exclusion is what keeps the PadChest-GR test images out of training. The encoder is already clean (§2), and PadChest itself is never a test set. The same exclusion protects J's transfer to PadChest-GR and the PadChest-GR rows in §4.3.
+  - **Retrieval:** the default Jaccard ranking (§3). This is also why Jaccard is the default: exact label-set match stops working as the vocabulary grows, since almost no corpus study shares an exact 60-label (or larger) vector with the target. (The preprint's `partial` filter counts shared positives only, so it favours corpus reports with many positives. Jaccard penalizes the extra positives.)
+- **No shared labeler:** with the PadChest label sets, the boosting labels no longer come from CheXbert, so the SembScore and RadCliQ overlap (§7) does not apply. §5 is a check on the CheXbert-14 results that does not share the labeler.
+
+### 5.1 PadChest-GR (headline)
+- **Test:** the official PadChest-GR test split (915 studies), Findings only. The reference report is the study's English sentences (positive and negative).
+- **Corpus:** PadChest-GR train, with its **gold** labels. This mirrors how CheXbert labels extracted from reports serve the default pipeline.
+- **Labels:** predicted by the PadChest classifiers; oracle runs use the target's gold labels (gold localized labels for the localized sets, §5.3).
+- **Design:** both main models × LaB-RAG × {predicted, oracle} × each of the 9 label sets (localized included), plus one retrieval-only cell per model (retrieval only does not depend on the label set).
+- **Reading:** larger vocabulary vs smaller; localized vs unlocalized at the same vocabulary.
+
+### 5.2 Transfer to MIMIC-CXR and ReXGradient
+Can classifiers cheaply trained on **another dataset**, in **a richer vocabulary**, improve generation on MIMIC-CXR and ReXGradient with no labels from them and no tuning of the classifiers on them? If so, it is a much cheaper way to adapt to a new dataset than fine-tuning an LLM on it (§6). This is a finding in its own right, not a secondary check.
+
+- **Nothing from the target's labels is used.** The corpus labels are predicted by the same classifiers from the corpus images, so no report labeler is needed. The only target-domain input is the corpus reports, which every retrieval condition uses anyway.
+  - Caveat to state: public RAD-DINO's self-supervised pretraining includes the unlabelled MIMIC-CXR train images (but no ReXGradient images, so ReXGradient is the clean read). The classifiers never see the target data.
+- **Design:** MIMIC-CXR and ReXGradient Findings test, both main models, predicted labels only (these datasets have no gold PadChest labels):
   - retrieval only *(shared with B)*
-  - LaB-RAG with in-domain CheXbert-14 labels *(shared with B)*. This is the in-domain reference.
-  - LaB-RAG with PadChest-trained labels at each PadChest level (collapsed-14, top-30, top-60, richest)
-- **Reading:** PadChest labels vs retrieval only is the transfer gain. PadChest labels vs in-domain CheXbert-14 shows how much of the in-domain gain the foreign labels recover. Collapsed-14 vs richer levels shows whether vocabulary size matters when the labels are foreign.
+  - LaB-RAG with in-domain CheXbert-14 labels *(shared with B)*: the in-domain reference
+  - LaB-RAG with each PadChest label set, localized ones included
+- **Reading:** PadChest labels vs retrieval only is the transfer gain. PadChest labels vs in-domain CheXbert-14 shows how much of the in-domain gain the foreign labels recover. Vocabulary size and localization are read as in §5.1.
 - **Relation to J:** J transfers CheXbert-14 classifiers between datasets that use the **same** vocabulary. Here the source differs in country, report language and vocabulary.
 - **Cost comparison with fine-tuning (2×2):** two ways to adapt the same Qwen3.5-4B to MIMIC-CXR and ReXGradient, each with and without reasoning.
 
@@ -177,17 +201,25 @@ This is promoted from a secondary check to a finding in its own right. Can a cla
 | Fine-tuned 4B, text retrieval only *(from §6)* | plain SFT | SFT with reasoning |
 
   - Reasoning modes are matched as in §6's frozen reference rows: plain SFT runs with thinking off, and SFT with reasoning thinks at the teacher's budget.
-  - The PadChest level is the one that is best on the CheXpert Plus pilot set (PadChest classifiers run on its images and its corpus), so §5.1 uses nothing from the target except the corpus reports.
+  - The frozen row uses a single PadChest label set: the one of the 8 (localized included) that is best on the CheXpert Plus pilot set (PadChest classifiers run on its images and its corpus), so §5.2 uses nothing from the target except the corpus reports.
   - Report the compute for each: minutes of classifier training vs H200-hours of LoRA (plus the teacher rationales for SFT with reasoning).
   - Fully crossed, so the effect of reasoning can be read for each adaptation method (§3 rule). Each method is a bundle (classifiers + label ranking + labels in the prompt, vs fine-tuned weights), so the claim is about the two methods as wholes.
 
-- **Note:** with the PadChest vocabularies, the boosting labels no longer come from CheXbert, so the SembScore and RadCliQ overlap (§7) does not apply. This makes §5 a check on the CheXbert-14 results that does not share the labeler.
+### 5.3 Building the localized labels
+- **Source:** PadChest's `LabelsLocalizationsBySentence` pairs each finding with the locations in the same sentence. PadChest-GR's per-sentence labels and locations give the gold localized labels.
+- **Location tree:** PadChest's anatomic location hierarchy (Bustos et al. 2020, arXiv 1901.07441v2, Appendix A.1.3). No author file ships it, so it is transcribed into `src/labrag/data/padchest_locations.tsv` and cited. A location such as "left lower lobe" has two parents: an anatomic one, which gives the side, and a lung-field zone, which gives upper, middle or lower. "By side/zone" and "by location" are two cuts of this tree.
+- **Rare pairs back off.** PadChest has 3,608 finding × location pairs, only 197 of them in ≥100 images, and PadChest-GR validation (455 studies) is too small to set thresholds for rare pairs. A pair with too few examples moves up to its parent location ("left lower lobe" → "left lung" → "lung"), and with no location left it is the plain finding. The minimum count is set at implementation.
+- **Pairs that repeat the finding are dropped** (e.g. cardiomegaly + cardiac, aortic elongation + aortic).
+- **In retrieval,** a localized label also counts as its plain finding, so "effusion, left" still partly matches "effusion, right".
+- **In the template floor,** a localized label renders as "Left pleural effusion."
+- **Check first:** the global embedding may not keep left vs right. Measure side accuracy on PadChest-GR test (§4.3) before any generation runs.
+- **Metrics:** the location-aware metrics (RadGraph F1, GREEN, CRIMSON) show what localization adds to the reports.
 
 ---
 
 ## 6. Fine-tuning
 
-Purpose: show that LaB-RAG still works after the LLM is fine-tuned. This is not a cost argument (§1), although §5.1 uses the text retrieval-only arms as a cost reference.
+Purpose: show that LaB-RAG still works after the LLM is fine-tuned. This is not a cost argument (§1), although §5.2 uses the text retrieval-only arms as a cost reference.
 
 - **Student:** Qwen3.5-4B (multimodal, same family as the main model), trained with LoRA.
 - **Findings only**, for both training and evaluation (§4.2). Full Findings train is 152k MIMIC-CXR + 140k ReXGradient ≈ 292k studies.
@@ -227,8 +259,9 @@ Settled:
 
 ## 7. Metrics
 - **Suite: the ReXrank metrics**: BLEU, BERTScore, SembScore, RadGraph F1, RaTEScore, 1/RadCliQ-v1, **GREEN** and **CRIMSON**.
-  - Run locally where possible. GREEN uses a fixed open-weight model. **CRIMSON runs locally:** by default the `crimson-score` package uses a fine-tuned MedGemma 4B judge (`rajpurkarlab/medgemma-4b-it-crimson`). GPT-5.2 is an optional API backend that we won't use. CRIMSON scores abnormal findings only, and can take patient age and indication as context. Caveat: the judge is from the MedGemma family, which is also a generator in D and E.
-  - The LLM judges cost one generation per scored report, so they are counted in the budget (Appendix).
+  - **Official implementations, one container per upstream:** CXR-Report-Metric (BLEU-2, BERTScore, SembScore, RadGraph F1, RadCliQ-v1), GREEN, RaTEScore and CRIMSON. They can't share an env: GREEN pins transformers 4.40, while CRIMSON needs transformers ≥5.3. ReXrank's own pipeline also splits them across two envs. RadEval reimplements all of them in one package, but its parity with ReXrank is unverified, so it is not used.
+  - Everything runs locally. GREEN uses a fixed open-weight model. **CRIMSON:** by default the `crimson-score` package uses a fine-tuned MedGemma 4B judge (`rajpurkarlab/medgemma-4b-it-crimson`). GPT-5.2 is an optional API backend that we won't use. CRIMSON scores abnormal findings only, and can take patient age and indication as context. Caveat: the judge is from the MedGemma family, which is also a generator in D and E.
+  - The LLM judges (GREEN, CRIMSON) generate one output per scored report. That is evaluation cost, not part of the generation budget, which counts only the reports the experiments generate (Appendix, "not counted").
   - **F1-CheXbert is not in the suite** (ReXrank doesn't report it). It only appears in the error breakdown below.
 - **Label-space overlap:** one table footnote.
   - SembScore uses CheXbert, the labeler that produces the boosting labels, and RadCliQ includes SembScore.
@@ -245,12 +278,21 @@ Settled:
 ---
 
 ## 8. Infrastructure
-- **Envs:** one uv env (`uv.lock`) per run checkout; vLLM and the metrics run as containers.
+- **Envs:** one uv env (`uv.lock`) per run checkout; vLLM and the metrics (§7) run as containers.
+- **Runner** (`slurm/submit.sh` + `slurm/job.sh`). The code, env and source data live on each node's local disk; only the shared storage below is common to all nodes:
+  - the submitter pins the run to the current commit, refuses a dirty or unpushed tree, and keeps data-reading jobs off kg35-nvl02 (it has no copy of the data)
+  - on each node, the job fetches that commit from GitHub into its own directory and builds the env from the commit's `uv.lock`. Runs at different commits never share code or env.
+  - model weights and vLLM images are pre-pulled on every node; the job checks they are present at the pinned revision and digest, and never downloads them
+  - **shared storage:** `/opt/gpu_working/steven/labrag-shared`, an NFS directory visible from every node. It holds both the intermediates later stages need and the main results. NFS is easy to overload, so jobs are written to go easy on it:
+    - every job, on every node, works on local disk and copies its outputs to NFS once at the end, as a few large files (e.g. one compressed JSONL per generation cell), then renames them into place; never many small files, and never appending to a shared file
+    - a job copies the NFS inputs it needs (embeddings, prompts) to local disk once at the start, rather than reading them repeatedly
+    - no envs, uv cache, model weights, containers, vLLM caches or training checkpoints on NFS: they stay on local disk (final LoRA adapters are small and can go to NFS)
+    - no file locks or SQLite on NFS
 - **Stages:**
   - `embed` → `classify` (including out-of-fold) → `build-prompts` (hashed JSONL)
   - `generate`: an async client against `vllm serve`, resumable and cached
   - `evaluate`: per-study scores. The LLM judges are served the same way as the generators.
-- **Hard cap: never more than 8 GPUs in use at once** across all our jobs (Steven). Of the cluster's 16 H200s, at most 8 are ours at any time.
+- **Hard cap: never more than 8 GPUs in use at once** across all our jobs. Of the cluster's 16 H200s, at most 8 are ours at any time. Steven enforces it when scheduling; the runner doesn't.
 - **GPU wrapper (sbatch):**
   - tensor-parallel size taken from `CUDA_VISIBLE_DEVICES`
   - free port, health check, teardown
@@ -284,8 +326,8 @@ Assumptions:
 | H. Retrieval depth (8 k cells) | 99k |
 | I. Encoders (2 alternatives × 2 conditions) | 49k |
 | J. Transfer (CheXpert Plus source → 3 targets; corpus-swap retrieval only shared with B and §5) | 40k |
-| §5 Richer labels: headline 20k + §5.1 cross-dataset 99k + the two 4B cost-comparison cells 25k | ≈144k |
-| **Total, excluding fine-tuning (§6)** | **≈2.3M** |
+| §5 Richer labels: §5.1 PadChest-GR 35k + §5.2 transfer 198k + the two 4B cost-comparison cells 25k (the 4 localized sets add ≈15k + 99k) | ≈258k |
+| **Total, excluding fine-tuning (§6)** | **≈2.4M** |
 
 ### Thinking length is the main unknown
 Steven's preliminary runs show that Qwen's highest thinking modes are slow. The v5 estimate assumed 2.5k output tokens per generation, which is probably too low for the top budget.
@@ -296,7 +338,7 @@ Steven's preliminary runs show that Qwen's highest thinking modes are slow. The 
   - The pilot uses public RAD-DINO, like every other experiment (see the encoder caveat in §2).
   - The 397B pilot cells run in BF16, like C (§4.1).
   - Measure thinking tokens (mean and p95), truncation rate, H200 throughput, and pilot quality.
-  - The same pilot studies are used for **Ministral 3 8B Reasoning vs Instruct + CoT** (§4.1), the **§5.1 PadChest level**, and the 0.8B/2B loop check (C).
+  - The same pilot studies are used for **Ministral 3 8B Reasoning vs Instruct + CoT** (§4.1), the **§5.2 PadChest label set**, and the 0.8B/2B loop check (C).
   - **MedGemma reasoning setting:** native thinking on vs thinking off vs our CoT prompt, for both 27B checkpoints, on the same pilot studies. Measure pilot quality, thinking length and truncation at Google's caps, then pick per checkpoint (§3).
   - **Still tuned on target validation** (part of training on that data, not a generation setting): classifier thresholds, and §6's LoRA learning rate, checkpoint and training-set size.
 - **Budgets are hard token caps** (e.g. ≈1k / 4k / 16k, set from the pilot), not the model's open-ended top mode. The top cap is where pilot quality levels off or where cost becomes prohibitive, whichever comes first.

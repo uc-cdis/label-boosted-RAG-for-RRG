@@ -1,6 +1,6 @@
-# LaB-RAG Journal Revision Plan (v10)
+# LaB-RAG Journal Revision Plan (v11)
 
-Status: **DRAFT v10, 2026-11-09.** v10 drops training our own RAD-DINO: the public checkpoint is checked to be leakage-free for our test sets (§2).
+Status: **v11, 2026-11-09.** Beginning implementation.
 
 - **Target:** MDPI *Machine Learning and Knowledge Extraction* (MAKE), special issue "Multimodal Data Fusion for Complementary Feature Learning and Knowledge Discovery". Submit by April 2027.
 - **Title:** unchanged, so Google Scholar keeps merging it with the arXiv preprint.
@@ -98,6 +98,7 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 | Others | Muse Glimmer 30B |
 
 - **Teacher** for the reasoning traces in §6: Qwen3.5-397B (same family as the 4B student, so the thinking format and tokenizer match).
+- **Precision:** every reported generation runs in **BF16**, including Qwen3.5-397B in C and the pilot. The only exception is the §6 teacher, which runs the official FP8 checkpoint (`Qwen/Qwen3.5-397B-A17B-FP8`, block-wise FP8 with block size 128). The teacher only produces training data that no result compares against, so the difference in precision never enters a comparison. To state in the paper.
 - **Main models:** Qwen3.5-27B (multimodal, controllable thinking) and gpt-oss-120b (strictly text-only, with low/medium/high effort).
 - **Why Qwen3.5 and not the newer Qwen3.6 / 3.8** (to state in the paper): Qwen3.5 is the newest Qwen release with open weights at every size from 0.8B to 397B. C needs that range, and §6 needs the 4B student and the 397B teacher from the same release. The open Qwen3.6 models are 27B and 35B-A3B only. The open Qwen3.8 models are 27B, a ≈180B MoE, and a 2.4T text-only model. The F Qwen line checks whether the main result carries over to the newest 27B.
 - **MedGemma checkpoints: both, in the text-only cells.** MedGemma 27B has a multimodal checkpoint (`medgemma-27b-it`) and a separate text-only one (`medgemma-27b-text-it`, trained on medical text only). The MedGemma technical report's headline 27B numbers come from the text-only checkpoint, and it calls the multimodal 27B results preliminary.
@@ -249,10 +250,15 @@ Settled:
   - `embed` → `classify` (including out-of-fold) → `build-prompts` (hashed JSONL)
   - `generate`: an async client against `vllm serve`, resumable and cached
   - `evaluate`: per-study scores. The LLM judges are served the same way as the generators.
+- **Hard cap: never more than 8 GPUs in use at once** across all our jobs (Steven). Of the cluster's 16 H200s, at most 8 are ours at any time.
 - **GPU wrapper (sbatch):**
   - tensor-parallel size taken from `CUDA_VISIBLE_DEVICES`
   - free port, health check, teardown
-  - multi-node serving for the large teacher and 397B models
+  - multi-node serving on **one rail** (tensor-parallel across nodes on the same rail is faster than crossing sockets within a node):
+    - Qwen3.5-397B BF16: 8-way TP across all 4 nodes (C and the pilot)
+    - Qwen3.5-122B BF16: 4-way TP across 2 nodes (≈245 GB is too tight for one NVLink pair)
+    - §6 teacher, Qwen3.5-397B FP8: 4 GPUs on one rail across 2 nodes, so at most 2 servers at once under the 8-GPU cap
+  - everything else on 1 GPU or one NVLink pair
 - **Record per run:** model revision, vLLM version, sampling params, seed, reasoning settings, thinking-token counts.
 
 ---
@@ -288,6 +294,7 @@ Steven's preliminary runs show that Qwen's highest thinking modes are slow. The 
   - **Why CheXpert Plus:** every generation setting is chosen on a dataset we never evaluate on, so the MIMIC and ReXGradient results are not tuned to them. To state in the paper.
   - The 200-study CheXpert Plus pilot set, per Qwen3.5 size × candidate budget, plus gpt-oss at each effort level. Labels come from the CheXpert Plus classifiers (J), and the corpus is CheXpert Plus train minus the pilot patients.
   - The pilot uses public RAD-DINO, like every other experiment (see the encoder caveat in §2).
+  - The 397B pilot cells run in BF16, like C (§4.1).
   - Measure thinking tokens (mean and p95), truncation rate, H200 throughput, and pilot quality.
   - The same pilot studies are used for **Ministral 3 8B Reasoning vs Instruct + CoT** (§4.1), the **§5.1 PadChest level**, and the 0.8B/2B loop check (C).
   - **MedGemma reasoning setting:** native thinking on vs thinking off vs our CoT prompt, for both 27B checkpoints, on the same pilot studies. Measure pilot quality, thinking length and truncation at Google's caps, then pick per checkpoint (§3).
@@ -295,6 +302,7 @@ Steven's preliminary runs show that Qwen's highest thinking modes are slow. The 
 - **Budgets are hard token caps** (e.g. ≈1k / 4k / 16k, set from the pilot), not the model's open-ended top mode. The top cap is where pilot quality levels off or where cost becomes prohibitive, whichever comes first.
 - **The default thinking setting for B** (and D–J) is a middle budget, not the top one.
 - **Rough sensitivity:** if the top-budget cells average ≈10k tokens, those ≈220k generations take ≈2.2B tokens, ≈1.7B more than the 2.5k-token assumption. The total would then be ≈7.5B output tokens, or ≈450–850 H200-hours (tokens from the 0.8B–9B models are far cheaper than the rest). Re-estimate after the pilot.
+- **Qwen3.5-397B in BF16 takes our whole 8-GPU cap:** 8 GPUs on one rail across all 4 nodes, so only one server runs at a time, and nothing else of ours can run alongside it. C's 397B cells (≈99k generations) can't overlap with any other run, including the §6 teacher. Very rough estimate: about two days; re-estimate after the pilot.
 - **Cuts, in order, if the pilot says it's too slow:**
   1. No top budget at 397B.
   2. 3 thinking budgets → 2 (≈−173k: 7 Qwen3.5 sizes × 2 conditions).

@@ -10,8 +10,12 @@ on `main` (tag `paper-v1`).
 
 ## Layout
 - `src/labrag/`: the pipeline package (`labrag` CLI)
-- `envs/`: env build script and lock file. `envs/build.sh labrag` builds the pipeline env;
-  add `--from-lock` to reproduce it exactly. vLLM and the metrics run as containers.
+- `uv.lock`, `.python-version`: the env, managed by [uv](https://docs.astral.sh/uv/).
+  `envs/install-uv.sh` installs the pinned uv, then `uv sync --frozen` builds `.venv/`
+  exactly from the lock (`--no-dev` for runs). vLLM and the metrics run as containers.
+- `slurm/`: `submit.sh [sbatch options] -- <command>` runs a command on the cluster at the
+  current commit (clean tree, pushed). Each node keeps one shallow clone plus env per
+  commit under `~/labrag-run/commits/<sha>/`, so jobs at different commits never interfere.
 - `external/`: upstream code as git submodules (`mimic-cxr`: MIT-LCP's report section parser)
 - `splits/`: frozen, committed split files with provenance ([splits/README.md](splits/README.md))
 - `tests/`: checks, including exact reproduction of the frozen splits

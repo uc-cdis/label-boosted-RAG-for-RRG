@@ -245,7 +245,7 @@ Settled:
 ---
 
 ## 8. Infrastructure
-- **Envs:** fresh `labrag` and `labrag-eval` environments.
+- **Envs:** one uv env (`uv.lock`) per run checkout; vLLM and the metrics run as containers.
 - **Stages:**
   - `embed` → `classify` (including out-of-fold) → `build-prompts` (hashed JSONL)
   - `generate`: an async client against `vllm serve`, resumable and cached

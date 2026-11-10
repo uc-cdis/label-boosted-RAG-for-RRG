@@ -7,13 +7,14 @@ name = "labrag"
 version = "0.2.0.dev0"
 description = "LaB-RAG: label-boosted retrieval augmented generation for radiology report generation"
 requires-python = ">=3.12"
-dependencies = ["numpy", "pandas", "pyarrow", "pyyaml", "tqdm"]
-
-# One env (envs/build.sh labrag) = [pipeline,dev]; exact versions in envs/labrag.lock.txt,
-# the bounds here are loose. vLLM and the evaluation metrics are not installed here: they
-# run as containers (one image per upstream metric implementation).
-[project.optional-dependencies]
-pipeline = [
+# Exact versions are in uv.lock; the bounds here are loose. vLLM and the evaluation metrics
+# are not installed here: they run as containers (one image per upstream implementation).
+dependencies = [
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "pyyaml",
+    "tqdm",
     "torch>=2.10",
     "torchvision",
     "transformers>=5.0",
@@ -27,10 +28,19 @@ pipeline = [
     "openai>=2.26",  # async client for `vllm serve`
     "httpx",
 ]
+
+[dependency-groups]
 dev = ["pytest", "pre-commit", "ipykernel", "matplotlib"]
 
 [project.scripts]
 labrag = "labrag.cli:main"
+
+[tool.uv]
+required-version = "==0.13.7"  # keep in step with envs/install-uv.sh
+python-preference = "only-managed"  # same uv-built CPython on every node, never conda/system
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64' and implementation_name == 'cpython'",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

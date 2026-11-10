@@ -9,7 +9,7 @@ the other nodes are checked against it with [tools/data-audit/](../tools/data-au
 
 | Dataset | Files the pipeline reads | Verified against |
 |---|---|---|
-| MIMIC-CXR-JPG 2.1.0 | `files/` (377,110 JPGs), `mimic-cxr-2.0.0-{split,metadata}.csv.gz`, `mimic-cxr-2.1.0-test-set-labeled.csv` | PhysioNet `SHA256SUMS.txt`: every file matches |
+| MIMIC-CXR-JPG 2.1.0 | `files/` (377,110 JPGs), `mimic-cxr-2.0.0-{split,metadata,chexpert,negbio}.csv.gz`, `mimic-cxr-2.1.0-test-set-labeled.csv` | PhysioNet `SHA256SUMS.txt`: every listed file is present and matches. The local uncompressed `mimic-cxr-2.0.0-*.csv` equal the decompressed `.gz`; adapters read the `.gz` |
 | MIMIC-CXR 2.1.0 (reports) | `notes/` (227,835 reports, the unzipped `mimic-cxr-reports.zip`) | PhysioNet `SHA256SUMS.txt` of the DICOM release, which hashes each report: all match |
 | MIMIC-CXR sections | computed from `notes/` with MIT-LCP's `section_parser.py` and custom rules ([external/mimic-cxr](../external/mimic-cxr)) | no author file exists |
 | CheXpert Plus | `df_chexpert_plus_240401.csv`, `PNG/` (223,461 PNGs) | no author checksums. The PNG set equals the csv's image list. The extracted `*_fixed.json` and `section_*.json` equal the members of the author zips |
@@ -24,8 +24,6 @@ the other nodes are checked against it with [tools/data-audit/](../tools/data-au
 
 - **MIMIC test-set-labeled:** the author file has 9 studies from the validate split and 2 study
   IDs that aren't in MIMIC-CXR. Filter it to the official test split.
-- **MIMIC `mimic-cxr-2.0.0-chexpert.csv`:** not yet verified (the `.gz` is being re-downloaded).
-  The pipeline computes its own CheXbert labels, so this file is only a cross-check.
 - **CheXpert Plus:** `PNG/train/patient32368/study1/view1_frontal.png` is corrupt and was
   renamed `.png.BAK`. Skip it. Reports differ per image within a study (Stanford-AIMI/chexpert-plus#13), so take
   one canonical text per study.

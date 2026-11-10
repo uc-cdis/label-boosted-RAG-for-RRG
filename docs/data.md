@@ -20,7 +20,11 @@ files remain in the kg35-nvl01 reference manifests.
 | PadChest-GR | `grounded_reports_20240819.json`, `master_table.csv`, `PadChest_GR/` (4,555), `PadChest_GR_progression_prior_studies/` (1,446) | no author checksums. The image sets equal the JSON, and every image is byte-identical to its PadChest copy |
 | BRAX | not used | author `SHA256SUMS.txt`: every file matches |
 | VinDr-CXR | not used | author `SHA256SUMS.txt`: every file matches |
-| OpenI (IU X-ray) | not used | NLM gives no checksums. `pngs/` and `reports/` equal the members of `NLMCXR_{png,reports}.tgz` (except a `Thumbs.db`). `NLMCXR_dcm.tgz` passes `gzip -t` |
+| OpenI (IU X-ray) | not used | NLM gives no checksums. `pngs/` and `reports/` equal the members of `NLMCXR_png.tgz` (sha256 `baf3abfe19ba5d58efe69002aed1e71aa2e6d5efb3238db9adcac210ad44bdf2`, except a `Thumbs.db`) and `NLMCXR_reports.tgz` (`8fb6de7eec73d8c3665067ad4bb003ccd57f971ae316d2642e1627ac7268667a`), which were then deleted. `NLMCXR_dcm.tgz` is kept and passes `gzip -t` |
+
+**Archives:** a single-file `.gz` stays compressed (pandas reads it directly), and its
+uncompressed copy goes to `derived/`. Multi-file archives are kept extracted: the extracted
+files are the source. CheXpert Plus keeps both its zips and the extracted JSONs.
 
 ## Known issues (handled in the adapters)
 

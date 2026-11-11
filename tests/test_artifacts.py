@@ -27,6 +27,9 @@ def test_publish_writes_manifest(tmp_path, monkeypatch):
     assert m["outputs"] == {"data.csv": artifacts.sha256_file(final / "data.csv")}
     assert m["commit"] == {"sha": "a" * 40, "dirty": False}
     assert [p.name for p in (tmp_path / "x").iterdir()] == ["y"]  # no leftovers
+    # same mode as a directory made normally (not the 0700 of the staging dir)
+    (tmp_path / "plain").mkdir()
+    assert final.stat().st_mode == (tmp_path / "plain").stat().st_mode
 
 
 def test_same_config_skips_different_refuses_overwrite_replaces(tmp_path):

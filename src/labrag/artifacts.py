@@ -129,6 +129,11 @@ def publish(
         tag = uuid.uuid4().hex[:8]
         incoming = final.parent / f".{final.name}.incoming-{tag}"
         shutil.copytree(stage, incoming)
+        # The staging dir is created 0700 and copytree copies that mode; give the
+        # artifact dir the normal mode for a new directory under the current umask.
+        umask = os.umask(0)
+        os.umask(umask)
+        os.chmod(incoming, 0o777 & ~umask)
     if final.exists():
         old = final.parent / f".{final.name}.old-{tag}"
         os.rename(final, old)

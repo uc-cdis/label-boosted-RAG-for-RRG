@@ -1,7 +1,7 @@
 """Stage ``classify``: per-label image classifiers for one report section's labels.
 
 Reads ``embeddings/<dataset>/<encoder>/`` and ``labels/<dataset>/<section>/<labeler>/``
-and writes ``classifiers/<dataset>/<encoder>.<classifier>/<section>/<labeler>/``:
+and writes ``classifiers/<dataset>/<encoder>.<classifier>/<section>/<labeler>[.u0]/``:
 - ``model.npz``: labels, coef (n_labels, dim), intercept, threshold; enough to predict
   on any embeddings from the same encoder (e.g. other datasets, J and §4.3);
 - ``probs.csv``: study_id, role, one probability column per label;
@@ -13,8 +13,10 @@ and writes ``classifiers/<dataset>/<encoder>.<classifier>/<section>/<labeler>/``
 Rows are the studies that have reference labels for this section: classifiers are fit
 within each section, never on another section's labels. Roles come from the adapter
 (``classifier_roles``): fit on ``train``, thresholds on ``val``; every other role is
-predicted only. Labels are binarized as in the preprint: positive or uncertain = 1,
-negative or not mentioned = 0. No out-of-fold predictions yet (§2 "Leakage
+predicted only. Uncertain labels follow the CheXpert policies (Irvin et al. 2019):
+``ones`` (U-Ones, the preprint's default) maps positive or uncertain to 1; ``zeros``
+(U-Zeros) maps only positive to 1 and adds ``.u0`` to the labeler directory. Negative
+and not mentioned are always 0. No out-of-fold predictions yet (§2 "Leakage
 controls"): nothing trains on these predictions so far.
 """
 
@@ -29,7 +31,13 @@ from labrag.classifiers import logistic
 from labrag.data import DATASETS
 
 CLASSIFIERS = ("lr",)
-POSITIVE = (1, -1)  # CheXbert positive and uncertain
+# CheXbert codes counted as positive, per uncertain-label policy.
+POSITIVE = {"ones": (1, -1), "zeros": (1,)}
+BINARIZE = {
+    "ones": "positive or uncertain = 1, negative or blank = 0",
+    "zeros": "positive = 1, uncertain or negative or blank = 0",
+}
+LABELER_SUFFIX = {"ones": "", "zeros": ".u0"}
 
 
 def run(
@@ -38,6 +46,7 @@ def run(
     encoder: str = "raddino",
     labeler: str = "chexbert14",
     classifier: str = "lr",
+    uncertain: str = "ones",
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:
@@ -61,7 +70,7 @@ def run(
         "labeler": labeler,
         "classifier": classifier,
         "params": logistic.PARAMS,
-        "binarize": "positive or uncertain = 1, negative or blank = 0",
+        "binarize": BINARIZE[uncertain],
         "fit": "train",
         "threshold": "max F1 on val; predict prob >= threshold",
     }
@@ -79,7 +88,7 @@ def run(
         embedded = embedded.loc[labels.study_id]
         assert (embedded.image_path == studies.image_path).all(), "image mismatch"
         X = np.load(emb_dir / "embeddings.npy")[embedded.row.to_numpy()]
-        Y = labels[names].isin(POSITIVE).to_numpy(dtype=int)
+        Y = labels[names].isin(POSITIVE[uncertain]).to_numpy(dtype=int)
         role = studies.role.to_numpy()
         train, val, official = role == "train", role == "val", role == "official_valid"
 
@@ -124,7 +133,8 @@ def run(
         }
 
     return artifacts.publish(
-        f"classifiers/{dataset}/{encoder}.{classifier}/{section}/{labeler}",
+        f"classifiers/{dataset}/{encoder}.{classifier}/{section}/"
+        f"{labeler}{LABELER_SUFFIX[uncertain]}",
         config,
         inputs,
         build,

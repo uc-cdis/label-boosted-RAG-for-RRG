@@ -67,11 +67,23 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--labeler", default="chexbert14", choices=labels.LABELERS)
     p.add_argument("--classifier", default="lr", choices=classify.CLASSIFIERS)
     p.add_argument(
+        "--uncertain",
+        default="ones",
+        choices=sorted(classify.POSITIVE),
+        help="uncertain labels count as 1 (ones, the preprint) or 0 (zeros)",
+    )
+    p.add_argument(
         "--overwrite", action="store_true", help="replace an existing artifact"
     )
     p.set_defaults(
         func=lambda a: classify.run(
-            a.dataset, a.section, a.encoder, a.labeler, a.classifier, a.overwrite
+            a.dataset,
+            a.section,
+            a.encoder,
+            a.labeler,
+            a.classifier,
+            a.uncertain,
+            a.overwrite,
         )
     )
 

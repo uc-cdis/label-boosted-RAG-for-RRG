@@ -70,3 +70,14 @@ def test_weights_resolve_checks_sha256_and_reads_revision(tmp_path, monkeypatch)
     cfg["m"]["files"] = {"missing.bin": good}
     with pytest.raises(SystemExit, match="missing"):
         weights.resolve("m", models_root=tmp_path)
+
+
+def test_artifact_record_checks_outputs(tmp_path):
+    final = artifacts.publish("a", {"k": 1}, {}, _build("v1"), shared_root=tmp_path)
+    record = artifacts.artifact_record(final)
+    assert record["path"] == str(final) and set(record["outputs"]) == {"data.csv"}
+    (final / "data.csv").write_text("v2")
+    with pytest.raises(SystemExit, match="CHANGED"):
+        artifacts.artifact_record(final)
+    with pytest.raises(SystemExit, match="MISSING"):
+        artifacts.artifact_record(tmp_path / "nope")

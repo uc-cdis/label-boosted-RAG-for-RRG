@@ -63,6 +63,25 @@ def read_manifest(artifact_dir: Path) -> dict | None:
     return json.loads(path.read_text()) if path.is_file() else None
 
 
+def artifact_record(artifact_dir: Path) -> dict:
+    """Provenance record of an input artifact, after checking its files' sha256.
+
+    Downstream stages call this on every artifact they read, so a missing, partial or
+    modified input stops the job before anything is built from it.
+    """
+    manifest = read_manifest(artifact_dir)
+    if manifest is None:
+        raise SystemExit(f"MISSING: {artifact_dir} has no {MANIFEST}; build it first")
+    for name, sha in manifest["outputs"].items():
+        if sha256_file(artifact_dir / name) != sha:
+            raise SystemExit(f"CHANGED: {artifact_dir / name} differs from {MANIFEST}")
+    return {
+        "path": str(artifact_dir),
+        "commit": manifest["commit"]["sha"],
+        "outputs": manifest["outputs"],
+    }
+
+
 def _normalize(config: dict) -> dict:
     """The config as it reads back from JSON, so in-memory and stored configs compare."""
     return json.loads(json.dumps(config))

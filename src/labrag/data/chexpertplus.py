@@ -39,6 +39,13 @@ N_PILOT = 200
 N_PROMPT_TUNING = 200
 PILOT_SEED = 20261109
 
+# Frozen split files under paths.SPLITS_DIR (splits/README.md).
+PILOT_SPLIT_FILE = "chexpertplus_pilot_split.csv"
+CLASSIFIER_VAL_SPLIT_FILE = "chexpertplus_classifier_val_split.csv"
+SPLIT_FILES = (PILOT_SPLIT_FILE, CLASSIFIER_VAL_SPLIT_FILE)  # read by classifier_roles
+CLASSIFIER_VAL_FRACTION = 0.1
+CLASSIFIER_VAL_SEED = 20261111
+
 
 def load_images(cxr_root: Path) -> pd.DataFrame:
     """One row per image: subject_id, study_id, image_path, split, view, findings, impression.
@@ -129,3 +136,39 @@ def draw_pilot_split(images: pd.DataFrame, seed: int = PILOT_SEED) -> pd.DataFra
     sets = ["pilot"] * N_PILOT + ["prompt_tuning"] * N_PROMPT_TUNING
     pilot = pd.DataFrame({"subject_id": picked, "set": sets})
     return pilot.merge(studies, on="subject_id")[["subject_id", "study_id", "set"]]
+
+
+def draw_classifier_val_split(
+    images: pd.DataFrame, pilot: pd.DataFrame, seed: int = CLASSIFIER_VAL_SEED
+) -> pd.DataFrame:
+    """Draw the patients whose studies set the CheXpert Plus classifier thresholds.
+
+    The official valid split has only 61 studies with Findings (one positive or none
+    for some labels), too few to set per-label thresholds, so validation is carved out
+    of official train instead. Eligible: official-train patients not in the pilot split.
+    The draw is per patient and ignores report sections, so the same patients are the
+    validation set for every section's classifiers. Returns column subject_id, sorted.
+    """
+    train = images.loc[images.split == "train", "subject_id"]
+    eligible = np.array(sorted(set(train) - set(pilot.subject_id)))
+    n = round(CLASSIFIER_VAL_FRACTION * len(eligible))
+    picked = np.random.default_rng(seed).choice(eligible, size=n, replace=False)
+    return pd.DataFrame({"subject_id": sorted(picked)})
+
+
+def classifier_roles(studies: pd.DataFrame, splits_dir: Path) -> pd.Series:
+    """Role of each study for the classifiers, aligned with ``studies``.
+
+    ``train`` (fit), ``val`` (thresholds), ``pilot`` / ``prompt_tuning`` (the pilot
+    split, never trained on) and ``official_valid`` (the 200-study official valid
+    split, a small extra check only).
+    """
+    pilot = pd.read_csv(splits_dir / PILOT_SPLIT_FILE)
+    val = pd.read_csv(splits_dir / CLASSIFIER_VAL_SPLIT_FILE)
+    pilot_set = studies.subject_id.map(pilot.set_index("subject_id").set)
+    role = pd.Series("train", index=studies.index)
+    role[studies.subject_id.isin(val.subject_id)] = "val"
+    role[pilot_set.notna()] = pilot_set[pilot_set.notna()]
+    role[studies.split == "valid"] = "official_valid"
+    assert not (studies.subject_id.isin(val.subject_id) & pilot_set.notna()).any()
+    return role

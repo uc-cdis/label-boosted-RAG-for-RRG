@@ -13,6 +13,8 @@
 #     commits/<sha>/         one complete, independent clone per commit, plus .venv/
 #     uv-cache/ python/ bin/ uv's package cache, Python builds and binary, kept on the
 #                            same filesystem as commits/ so venvs hard-link from the cache
+#     bin/hf, tools/         the Hugging Face CLI, for pre-pulling weights by hand
+#                            (envs/install-hf.sh; at the versions in the latest job's lock)
 #     logs/<job-id>.out      this job's log
 #     setup.lock             held while a commit dir is being built
 #
@@ -39,6 +41,7 @@ setup_commit() {
   local sha=$1 url=$2 root=$3
   local dir=$root/commits/$sha
   export UV_INSTALL_DIR=$root/bin UV_CACHE_DIR=$root/uv-cache UV_PYTHON_INSTALL_DIR=$root/python
+  export UV_TOOL_DIR=$root/tools UV_TOOL_BIN_DIR=$root/bin
   mkdir -p "$root/commits"
   exec 9>"$root/setup.lock"
   flock 9
@@ -54,6 +57,8 @@ setup_commit() {
     (cd "$dir" && unset VIRTUAL_ENV && "$uv" sync --locked --no-dev)
     touch "$dir/.ready"
   fi
+  # Not used by jobs; kept here so every node that runs a job has it.
+  echo "$(hostname): hf $("$dir/envs/install-hf.sh")"
   flock -u 9
   echo "$(hostname): $dir ready"
 }

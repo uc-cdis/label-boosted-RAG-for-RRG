@@ -16,6 +16,8 @@ on `main` (tag `paper-v1`).
 - `slurm/`: `submit.sh [sbatch options] -- <command>` runs a command on the cluster at the
   current commit (clean tree, pushed). Each node keeps one shallow clone plus env per
   commit under `~/labrag-run/commits/<sha>/`, so jobs at different commits never interfere.
+  Every job also leaves `~/labrag-run/bin/hf` on its nodes (`envs/install-hf.sh`, versions
+  from the lock) for pre-pulling weights by hand; jobs themselves never download.
 - `external/`: upstream code as git submodules (`mimic-cxr`: MIT-LCP's report section parser)
 - `splits/`: frozen, committed split files with provenance ([splits/README.md](splits/README.md))
 - `tests/`: checks, including exact reproduction of the frozen splits

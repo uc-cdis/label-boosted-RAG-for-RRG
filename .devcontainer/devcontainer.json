@@ -18,6 +18,7 @@
     "source=/opt/gpu_working/steven/labrag-shared,target=/opt/gpu_working/steven/labrag-shared,type=bind,consistency=cached,readonly",
     "source=/opt/gpudata/models/StanfordAIMI/RRG_scorers,target=/opt/gpudata/models/StanfordAIMI/RRG_scorers,type=bind,consistency=cached,readonly",
     "source=/opt/gpudata/models/google-bert/bert-base-uncased,target=/opt/gpudata/models/google-bert/bert-base-uncased,type=bind,consistency=cached,readonly",
+    "source=/opt/gpudata/models/microsoft/rad-dino,target=/opt/gpudata/models/microsoft/rad-dino,type=bind,consistency=cached,readonly",
     "source=/opt/gpudata/cxr,target=/opt/gpudata/cxr,type=bind,consistency=cached,readonly"
   ],
   "containerEnv": {

@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 SOURCE_CSV = "chexpertplus/df_chexpert_plus_240401.csv"
+IMAGE_ROOT = "chexpertplus"  # image_path is relative to this
 
 # Corrupt in the release; renamed to .BAK locally so we don't open it. It is
 # the only image of its study (which has no Findings), so that study drops out.
@@ -42,7 +43,7 @@ PILOT_SEED = 20261109
 def load_images(cxr_root: Path) -> pd.DataFrame:
     """One row per image: subject_id, study_id, image_path, split, view, findings, impression.
 
-    ``image_path`` is the PNG path relative to ``cxr_root / "chexpertplus"`` (the CSV
+    ``image_path`` is the PNG path relative to ``cxr_root / IMAGE_ROOT`` (the CSV
     names .jpg files; the release images are PNGs).
     """
     df = pd.read_csv(

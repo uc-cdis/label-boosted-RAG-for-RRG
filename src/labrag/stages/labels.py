@@ -11,11 +11,9 @@ from pathlib import Path
 import torch
 
 from labrag import artifacts, paths, weights
-from labrag.data import chexpertplus
+from labrag.data import DATASETS
 from labrag.labelers import chexbert
 
-# dataset -> (loader of the canonical study table, author source files it reads)
-DATASETS = {"chexpertplus": (chexpertplus.load_studies, [chexpertplus.SOURCE_CSV])}
 SECTIONS = ("findings",)
 LABELERS = ("chexbert14",)
 
@@ -28,7 +26,7 @@ def run(
     cxr_root: Path | None = None,
 ) -> Path:
     cxr_root = cxr_root or paths.CXR_ROOT
-    load_studies, sources = DATASETS[dataset]
+    adapter = DATASETS[dataset]
     chexbert_dir, chexbert_record = weights.resolve("chexbert")
     bert_dir, bert_record = weights.resolve("bert-base-uncased")
     code = subprocess.run(
@@ -38,7 +36,7 @@ def run(
         check=True,
     ).stdout.strip()
     inputs = {
-        "sources": [artifacts.file_record(cxr_root / s) for s in sources],
+        "sources": [artifacts.file_record(cxr_root / adapter.SOURCE_CSV)],
         "chexbert_weights": chexbert_record,
         "bert_weights": bert_record,
         "chexbert_code": {"path": "external/CheXbert", "commit": code},
@@ -51,7 +49,7 @@ def run(
     }
 
     def build(out: Path) -> dict:
-        studies = load_studies(cxr_root)
+        studies = adapter.load_studies(cxr_root)
         studies = studies[studies[section].notna()].reset_index(drop=True)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model, tokenizer = chexbert.load_model(

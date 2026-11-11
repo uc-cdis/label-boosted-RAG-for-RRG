@@ -5,8 +5,8 @@ import sys
 from pathlib import Path
 
 from labrag import paths
-from labrag.data import chexpertplus
-from labrag.stages import labels
+from labrag.data import DATASETS, chexpertplus
+from labrag.stages import embed, labels
 
 PILOT_SPLIT_FILE = "chexpertplus_pilot_split.csv"
 
@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=splits_pilot)
 
     p = sub.add_parser("labels", help="reference labels on report text (stage labels)")
-    p.add_argument("--dataset", required=True, choices=sorted(labels.DATASETS))
+    p.add_argument("--dataset", required=True, choices=sorted(DATASETS))
     p.add_argument("--section", required=True, choices=labels.SECTIONS)
     p.add_argument("--labeler", default="chexbert14", choices=labels.LABELERS)
     p.add_argument(
@@ -51,6 +51,14 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(
         func=lambda a: labels.run(a.dataset, a.section, a.labeler, a.overwrite)
     )
+
+    p = sub.add_parser("embed", help="one image embedding per study (stage embed)")
+    p.add_argument("--dataset", required=True, choices=sorted(DATASETS))
+    p.add_argument("--encoder", default="raddino", choices=sorted(embed.ENCODERS))
+    p.add_argument(
+        "--overwrite", action="store_true", help="replace an existing artifact"
+    )
+    p.set_defaults(func=lambda a: embed.run(a.dataset, a.encoder, a.overwrite))
 
     args = ap.parse_args(argv)
     args.func(args)

@@ -75,4 +75,15 @@ fi
 dir=$root/commits/$sha
 cd "$dir"
 export VIRTUAL_ENV=$dir/.venv PATH=$dir/.venv/bin:$PATH LABRAG_COMMIT=$sha
+# Our Slurm doesn't confine jobs with cgroups, so a process can use every core of the
+# node. OpenBLAS (numpy/scipy/sklearn) and OpenMP (torch) size their thread pools to the
+# whole machine by default, and joblib (sklearn n_jobs=-1) its worker count; cap all three
+# at the job's --cpus-per-task (Slurm's default is 1). These are per pool: joblib workers
+# inherit the BLAS cap, so any n_jobs > 1 call must also pass
+# joblib.parallel_config(backend="loky", inner_max_num_threads=1).
+if [[ -n ${SLURM_JOB_ID:-} ]]; then
+  ncpu=${SLURM_CPUS_PER_TASK:-1}
+  export OPENBLAS_NUM_THREADS=$ncpu OMP_NUM_THREADS=$ncpu LOKY_MAX_CPU_COUNT=$ncpu
+  echo "thread pools and joblib workers capped at $ncpu (--cpus-per-task)"
+fi
 "$@"

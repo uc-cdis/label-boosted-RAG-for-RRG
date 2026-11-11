@@ -37,9 +37,13 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 ### Data provenance
 - **Inputs are only the files the dataset authors released.** Every derived file (sections, labels, splits) is produced by code in this repo. Locally derived files from earlier work are never read.
 - **MIMIC-CXR sections:** the dataset authors' own section parser (MIT-LCP `mimic-cxr`), used unmodified as a pinned submodule under `external/`.
-- **CheXpert Plus reports:** the release has one report row per image, and images of the same study can carry slightly different anonymized text (Stanford-AIMI/chexpert-plus#13; the clinical content is the same). We keep one canonical text per study: the first image row in a fixed order. Labels are computed on that text.
+- **CheXpert Plus reports:** the release has one report row per image, and images of the same study can carry slightly different anonymized text ([Stanford-AIMI/chexpert-plus#13](https://github.com/Stanford-AIMI/chexpert-plus/issues/13); the clinical content is the same). We keep one canonical text per study: the first image row in a fixed order. Labels are computed on that text.
 - **MIMIC-CXR labelled test set** (`mimic-cxr-2.1.0-test-set-labeled.csv`, 687 studies): 9 of its studies are in the official validation split and 2 are not in MIMIC-CXR. It is filtered to official test.
-- **Reference labels** (CheXbert-14 on the reference reports) are computed in-repo, in the pipeline env.
+- **Reference labels** (CheXbert-14 on the reference section) are computed in-repo, the same way for every dataset: one labeler at one version, on exactly the section text we generate and score. No author labels fit:
+  - **MIMIC-CXR:** its labels come from the CheXpert and NegBio labelers (not CheXbert), on findings-or-impression text rather than a fixed section.
+  - **CheXpert Plus:** its CheXbert labels are per image and can differ within a study ([#13](https://github.com/Stanford-AIMI/chexpert-plus/issues/13)).
+  - **ReXGradient:** no author labels.
+  - **PadChest-GR:** its gold labels are used as released (§5). J also needs CheXbert-14 labels on its Findings (§4.2), and the authors ship none, so those are computed in-repo too.
 
 ### Leakage controls
 - **CheXpert Plus pilot split:** 400 patients from CheXpert Plus train, each with exactly one Findings study (17,972 of the 26,634 train patients qualify), drawn once with a fixed seed. 200 are the **pilot set** and 200 the **prompt-tuning set** (§3), so the CoT prompt isn't tuned on the studies that then choose between settings. Both are excluded from the CheXpert Plus classifiers and every retrieval corpus.
@@ -207,7 +211,7 @@ Can classifiers cheaply trained on **another dataset**, in **a richer vocabulary
 
 ### 5.3 Building the localized labels
 - **Source:** PadChest's `LabelsLocalizationsBySentence` pairs each finding with the locations in the same sentence. PadChest-GR's per-sentence labels and locations give the gold localized labels.
-- **Location tree:** PadChest's anatomic location hierarchy (Bustos et al. 2020, arXiv 1901.07441v2, Appendix A.1.3). No author file ships it, so it is transcribed into `src/labrag/data/padchest_locations.tsv` and cited. A location such as "left lower lobe" has two parents: an anatomic one, which gives the side, and a lung-field zone, which gives upper, middle or lower. "By side/zone" and "by location" are two cuts of this tree.
+- **Location tree:** PadChest's anatomic location hierarchy (Bustos et al. 2020, arXiv 1901.07441v2, Appendix A.1.3). No author file ships it, so it is transcribed into `resources/padchest_locations.tsv` and cited. A location such as "left lower lobe" has two parents: an anatomic one, which gives the side, and a lung-field zone, which gives upper, middle or lower. "By side/zone" and "by location" are two cuts of this tree.
 - **Rare pairs back off.** PadChest has 3,608 finding × location pairs, only 197 of them in ≥100 images, and PadChest-GR validation (455 studies) is too small to set thresholds for rare pairs. A pair with too few examples moves up to its parent location ("left lower lobe" → "left lung" → "lung"), and with no location left it is the plain finding. The minimum count is set at implementation.
 - **Pairs that repeat the finding are dropped** (e.g. cardiomegaly + cardiac, aortic elongation + aortic).
 - **In retrieval,** a localized label also counts as its plain finding, so "effusion, left" still partly matches "effusion, right".

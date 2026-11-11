@@ -1,3 +1,6 @@
 [submodule "external/mimic-cxr"]
 	path = external/mimic-cxr
 	url = https://github.com/MIT-LCP/mimic-cxr.git
+[submodule "external/CheXbert"]
+	path = external/CheXbert
+	url = https://github.com/stanfordmlgroup/CheXbert.git

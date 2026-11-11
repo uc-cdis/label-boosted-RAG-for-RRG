@@ -1,0 +1,25 @@
+# Model weights. Each repo is pre-pulled on every node as a full clone of its latest head:
+#   hf download <repo> --local-dir $LABRAG_MODELS_ROOT/<repo>
+# Jobs never download. They check the sha256 of every file they load (listed here) and
+# record the revision that `hf download` wrote next to each file.
+
+# CheXbert (Smit et al. 2020). The authors' original Stanford Box link is gone
+# (stanfordmlgroup/CheXbert#10); this is the copy the Stanford AIMI group hosts with its
+# report scorers. chexbert.pth was uploaded once (commit 4ccc069b, 2022-05-13) and has
+# not changed since.
+chexbert:
+  repo: StanfordAIMI/RRG_scorers
+  files:
+    chexbert.pth: 6550703c92d640e1e04d8105a7a185d76ece0f25fcbf033d292785bf22c0fde1
+
+# BERT base, for CheXbert's tokenizer and architecture. The files transformers reads:
+# config.json (architecture), model.safetensors (CheXbert's model class loads it, then
+# its checkpoint overwrites every weight), tokenizer.json and tokenizer_config.json
+# (lowercasing). vocab.txt is not read when tokenizer.json is present.
+bert-base-uncased:
+  repo: google-bert/bert-base-uncased
+  files:
+    config.json: 7160e1553ad2ca51d8c1cb066be533db31826e12d173824c1bb0cb1a4f187d20
+    model.safetensors: 68d45e234eb4a928074dfd868cead0219ab85354cc53d20e772753c6bb9169d3
+    tokenizer.json: ce64fce797c24f68df90b40a3f74f579b336a493db14bd583fd520ea0d8c9a98
+    tokenizer_config.json: a025160ef0431f1a392f6f050c1310f4c5d9fb6f275932dbccba73c4d214bf10

@@ -8,14 +8,13 @@ breaks a sum. Names are checked against the label CSV. CUIs are checked only by 
 import ast
 import re
 from collections import defaultdict
-from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from labrag import paths
 
-TABLE = Path(__file__).resolve().parents[1] / "src/labrag/data/padchest_locations.tsv"
+TABLE = paths.RESOURCES_DIR / "padchest_locations.tsv"
 PADCHEST_CSV = "padchest/PADCHEST_chest_x_ray_images_labels_160K_01.02.19.csv.gz"
 
 

@@ -3,7 +3,8 @@
 # with the Slurm client.
 #
 #   slurm/submit.sh [--with-nvl02] [sbatch options...] -- <command> [args...]
-#   e.g. slurm/submit.sh --gres=gpu:h200_rail0:1 -- python -m labrag.cli splits pilot
+#   e.g. slurm/submit.sh --gres=gpu:1 -- labrag labels --dataset chexpertplus --section findings
+#   (request a rail type, gpu:h200_rail0/1, only when the job needs rail alignment)
 #
 # The job runs exactly the commit at HEAD, cloned from GitHub on each node (slurm/job.sh),
 # so the tree must be clean and HEAD must be on GitHub. kg35-nvl02 has no copy of the

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from labrag import paths
 from labrag.data import DATASETS, chexpertplus
-from labrag.stages import classify, embed, labels
+from labrag.stages import build_prompts, classify, embed, labels
 
 PILOT_SPLIT_FILE = chexpertplus.PILOT_SPLIT_FILE
 
@@ -84,6 +84,35 @@ def main(argv: list[str] | None = None) -> None:
             a.classifier,
             a.uncertain,
             a.overwrite,
+        )
+    )
+
+    p = sub.add_parser(
+        "build-prompts", help="one chat prompt per target study (stage build-prompts)"
+    )
+    p.add_argument(
+        "--experiment", required=True, choices=sorted(build_prompts.EXPERIMENTS)
+    )
+    p.add_argument("--section", required=True, choices=labels.SECTIONS)
+    p.add_argument("--condition", required=True, choices=build_prompts.CONDITIONS)
+    p.add_argument(
+        "--prompt",
+        help="version in configs/prompts.yaml (default: "
+        + ", ".join(f"{c} {v}" for c, v in build_prompts.DEFAULT_PROMPT.items())
+        + ")",
+    )
+    p.add_argument(
+        "--uncertain",
+        default="ones",
+        choices=sorted(classify.POSITIVE),
+        help="labrag only: which classifier variant (as in classify)",
+    )
+    p.add_argument(
+        "--overwrite", action="store_true", help="replace an existing artifact"
+    )
+    p.set_defaults(
+        func=lambda a: build_prompts.run(
+            a.experiment, a.section, a.condition, a.prompt, a.uncertain, a.overwrite
         )
     )
 

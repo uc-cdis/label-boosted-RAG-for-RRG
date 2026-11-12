@@ -2,13 +2,14 @@
 
 Reads ``embeddings/<dataset>/<encoder>/`` and ``labels/<dataset>/<section>/<labeler>/``
 and writes ``classifiers/<dataset>/<encoder>.<classifier>/<section>/<labeler>[.u0]/``:
-- ``model.npz``: labels, coef (n_labels, dim), intercept, threshold; enough to predict
-  on any embeddings from the same encoder (e.g. other datasets, J and §4.3);
+- ``model.npz``: labels, coef (n_labels, dim), intercept, threshold; with
+  ``consistent``, enough to predict on any embeddings from the same encoder (e.g.
+  other datasets, J and §4.3);
 - ``probs.csv``: study_id, role, one probability column per label;
-- ``predictions.csv``: study_id, one 0/1 column per label (prob >= threshold), the
-  same layout as the reference labels.csv;
-- ``metrics.csv``: per label, counts, threshold, and AUROC/F1/precision/recall on val
-  and on the official valid split.
+- ``predictions.csv``: study_id, one 0/1 column per label (prob >= threshold, then
+  ``consistent``), the same layout as the reference labels.csv;
+- ``metrics.csv``: per label, counts, threshold, and AUROC/F1/precision/recall of the
+  predictions on val and on the official valid split.
 
 Rows are the studies that have reference labels for this section: classifiers are fit
 within each section, never on another section's labels. Roles come from the adapter
@@ -18,6 +19,13 @@ predicted only. Uncertain labels follow the CheXpert policies (Irvin et al. 2019
 (U-Zeros) maps only positive to 1 and adds ``.u0`` to the labeler directory. Negative
 and not mentioned are always 0. No out-of-fold predictions yet (§2 "Leakage
 controls"): nothing trains on these predictions so far.
+
+Pathologies win over No Finding (``consistent``): after thresholding, No Finding is
+cleared wherever any label other than Support Devices is predicted. No Finding then
+means "normal" only when its own classifier and every pathology classifier agree.
+CheXbert's reference labels follow the same rule in all but 40 of the 46,759 CheXpert
+Plus Findings studies. The No Finding threshold is still max-F1 on its own
+probabilities.
 """
 
 from pathlib import Path
@@ -38,6 +46,9 @@ BINARIZE = {
     "zeros": "positive = 1, uncertain or negative or blank = 0",
 }
 LABELER_SUFFIX = {"ones": "", "zeros": ".u0"}
+NO_FINDING = "No Finding"
+NOT_PATHOLOGY = ("No Finding", "Support Devices")
+CONSISTENCY = "No Finding = 0 when any label other than Support Devices is predicted"
 
 
 def run(
@@ -73,6 +84,7 @@ def run(
         "binarize": BINARIZE[uncertain],
         "fit": "train",
         "threshold": "max F1 on val; predict prob >= threshold",
+        "consistency": CONSISTENCY,
     }
 
     def build(out: Path) -> dict:
@@ -99,7 +111,7 @@ def run(
         threshold = np.array(
             [logistic.f1_threshold(Y[val, j], P[val, j]) for j in range(len(names))]
         )
-        pred = (P >= threshold).astype(int)
+        pred = consistent((P >= threshold).astype(int), names)
 
         metrics = pd.DataFrame(
             {
@@ -140,6 +152,14 @@ def run(
         build,
         overwrite,
     )
+
+
+def consistent(pred: np.ndarray, names: list[str]) -> np.ndarray:
+    """Pathologies win over No Finding: clear No Finding where any pathology is 1."""
+    pred = pred.copy()
+    pathology = [j for j, n in enumerate(names) if n not in NOT_PATHOLOGY]
+    pred[pred[:, pathology].any(axis=1), names.index(NO_FINDING)] = 0
+    return pred
 
 
 def _scores(prefix: str, Y: np.ndarray, P: np.ndarray, pred: np.ndarray) -> dict:

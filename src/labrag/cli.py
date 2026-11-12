@@ -4,9 +4,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from labrag import paths
+from labrag import paths, serving
 from labrag.data import DATASETS, chexpertplus
-from labrag.stages import build_prompts, classify, embed, labels
+from labrag.stages import build_prompts, classify, embed, generate, labels
 
 PILOT_SPLIT_FILE = chexpertplus.PILOT_SPLIT_FILE
 
@@ -114,6 +114,29 @@ def main(argv: list[str] | None = None) -> None:
         func=lambda a: build_prompts.run(
             a.experiment, a.section, a.condition, a.prompt, a.uncertain, a.overwrite
         )
+    )
+
+    p = sub.add_parser(
+        "generate", help="generations from a vLLM-served model (stage generate)"
+    )
+    p.add_argument(
+        "--prompts",
+        required=True,
+        nargs="+",
+        help="prompt artifacts, relative to prompts/ (one server serves them all)",
+    )
+    p.add_argument("--set", required=True, help="target set, e.g. pilot")
+    p.add_argument(
+        "--model", required=True, choices=sorted(serving.load_config("models"))
+    )
+    p.add_argument(
+        "--sampling", required=True, choices=sorted(serving.load_config("sampling"))
+    )
+    p.add_argument(
+        "--overwrite", action="store_true", help="replace existing artifacts"
+    )
+    p.set_defaults(
+        func=lambda a: generate.run(a.prompts, a.set, a.model, a.sampling, a.overwrite)
     )
 
     args = ap.parse_args(argv)

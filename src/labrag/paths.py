@@ -18,6 +18,10 @@ SHARED_ROOT = Path(
     os.environ.get("LABRAG_SHARED_ROOT", "/opt/gpu_working/steven/labrag-shared")
 )
 
+# Node-local run root of slurm/job.sh (commit checkouts, uv cache, logs). Long-lived
+# node-local caches (e.g. vLLM's compile cache) live here too, never on NFS.
+RUN_ROOT = Path(os.environ.get("LABRAG_RUN_ROOT", Path.home() / "labrag-run"))
+
 # All pipeline outputs.
 OUT_ROOT = Path(os.environ.get("LABRAG_OUT_ROOT", "/home/songs1/labrag-outputs"))
 

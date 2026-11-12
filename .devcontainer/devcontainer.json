@@ -16,9 +16,7 @@
     "source=${localEnv:HOME}/labrag-outputs-v1,target=${localEnv:HOME}/labrag-outputs-v1,type=bind,consistency=cached,readonly",
     "source=${localEnv:HOME}/labrag-run,target=${localEnv:HOME}/labrag-run,type=bind,consistency=cached,readonly",
     "source=/opt/gpu_working/steven/labrag-shared,target=/opt/gpu_working/steven/labrag-shared,type=bind,consistency=cached,readonly",
-    "source=/opt/gpudata/models/StanfordAIMI/RRG_scorers,target=/opt/gpudata/models/StanfordAIMI/RRG_scorers,type=bind,consistency=cached,readonly",
-    "source=/opt/gpudata/models/google-bert/bert-base-uncased,target=/opt/gpudata/models/google-bert/bert-base-uncased,type=bind,consistency=cached,readonly",
-    "source=/opt/gpudata/models/microsoft/rad-dino,target=/opt/gpudata/models/microsoft/rad-dino,type=bind,consistency=cached,readonly",
+    "source=/opt/gpudata/models,target=/opt/gpudata/models,type=bind,consistency=cached,readonly",
     "source=/opt/gpudata/cxr,target=/opt/gpudata/cxr,type=bind,consistency=cached,readonly"
   ],
   "containerEnv": {

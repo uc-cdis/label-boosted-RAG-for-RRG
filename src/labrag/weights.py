@@ -1,11 +1,15 @@
 """Locate and verify pre-pulled model weights (configs/weights.yaml)."""
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import yaml
 
 from labrag import paths
 from labrag.artifacts import sha256_file
+
+HASH_WORKERS = min(16, int(os.environ.get("SLURM_CPUS_PER_TASK", 8)))
 
 
 def load_config() -> dict:
@@ -26,14 +30,24 @@ def resolve(name: str, models_root: Path | None = None) -> tuple[Path, dict]:
     """
     entry = load_config()[name]
     model_dir = (models_root or paths.MODELS_ROOT) / entry["repo"]
+    for filename in entry["files"]:
+        if not (model_dir / filename).is_file():
+            raise SystemExit(
+                f"weights {name}: missing {model_dir / filename} "
+                "(pre-pull it; jobs never download)"
+            )
+    # hashlib releases the GIL, so threads hash files in parallel (55 GB in ~20 s).
+    with ThreadPoolExecutor(max_workers=HASH_WORKERS) as pool:
+        hashes = dict(
+            zip(
+                entry["files"],
+                pool.map(sha256_file, [model_dir / f for f in entry["files"]]),
+            )
+        )
     files = {}
     for filename, expected in entry["files"].items():
         path = model_dir / filename
-        if not path.is_file():
-            raise SystemExit(
-                f"weights {name}: missing {path} (pre-pull it; jobs never download)"
-            )
-        actual = sha256_file(path)
+        actual = hashes[filename]
         if actual != expected:
             raise SystemExit(
                 f"weights {name}: sha256 of {path} is {actual}, expected {expected}"

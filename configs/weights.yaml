@@ -34,3 +34,34 @@ rad-dino:
     config.json: 89daf9751d9576d586dedf9543c1083211611fa3a36908db7a799b3ce7c68ede
     model.safetensors: dbfb9f54459c38773505de64a6ab7807bdcb392610fe1e697166342e43fb91ae
     preprocessor_config.json: c537fc995c30e2353f07253899618d60e9eae3d5f82473778602c007c6523b56
+
+# Qwen3.5-27B (Qwen 2026), Apache-2.0, BF16. The multimodal checkpoint
+# (Qwen3_5ForConditionalGeneration); text-only runs serve it with --language-model-only
+# (configs/models.yaml). Every file vLLM may read: config, generation config, tokenizer,
+# chat template, processor configs and the 11 safetensors shards (55.6 GB). Revision
+# fc05daec18b0a78c049392ed2e771dde82bdf654 (2026-04-24); the shard hashes equal the
+# sha256 Hugging Face lists for that revision.
+qwen3.5-27b:
+  repo: Qwen/Qwen3.5-27B
+  files:
+    chat_template.jinja: a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715
+    config.json: f8d190c5b89c1521220f935d2567a587d6e291ed69066a45a106560b05a2174c
+    generation_config.json: 303aba891d66ab63908a7b3cc9163bcb835fdf8b9f6301c73216f3f1eb3992dd
+    merges.txt: a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d
+    model.safetensors-00001-of-00011.safetensors: 9019228d172c87d5603266c2d56672d119e838facffa164de803a1ebf0d716d2
+    model.safetensors-00002-of-00011.safetensors: 890ef00c920b01c1c02755088c8d8ca5cdd6a1faa2a9a729eecd00857648b411
+    model.safetensors-00003-of-00011.safetensors: 8aca03689ad0717fb91455809a6670eecca818bea8c0b6bd3a591a8807cc3223
+    model.safetensors-00004-of-00011.safetensors: 20f539430c60fa611b3522b8408749a080b63f1fe034e551a6539ef864ca079a
+    model.safetensors-00005-of-00011.safetensors: 57a0c074c654f05fc2d6b5112eeec387ac04986e928e42f502993e69aa03a49d
+    model.safetensors-00006-of-00011.safetensors: cfa4e6fbfc600854ef6c8e5465d0a1e43832a64b5e539f1e880333e3b1086703
+    model.safetensors-00007-of-00011.safetensors: d426963325b2319cb9e1442bc8b89b9a7748a8f7a907aa4041c11531cda6b014
+    model.safetensors-00008-of-00011.safetensors: fe60dbb9d25354c4eb2a9a59d9b1afd07741c8bebab5870f5eea6eadb4cf9a06
+    model.safetensors-00009-of-00011.safetensors: 71a153d882242734a1fc7e000734727f00f6ec8ca70b044f5e44fcf97736ef8f
+    model.safetensors-00010-of-00011.safetensors: 146745698b9f21940e2982beb1816a0eef3b80d77ab9cd884695b9a08c2697eb
+    model.safetensors-00011-of-00011.safetensors: d947ce7483c4109b55039f1359f4494d22390cf123568100abd89816802f097d
+    model.safetensors.index.json: b3737e9d00bda0e37f0b873629d98bf9b407bef35735b9193c23d9844bcc96a6
+    preprocessor_config.json: 27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516
+    tokenizer.json: 5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42
+    tokenizer_config.json: 316230d6a809701f4db5ea8f8fc862bc3a6f3229c937c174e674ff3ca0a64ac8
+    video_preprocessor_config.json: 7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13
+    vocab.json: ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003

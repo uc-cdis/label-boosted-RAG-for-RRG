@@ -1,0 +1,24 @@
+# Per-request sampling settings. Each entry:
+#   chat_template_kwargs: passed to the model's chat template (e.g. the thinking switch,
+#                         always set explicitly);
+#   params:               OpenAI / vLLM sampling parameters. Every parameter the model's
+#                         generation_config.json sets is given here, so its defaults never
+#                         apply silently.
+#   seed:                 the same seed for every request. vLLM's seeded sampling is not
+#                         bit-for-bit reproducible across batch compositions.
+
+# Qwen3.5 thinking mode, "general tasks" settings from the Qwen/Qwen3.5-27B model card
+# (its generation_config.json says temperature 0.6; the card's 1.0 is used). Output cap
+# 32k tokens: generous on purpose for the first pilot run, to see how long thinking
+# runs before the pilot sets the budgets.
+qwen3.5-thinking-32k:
+  chat_template_kwargs: {enable_thinking: true}
+  params:
+    temperature: 1.0
+    top_p: 0.95
+    top_k: 20
+    min_p: 0.0
+    presence_penalty: 1.5
+    repetition_penalty: 1.0
+    max_tokens: 32768
+  seed: 20261112

@@ -91,6 +91,34 @@ def _now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
 
 
+def is_built(
+    relpath: str, config: dict, overwrite: bool = False, shared_root: Path | None = None
+) -> bool:
+    """True if the artifact exists with this config (publish would skip it).
+
+    Raises SystemExit where publish would refuse: a different config without
+    ``overwrite``, or a directory without a manifest. Lets a stage skip expensive setup
+    (e.g. starting a model server) when everything it would build already exists.
+    """
+    final = (shared_root or paths.SHARED_ROOT) / relpath
+    config = _normalize(config)
+    existing = read_manifest(final)
+    if existing is not None and not overwrite:
+        if existing["config"] == config:
+            return True
+        raise SystemExit(
+            f"REFUSED: {final} exists with a different config.\n"
+            f"  existing: {json.dumps(existing['config'], sort_keys=True)}\n"
+            f"  new:      {json.dumps(config, sort_keys=True)}\n"
+            "Use a new name, or --overwrite to replace it."
+        )
+    if final.exists() and existing is None:
+        raise SystemExit(
+            f"REFUSED: {final} exists but has no {MANIFEST}; not touching it"
+        )
+    return False
+
+
 def publish(
     relpath: str,
     config: dict,
@@ -107,21 +135,9 @@ def publish(
     """
     final = (shared_root or paths.SHARED_ROOT) / relpath
     config = _normalize(config)
-    existing = read_manifest(final)
-    if existing is not None and not overwrite:
-        if existing["config"] == config:
-            print(f"SKIP: {final} already built with this config")
-            return final
-        raise SystemExit(
-            f"REFUSED: {final} exists with a different config.\n"
-            f"  existing: {json.dumps(existing['config'], sort_keys=True)}\n"
-            f"  new:      {json.dumps(config, sort_keys=True)}\n"
-            "Use a new name, or --overwrite to replace it."
-        )
-    if final.exists() and existing is None:
-        raise SystemExit(
-            f"REFUSED: {final} exists but has no {MANIFEST}; not touching it"
-        )
+    if is_built(relpath, config, overwrite, shared_root):
+        print(f"SKIP: {final} already built with this config")
+        return final
 
     started = _now()
     with tempfile.TemporaryDirectory(prefix="labrag-") as stage:

@@ -1,0 +1,13 @@
+# Generators. Each entry: the weights (configs/weights.yaml), the container that serves
+# them (configs/containers.yaml), and the extra `vllm serve` arguments. The served model
+# name is the entry's name. Sampling and thinking switches are per request
+# (configs/sampling.yaml).
+
+# Qwen3.5-27B, text only. --reasoning-parser qwen3 splits the <think> block into the
+# response's `reasoning` field, so `content` is the report alone. --language-model-only
+# skips the vision encoder. --max-model-len: prompts are at most ~3k tokens and output
+# caps at most 32k so far.
+qwen3.5-27b:
+  weights: qwen3.5-27b
+  container: vllm
+  serve_args: [--reasoning-parser, qwen3, --language-model-only, --max-model-len, "40960"]

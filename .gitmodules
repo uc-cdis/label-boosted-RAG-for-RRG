@@ -4,3 +4,6 @@
 [submodule "external/CheXbert"]
 	path = external/CheXbert
 	url = https://github.com/stanfordmlgroup/CheXbert.git
+[submodule "external/CXR-Report-Metric"]
+	path = external/CXR-Report-Metric
+	url = https://github.com/rajpurkarlab/CXR-Report-Metric.git

@@ -1,0 +1,103 @@
+# Every package of upstream's requirements.txt resolved as of 2023-05-15, the day after the
+# commit pinned (9c9ecad, 2023-05-14), for Python 3.7. Upstream pins only part of its tree;
+# resolving the rest against today's PyPI breaks the build (e.g. jsonnet >= 0.21 needs
+# setuptools >= 72.2, which has no Python 3.7 release, and declares no Python bound).
+# Used as pip constraints (-c), so upstream's requirements.txt stays as it is.
+#
+# Generated with uv 0.13.7:
+#   uv pip compile external/CXR-Report-Metric/requirements.txt --python-version 3.7 \
+#     --python-platform x86_64-manylinux_2_28 --exclude-newer 2023-05-15 --config-file uv.toml
+# where uv.toml gives bert-score 0.3.11's dependencies by hand (uv can't parse its malformed
+# "transformers (>=3.0.0numpy)"; pip 23 reads it as transformers>=3.0.0):
+#   [[dependency-metadata]]
+#   name = "bert-score"
+#   version = "0.3.11"
+#   requires-dist = ["torch>=1.0.0", "pandas>=1.0.1", "transformers>=3.0.0", "requests",
+#                    "tqdm>=4.31.1", "matplotlib", "packaging>=20.9"]
+alembic==1.11.0
+allennlp==1.1.0
+allennlp-models==1.1.0
+beautifulsoup4==4.8.1
+bert-score==0.3.11
+blis==0.7.9
+boto3==1.26.134
+botocore==1.29.134
+catalogue==1.0.2
+certifi==2023.5.7
+charset-normalizer==3.1.0
+click==8.1.3
+cmaes==0.9.1
+colorlog==6.7.0
+conllu==4.1
+cycler==0.11.0
+cymem==2.0.7
+exceptiongroup==1.1.1
+fast-bleu==0.0.90
+filelock==3.0.12
+fonttools==4.38.0
+ftfy==6.1.1
+future==0.18.3
+greenlet==2.0.2
+h5py==3.8.0
+idna==3.4
+importlib-metadata==6.6.0
+importlib-resources==5.12.0
+iniconfig==2.0.0
+jmespath==1.0.1
+joblib==1.2.0
+jsonnet==0.20.0
+jsonpickle==3.0.1
+kiwisolver==1.4.4
+levenshtein==0.21.0
+lxml==4.9.2
+mako==1.2.4
+markupsafe==2.1.2
+matplotlib==3.5.3
+murmurhash==1.0.9
+nltk==3.8.1
+numpy==1.18.2
+optuna==3.1.1
+overrides==3.1.0
+packaging==23.1
+pandas==1.0.1
+patsy==0.5.3
+pillow==9.5.0
+plac==1.1.3
+pluggy==1.0.0
+preshed==3.0.8
+protobuf==3.20.3
+py-rouge==1.1
+pyparsing==3.0.9
+pytest==7.3.1
+python-dateutil==2.8.2
+python-levenshtein==0.21.0
+pytz==2023.3
+pyyaml==6.0
+rapidfuzz==3.0.0
+regex==2023.5.5
+requests==2.30.0
+s3transfer==0.6.1
+sacremoses==0.0.53
+scikit-learn==0.22.1
+scipy==1.7.3
+sentencepiece==0.1.99
+setuptools==67.7.2
+six==1.16.0
+soupsieve==2.4.1
+spacy==2.3.9
+sqlalchemy==2.0.13
+srsly==1.0.6
+statsmodels==0.13.0
+tensorboardx==2.6
+thinc==7.4.6
+tokenizers==0.8.0rc4
+tomli==2.0.1
+torch==1.6.0
+tqdm==4.38.0
+transformers==3.0.1
+typing-extensions==4.5.0
+urllib3==1.26.15
+wasabi==0.10.1
+wcwidth==0.2.6
+word2number==1.1
+zipp==3.15.0

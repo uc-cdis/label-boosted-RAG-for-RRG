@@ -1,0 +1,40 @@
+# The evaluation metrics, one service per official upstream, each in its own image with
+# that upstream's own pins (docs/revision-plan.md §7). Paths are relative to this file.
+#
+#   docker compose -f eval/compose.yaml build [service]
+#   docker compose -f eval/compose.yaml run --rm -v <dir>:<dir> --user <uid>:<gid> \
+#     -e OMP_NUM_THREADS=<n> <service> <args...>
+#
+# Images are tagged with the repo commit they were built from (LABRAG_COMMIT, set by the
+# evaluate stage; "dev" by hand), so jobs at different commits on one node never run each
+# other's image. The stage builds before it runs; BuildKit's layer cache makes that
+# near-instant when nothing changed. vLLM generation is not here (src/labrag/serving.py).
+#
+# Every service: no network (all model files come from /models, the host weights root,
+# read-only) and no GPU unless it says so.
+
+name: labrag-eval
+
+x-offline: &offline
+  network_mode: none
+  volumes:
+    # long syntax: a node without the weights root fails here, instead of Docker
+    # creating an empty directory in its place
+    - type: bind
+      source: ${LABRAG_MODELS_ROOT:-/opt/gpudata/models}
+      target: /models
+      read_only: true
+      bind:
+        create_host_path: false
+
+services:
+  # BLEU-2, BERTScore, SembScore, RadGraph F1, RadCliQ-v1. CPU only (see its Dockerfile).
+  cxr-report-metric:
+    <<: *offline
+    image: labrag/cxr-report-metric:${LABRAG_COMMIT:-dev}
+    build:
+      context: cxr-report-metric
+      additional_contexts:
+        upstream: ../external/CXR-Report-Metric
+    environment:
+      - OMP_NUM_THREADS  # required by run.py

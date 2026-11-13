@@ -1,0 +1,109 @@
+diff --git a/CXRMetric/CheXbert/src/datasets/unlabeled_dataset.py b/CXRMetric/CheXbert/src/datasets/unlabeled_dataset.py
+index fa259b1..ea05b7f 100644
+--- a/CXRMetric/CheXbert/src/datasets/unlabeled_dataset.py
++++ b/CXRMetric/CheXbert/src/datasets/unlabeled_dataset.py
+@@ -13,7 +13,7 @@ class UnlabeledDataset(Dataset):
+                 @param csv_path (string): path to the csv file containing rhe reports. It
+                                           should have a column named "Report Impression"
+                 """
+-                tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
++                tokenizer = BertTokenizer.from_pretrained('/models/google-bert/bert-base-uncased')  # LaB-RAG: local copy
+                 impressions = bert_tokenizer.get_impressions_from_csv(csv_path)
+                 self.encoded_imp = bert_tokenizer.tokenize(impressions, tokenizer)
+ 
+diff --git a/CXRMetric/CheXbert/src/models/bert_encoder.py b/CXRMetric/CheXbert/src/models/bert_encoder.py
+index 85b92e7..9fd6fe7 100644
+--- a/CXRMetric/CheXbert/src/models/bert_encoder.py
++++ b/CXRMetric/CheXbert/src/models/bert_encoder.py
+@@ -19,7 +19,7 @@ class bert_encoder(nn.Module):
+         elif clinical:
+             self.bert = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
+         else:
+-            self.bert = BertModel.from_pretrained('bert-base-uncased')
++            self.bert = BertModel.from_pretrained('/models/google-bert/bert-base-uncased')  # LaB-RAG: local copy
+ 
+         if freeze_embeddings:
+             for param in self.bert.embeddings.parameters():
+diff --git a/CXRMetric/radgraph_evaluate_model.py b/CXRMetric/radgraph_evaluate_model.py
+index 87b9997..64823df 100644
+--- a/CXRMetric/radgraph_evaluate_model.py
++++ b/CXRMetric/radgraph_evaluate_model.py
+@@ -31,7 +31,9 @@ def compute_f1(test, retrieved):
+             if precision + recall != 0 else 0
+     return f1
+ 
+-def generate_radgraph(model_path, raw_path, output_path, cuda=0,
++# LaB-RAG: CPU (cuda=-1). This torch (1.6, CUDA 10.2) has no kernels for our GPUs (H200,
++# sm_90): on them it errors or, for some ops, silently returns wrong values.
++def generate_radgraph(model_path, raw_path, output_path, cuda=-1,
+                       start=None, end=None,
+                       sentence=False, image=False,
+                       data_source="MIMIC-CXR", data_split="metric-oracle"):
+diff --git a/CXRMetric/radgraph_inference/inference.py b/CXRMetric/radgraph_inference/inference.py
+index c3bb2b2..8ea0df2 100644
+--- a/CXRMetric/radgraph_inference/inference.py
++++ b/CXRMetric/radgraph_inference/inference.py
+@@ -46,6 +46,15 @@ def preprocess_reports(data_path, start, end, sentence=False, image=False):
+             json.dump(item, outfile)
+             outfile.write("\n")
+ 
++# LaB-RAG: the archive's config names PubMedBERT by Hub id; load the local copy instead
++# (the Hub renamed it BiomedBERT; its weights.th replaces every encoder weight anyway).
++RADGRAPH_ENCODER = "/models/microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext"
++RADGRAPH_ENCODER_OVERRIDES = json.dumps({
++    "dataset_reader.token_indexers.bert.model_name": RADGRAPH_ENCODER,
++    "model.embedder.token_embedders.bert.model_name": RADGRAPH_ENCODER,
++})
++
++
+ def run_inference(model_path, cuda):
+     
+     """ Runs the inference on the processed input files. Saves the result in a
+@@ -65,6 +74,7 @@ def run_inference(model_path, cuda):
+             --use-dataset-reader \
+             --output-file {out_path} \
+             --cuda-device {cuda} \
++            --overrides '{RADGRAPH_ENCODER_OVERRIDES}' \
+             --silent")
+ 
+ def postprocess_reports(data_source, data_split):
+diff --git a/CXRMetric/run_eval.py b/CXRMetric/run_eval.py
+index 7c5b16f..e697ef8 100644
+--- a/CXRMetric/run_eval.py
++++ b/CXRMetric/run_eval.py
+@@ -6,6 +6,7 @@ import pandas as pd
+ import pickle
+ import torch
+ 
++import bert_score
+ from bert_score import BERTScorer
+ from fast_bleu import BLEU
+ from sklearn.linear_model import LinearRegression
+@@ -100,7 +101,12 @@ def add_bertscore_col(gt_df, pred_df, use_idf):
+     method_reports = [re.sub(r' +', ' ', report) for report in method_reports]
+ 
+     scorer = BERTScorer(
+-        model_type="distilroberta-base",
++        # LaB-RAG: local copy of distilroberta-base. A path is not in bert-score's
++        # tables, so its defaults for this model (layer 5, en baseline) are given.
++        model_type="/models/distilbert/distilroberta-base",
++        num_layers=5,
++        baseline_path=os.path.join(os.path.dirname(bert_score.__file__),
++                                   "rescale_baseline/en/distilroberta-base.tsv"),
+         batch_size=256,
+         lang="en",
+         rescale_with_baseline=True,
+diff --git a/config.py b/config.py
+index 1b47abb..e7240e4 100644
+--- a/config.py
++++ b/config.py
+@@ -1,6 +1,7 @@
+ # Model checkpoints
+-CHEXBERT_PATH = "CheXbert/models/chexbert.pth"
+-RADGRAPH_PATH = "radgraph/physionet.org/files/radgraph/1.0.0/models/model_checkpoint/model.tar.gz"
++# LaB-RAG: model files from the read-only /models mount (the host weights root).
++CHEXBERT_PATH = "/models/StanfordAIMI/RRG_scorers/chexbert.pth"
++RADGRAPH_PATH = "/models/radgraph/model_checkpoint/model.tar.gz"
+ 
+ # Report paths
+ GT_REPORTS = "reports/gt_reports.csv"

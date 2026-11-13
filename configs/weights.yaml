@@ -65,3 +65,52 @@ qwen3.5-27b:
     tokenizer_config.json: 316230d6a809701f4db5ea8f8fc862bc3a6f3229c937c174e674ff3ca0a64ac8
     video_preprocessor_config.json: 7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13
     vocab.json: ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003
+
+# --- Evaluation (eval/compose.yaml) ---
+# Each entry lists exactly the files the metric's container opens under /models (traced
+# with strace over a full run, upstream's subprocesses included, 2026-11-13); the
+# evaluate stage checks them before building anything. CXR-Report-Metric also reads
+# chexbert.pth (the chexbert entry above).
+
+# BERT base for CheXbert inside CXR-Report-Metric. transformers 3.0.1 reads
+# pytorch_model.bin and vocab.txt (it predates safetensors and fast-tokenizer files), so
+# this is a different file set from bert-base-uncased above. pytorch_model.bin equals
+# the legacy S3 file upstream's shortcut name used to download. Revision 86b5e093.
+cxr-report-metric.bert-base-uncased:
+  repo: google-bert/bert-base-uncased
+  files:
+    config.json: 7160e1553ad2ca51d8c1cb066be533db31826e12d173824c1bb0cb1a4f187d20
+    pytorch_model.bin: 097417381d6c7230bd9e3557456d726de6e83245ec8b24f529f60198a67b203a
+    tokenizer_config.json: a025160ef0431f1a392f6f050c1310f4c5d9fb6f275932dbccba73c4d214bf10
+    vocab.txt: 07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3
+
+# DistilRoBERTa base, BERTScore's model in CXR-Report-Metric (layer 5, rescaled with the
+# baseline bert-score ships). Revision fb53ab88.
+cxr-report-metric.distilroberta-base:
+  repo: distilbert/distilroberta-base
+  files:
+    config.json: c89c71e1352d0d95f0cc3da0b4d1d22b64c2be0bbdaa36cd9be451d6c781b4fa
+    merges.txt: 1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5
+    pytorch_model.bin: ec1ed6ff4c9753d2fc41ddf4a63cc099697b6cfc308f3df668659e8d16f84c57
+    tokenizer_config.json: 994f46754c5bf4014f1aa92d34b1374319c3a6b3f702105cd5b742beaecd18ce
+    vocab.json: 9e7f63c2d15d666b52e21d250d2e513b87c9b713cfa6987a82ed89e5e6e50655
+
+# BiomedBERT (formerly PubMedBERT) abstract+fulltext: RadGraph's encoder architecture and
+# tokenizer (allennlp builds the model from it; the RadGraph checkpoint then overwrites
+# its weights). Head vocab == the 2020 S3 files; weights differ only by the 2021 LM-head
+# fix, which RadGraph doesn't use. Revision e1354b7a.
+cxr-report-metric.biomedbert:
+  repo: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
+  files:
+    config.json: 56bab767c02bc792897638feb8addc06d483d9c73769a5f554bbabea1f5507a1
+    pytorch_model.bin: ad7bbb66376cfd6b2db3447192b034efe016337cbef135c35c411fd61b13c193
+    tokenizer_config.json: 53b6f42b8b8daddbdc6d3532c324187a92b46c1602bd6e8d4ad5a413b4fc90e1
+    vocab.txt: 79489a52be45e6fa033521e8ce8e4f62aedc0a742ee2aa6fc04667e5b0b1454d
+
+# RadGraph DyGIE++ checkpoint (Jain et al. 2021), PhysioNet radgraph/1.0.0
+# (credentialed): models/model_checkpoint/model.tar.gz. Not from Hugging Face, so no
+# revision is recorded; copy it by hand to <models root>/radgraph/model_checkpoint/.
+cxr-report-metric.radgraph:
+  repo: radgraph/model_checkpoint
+  files:
+    model.tar.gz: f7310cc53dd6d2ea3c6426c076504bc1677027d52f3106ac29866f8cfd79a901

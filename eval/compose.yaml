@@ -38,3 +38,7 @@ services:
         upstream: ../external/CXR-Report-Metric
     environment:
       - OMP_NUM_THREADS  # required by run.py
+      # Jobs run as their own uid, which has no home in the image (HOME=/): give
+      # matplotlib its config dir and fontconfig its cache somewhere writable.
+      - MPLCONFIGDIR=/tmp/matplotlib
+      - XDG_CACHE_HOME=/tmp/.cache

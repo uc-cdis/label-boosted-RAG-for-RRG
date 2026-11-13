@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from labrag import weights
 from labrag.stages import evaluate
 
 SPEC = evaluate.METRICS["cxr-report-metric"]
@@ -91,3 +92,10 @@ def test_torch_threads_half_the_job(monkeypatch):
     assert evaluate.torch_threads() == 1
     monkeypatch.setenv("SLURM_CPUS_PER_TASK", "32")
     assert evaluate.torch_threads() == 16
+
+
+@pytest.mark.parametrize("metric", sorted(evaluate.METRICS))
+def test_metric_weights_are_pinned(metric):
+    config = weights.load_config()
+    for name in evaluate.METRICS[metric]["weights"]:
+        assert config[name]["files"], name

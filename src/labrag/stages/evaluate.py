@@ -21,6 +21,10 @@ scripts/json_to_csv.py):
   our generations don't, so it is added here, at evaluation time only);
 - study ids are integers 0..n-1 in generation order (upstream casts them with int()).
 
+Model weights: each metric lists the configs/weights.yaml entries its container reads
+under /models (the host weights root, mounted read-only); they are checked (present,
+sha256) before anything is built and recorded in the manifest's inputs.
+
 Studies without a report (the output cap was hit while thinking, or an empty answer)
 are refused for now: how to score them is not decided yet.
 """
@@ -35,17 +39,24 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from labrag import artifacts, paths
+from labrag import artifacts, paths, weights
 
 COMPOSE_FILE = paths.REPO_ROOT / "eval" / "compose.yaml"
 SECTION_PREFIX = {"findings": "Findings: "}
 
-# metric -> compose service, the upstream submodule its image is built from, and the
-# per-study score columns it writes
+# metric -> compose service, the upstream submodule its image is built from, the
+# configs/weights.yaml entries it reads under /models, and its per-study score columns
 METRICS = {
     "cxr-report-metric": {
         "service": "cxr-report-metric",
         "upstream": "external/CXR-Report-Metric",
+        "weights": [
+            "chexbert",
+            "cxr-report-metric.bert-base-uncased",
+            "cxr-report-metric.distilroberta-base",
+            "cxr-report-metric.biomedbert",
+            "cxr-report-metric.radgraph",
+        ],
         "scores": [
             "bleu_score",
             "bertscore",
@@ -73,7 +84,9 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
             "generations": f"generations/{rel}",
             "metric": metric,
             # What determines the scores: the upstream commit and this repo's image
-            # definition (Dockerfile, patch, wrapper), by git tree hash.
+            # definition (Dockerfile, patch, wrapper), by git tree hash. Not
+            # eval/compose.yaml: it also holds the other services and run settings
+            # (recorded in the manifest's image record instead).
             "image": image_source(spec),
             "format": {
                 "whitespace": "runs collapsed to one space",
@@ -89,7 +102,9 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
     if not todo:
         return [paths.SHARED_ROOT / out for _, out, _ in jobs]
 
-    # Read and check every input before building the image.
+    # Check every input before building the image: the weights the container reads
+    # (present, with the sha256 in configs/weights.yaml), then the artifacts.
+    weight_records = {name: weights.resolve(name)[1] for name in spec["weights"]}
     loaded = []
     for gen_rel, out, config in todo:
         gen_dir = paths.SHARED_ROOT / gen_rel
@@ -105,7 +120,11 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
             if r["set"] == gen_config["set"]
         }
         pairs = pair_reports(rows, references, section, gen_rel)
-        inputs = {"generations": gen_record, "prompts": prompt_record}
+        inputs = {
+            "generations": gen_record,
+            "prompts": prompt_record,
+            "weights": weight_records,
+        }
         loaded.append((out, config, inputs, rows, pairs))
 
     image = build_image(spec)
@@ -215,7 +234,6 @@ def image_source(spec: dict) -> dict:
         "service": spec["service"],
         "upstream_commit": _git("rev-parse", f"HEAD:{spec['upstream']}"),
         "definition_tree": _git("rev-parse", f"HEAD:{service_dir}"),
-        "compose_blob": _git("rev-parse", "HEAD:eval/compose.yaml"),
     }
 
 
@@ -232,11 +250,21 @@ def build_image(spec: dict) -> dict:
         text=True,
         check=True,
     ).stdout.strip()
-    return {"ref": ref, "tag": tag, "image_id": image_id}
+    return {
+        "ref": ref,
+        "tag": tag,
+        "image_id": image_id,
+        "compose_blob": _git("rev-parse", "HEAD:eval/compose.yaml"),
+    }
 
 
 def compose(*args: str, tag: str) -> None:
-    env = {**os.environ, "LABRAG_COMMIT": tag}
+    # The container mounts the weights root the stage checked.
+    env = {
+        **os.environ,
+        "LABRAG_COMMIT": tag,
+        "LABRAG_MODELS_ROOT": str(paths.MODELS_ROOT),
+    }
     cmd = ["docker", "compose", "-f", str(COMPOSE_FILE), *args]
     print("+", " ".join(cmd), flush=True)
     subprocess.run(cmd, env=env, check=True)

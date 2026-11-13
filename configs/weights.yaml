@@ -162,3 +162,28 @@ green.radllama2-7b:
     tokenization_chexagent.py: 41cd5a036cb6f78b0ed3e8557e36a9f16739f9e977568c3d6d8e50f7e6d98b07
     tokenizer.model: 9e556afd44213b6bd1be2b850ebbbd98f5481437a8021afaf58ee7fb1818d347
     tokenizer_config.json: f3f9570f456ef91657c1f3f38b75f48a54f59db84fcc8e55a5c04057b1540685
+
+# CRIMSON's judge, MedGemmaCRIMSON (Baharoon et al. 2026; rajpurkarlab/medgemma-4b-it-crimson,
+# HAI-DEF terms, not gated), revision 02e8a99b: MedGemma 4B fine-tuned as a text-only
+# Gemma3ForCausalLM, one bf16 model.safetensors. Files: what transformers and vLLM read
+# for the model, its generation config (greedy, max_new_tokens 8192, eos 1) and the
+# tokenizer with its chat template.
+# The one exception to the full-clone rule: pulled with
+#   --exclude model.safetensors.index.json
+# That index is stale: it maps every tensor to two fp32 shards
+# (model-0000X-of-00002.safetensors) that are not in the repo. vLLM's loader keeps only
+# the safetensors files an index lists, so with it present it finds no weights; CRIMSON's
+# own vLLM path works around the same file (CRIMSON/utils.py resolve_model_for_vllm).
+# transformers prefers the single model.safetensors over an index, so its path does not
+# need the file either. Without it, both judge paths load the same weights file.
+# `absent`: the check fails if it is there (e.g. after a full re-clone on another node).
+crimson.medgemma-4b-it:
+  repo: rajpurkarlab/medgemma-4b-it-crimson
+  absent: [model.safetensors.index.json]
+  files:
+    chat_template.jinja: 7de1c58e208eda46e9c7f86397df37ec49883aeece39fb961e0a6b24088dd3c4
+    config.json: 2957d2900ecca877a4efe630bab9329b0d85a1aae5442ef9e03b91514446a14d
+    generation_config.json: f8de602d9d6a2e1c0bd10570b97a17d12b93b0153f4f0c0eea410cded97a20c0
+    model.safetensors: d858e73a744b4c34cc0bed90e2d4da7273256ff27a85c24e02aeb3a792ec5c9b
+    tokenizer.json: daab2354f8a74e70d70b4d1f804939b68a8c9624dd06cb7858e52dd8970e9726
+    tokenizer_config.json: eb28e3a9807f77cd74dce1b8aed91884621c0302941794470c5a46f884462615

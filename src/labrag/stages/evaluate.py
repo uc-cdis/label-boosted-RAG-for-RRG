@@ -8,9 +8,10 @@ scores. The manifest's ``summary`` has the means and, for CXR-Report-Metric, the
 leaderboard's ``1/RadCliQ-v1`` = 1 / mean(RadCliQ-v1) (corpus-level, as ReXrank).
 
 Metrics: ``cxr-report-metric`` (BLEU-2, BERTScore, SembScore, RadGraph F1, RadCliQ;
-CPU only), ``ratescore`` and ``green`` (GREEN score, its clinically significant error
-counts and matched findings, plus the judge's text). The GPU metrics run on one GPU:
-submit with --gres=gpu:1; the container gets the job's GPU from CUDA_VISIBLE_DEVICES.
+CPU only), ``ratescore``, ``green`` (GREEN score, its clinically significant error
+counts and matched findings, plus the judge's text) and ``crimson`` (CRIMSON score, its
+error counts, plus the judge's text). The GPU metrics run on one GPU: submit with
+--gres=gpu:1; the container gets the job's GPU from CUDA_VISIBLE_DEVICES.
 
 ``green`` serves GREEN's judge with vLLM (compose service green-judge, on the job's
 GPU; the client is service green-vllm); GREEN's image does all the text work with
@@ -20,6 +21,14 @@ at the end. ``green-hf``, the reference: the same scores by upstream's own HF ge
 (service green-hf, ≈1.6 s per study on an H200). ``labrag evaluate --metric green[-hf]
 --repro`` runs upstream's
 5-case reproduction test through either judge path.
+
+``crimson`` and ``crimson-hf`` (≈ the same pair for CRIMSON; eval/crimson/run.py):
+upstream's evaluate_batch with no patient context, on both texts after CRIMSON's own
+clean_report_text (ReXrank's practice, not the package's default; the manifest's timing
+counts the texts it changed). A study whose judge text upstream can't parse or score
+gets ``crimson_failed`` = 1 and no score or counts; the summary's means are over the
+studies that have them, and ``failed`` counts the others (how to aggregate them is
+still open, docs/revision-plan.md §7). CRIMSON has no reproduction test.
 
 Each metric is one service of eval/compose.yaml: the upstream's own code and pins in its
 own image (docs/revision-plan.md §7). The stage builds the image from this checkout
@@ -80,7 +89,9 @@ FORMAT = {
 # per-study score columns (numbers, averaged in the summary) and optional text columns
 # (kept per study, e.g. an LLM judge's output). Optional: ``build``, the service that
 # builds the image (default: the service itself); ``judge``, the compose service that
-# serves the metric's LLM judge (``run`` starts it; the stage takes it down).
+# serves the metric's LLM judge (``run`` starts it; the stage takes it down); ``failed``,
+# the 0/1 score column of studies the judge's text couldn't be scored for (their other
+# scores are missing; anywhere else a missing score is an error).
 METRICS = {
     "cxr-report-metric": {
         "service": "cxr-report-metric",
@@ -133,6 +144,40 @@ METRICS = {
 METRICS["green-hf"] = {  # the reference: upstream's HF generate
     **{k: v for k, v in METRICS["green"].items() if k not in ("build", "judge")},
     "service": "green-hf",
+}
+METRICS["crimson"] = {
+    "service": "crimson-vllm",
+    "build": "crimson-hf",
+    "upstream": "external/CRIMSON",
+    "gpu": True,
+    "weights": ["crimson.medgemma-4b-it"],
+    "scores": [
+        "crimson_score",
+        *(
+            f"crimson_{k}"
+            for k in (
+                "false_findings",
+                "missing_findings",
+                "attribute_errors",
+                "location_errors",
+                "severity_errors",
+                "descriptor_errors",
+                "measurement_errors",
+                "certainty_errors",
+                "unspecific_errors",
+                "overinterpretation_errors",
+                "temporal_errors",
+            )
+        ),
+        "crimson_failed",
+    ],
+    "failed": "crimson_failed",
+    "texts": ["crimson_response"],
+    "judge": "crimson-judge",
+}
+METRICS["crimson-hf"] = {  # the reference: upstream's HF pipeline
+    **{k: v for k, v in METRICS["crimson"].items() if k not in ("build", "judge")},
+    "service": "crimson-hf",
 }
 
 
@@ -213,7 +258,7 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
         extra = {
             "image": image,
             "timing": timing,
-            "summary": summarize(records, spec["scores"]),
+            "summary": summarize(records, spec),
         }
 
         def build(dest: Path, records=records, extra=extra, out=out) -> dict:
@@ -402,11 +447,17 @@ def read_scores(spec: dict, out_csv: Path, pairs: pd.DataFrame) -> list[dict]:
             out_csv, keep_default_na=False, dtype={t: str for t in texts}
         ).set_index("study_id")[texts]
     out = out.loc[pairs["study_id"]]
-    if out[spec["scores"]].isna().any().any():
+    missing = out[spec["scores"]].isna()
+    if "failed" in spec:  # allowed only where the metric says it failed
+        flag = out[spec["failed"]]
+        if flag.isna().any() or not flag.isin([0, 1]).all():
+            raise SystemExit(f"{spec['failed']} must be 0 or 1 for every study")
+        missing = missing[flag == 0]
+    if missing.any().any():
         raise SystemExit("the metric returned missing scores")
     return [
         {
-            **{k: float(row[k]) for k in spec["scores"]},
+            **{k: None if pd.isna(row[k]) else float(row[k]) for k in spec["scores"]},
             **{k: row[k] for k in texts},
         }
         for _, row in out.iterrows()
@@ -448,8 +499,8 @@ def torch_threads() -> int:
 
 
 def image_source(spec: dict) -> dict:
-    """The compose service the metric runs (green-vllm and green-hf share one image,
-    so this is what tells them apart) and the git ids of what its image is built from
+    """The compose service the metric runs (a served judge's client and its -hf
+    reference share one image, so this is what tells them apart) and the git ids of what its image is built from
     (committed state of this checkout).
     """
     _, context, _ = image_build(spec)
@@ -508,13 +559,18 @@ def compose(*args: str, tag: str, check: bool = True) -> None:
     subprocess.run(cmd, env=env, check=check)
 
 
-def summarize(records: list[dict], columns: list[str]) -> dict:
+def summarize(records: list[dict], spec: dict) -> dict:
+    """Means per score column; for a metric that can fail on a study (``failed``), over
+    the studies it scored, with the failures counted."""
+    columns = spec["scores"]
     df = pd.DataFrame(records)
     summary = {
         "n": len(df),
         "empty_reports": int(df["empty_report"].sum()),
-        "mean": {c: float(df[c].mean()) for c in columns},
+        "mean": {c: float(df[c].astype(float).mean()) for c in columns},
     }
+    if "failed" in spec:
+        summary["failed"] = int(df[spec["failed"]].sum())
     if "RadCliQ-v1" in columns:
         summary["1/RadCliQ-v1"] = float(1.0 / np.mean(df["RadCliQ-v1"]))
     return summary

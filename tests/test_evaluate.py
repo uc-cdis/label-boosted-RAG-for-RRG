@@ -151,10 +151,61 @@ def test_summarize_radcliq_is_corpus_level():
         {"empty_report": False, "RadCliQ-v1": 1.0},
         {"empty_report": True, "RadCliQ-v1": 3.0},
     ]
-    summary = evaluate.summarize(records, ["RadCliQ-v1"])
+    summary = evaluate.summarize(records, {"scores": ["RadCliQ-v1"]})
     assert summary["empty_reports"] == 1
     assert summary["1/RadCliQ-v1"] == pytest.approx(0.5)  # 1/mean, not mean of 1/x
     assert summary["mean"]["RadCliQ-v1"] == pytest.approx(2.0)
+
+
+def crimson_out(failed, scored_where_failed=False):
+    """A fake crimson out.csv writer: study i scores i/10 unless it failed."""
+    spec = evaluate.METRICS["crimson"]
+
+    def fake_compose(*args, tag):
+        out = args[-1]
+        df = pd.read_csv(args[-2])[["study_id"]]
+        for c in spec["scores"]:
+            df[c] = [
+                None if f and not scored_where_failed else i / 10
+                for i, f in enumerate(failed)
+            ]
+        df["crimson_failed"] = failed
+        df["crimson_response"] = ["text"] * len(df)
+        df.to_csv(out, index=False)
+        Path(out).with_suffix(".json").write_text("{}")
+
+    return {**spec, "gpu": False}, fake_compose
+
+
+def test_failed_studies_may_lack_scores_and_are_counted(monkeypatch):
+    spec, fake = crimson_out([0, 1, 0])
+    monkeypatch.setattr(evaluate, "compose", fake)
+    pairs = evaluate.pair_reports(
+        rows("x.", "y.", "z."),
+        {f"patient{i}_study1": "r" for i in range(3)},
+        "findings",
+        "x",
+    )
+    scores, _ = evaluate.score(spec, {"tag": "abc"}, pairs)
+    assert scores[1]["crimson_score"] is None and scores[1]["crimson_failed"] == 1
+    assert scores[2]["crimson_score"] == pytest.approx(0.2)
+    records = [{"empty_report": False, **s} for s in scores]
+    json.dumps(records, allow_nan=False)  # null, not NaN, in the artifact
+    summary = evaluate.summarize(records, spec)
+    assert summary["failed"] == 1
+    assert summary["mean"]["crimson_score"] == pytest.approx(0.1)  # scored studies
+    assert summary["mean"]["crimson_failed"] == pytest.approx(1 / 3)
+
+
+def test_missing_scores_without_failure_are_refused(monkeypatch):
+    spec, fake = crimson_out([0, 1])
+    monkeypatch.setattr(evaluate, "compose", fake)
+    pairs = evaluate.pair_reports(
+        rows("x.", "y."), {f"patient{i}_study1": "r" for i in range(2)}, "findings", "x"
+    )
+    spec = {k: v for k, v in spec.items() if k != "failed"}  # no failure flag
+    with pytest.raises(SystemExit, match="missing scores"):
+        evaluate.score(spec, {"tag": "abc"}, pairs)
 
 
 def test_torch_threads_half_the_job(monkeypatch):
@@ -277,6 +328,23 @@ def test_judged_metric_records_the_judge_and_hf_shares_its_image():
     assert judge["service"] == "green-judge"
     assert "@sha256:" in judge["image"]  # pinned by digest
     assert "--generation-config=vllm" in judge["command"]
+    assert "--skip-tokenizer-init" in judge["command"]
+
+
+def test_crimson_served_and_hf_share_an_image_and_the_judge_is_bf16():
+    spec, hf = evaluate.METRICS["crimson"], evaluate.METRICS["crimson-hf"]
+    assert evaluate.image_build(spec) == (
+        "crimson-hf",
+        "eval/crimson",
+        "labrag/crimson",
+    )
+    assert evaluate.image_build(hf) == evaluate.image_build(spec)
+    assert "judge" not in hf and hf["service"] == "crimson-hf"
+    judge = evaluate.judge_definition(spec)
+    assert judge["service"] == "crimson-judge"
+    green = evaluate.judge_definition(evaluate.METRICS["green"])
+    assert judge["image"] == green["image"]  # one pinned vLLM for both judges
+    assert "--dtype=bfloat16" in judge["command"]
     assert "--skip-tokenizer-init" in judge["command"]
 
 

@@ -11,8 +11,9 @@
 # near-instant when nothing changed. vLLM generation is not here (src/labrag/serving.py).
 #
 # Every service: no outside network (all model files come from /models, the host weights
-# root, read-only) and no GPU unless it says so. The served GREEN judge and its client
-# talk over an internal network (no outside access), the only network here.
+# root, read-only) and no GPU unless it says so. The served judges (GREEN's, CRIMSON's)
+# and their clients talk over an internal network (no outside access), the only network
+# here.
 #
 # The stage runs each job as its own compose project (-p labrag-eval-<job id>), so jobs
 # sharing a node never share a container or network, and takes it down at the end.
@@ -148,6 +149,87 @@ services:
       - --port=8000
       - --dtype=float16
       - --max-model-len=2048
+      - --generation-config=vllm
+      - --skip-tokenizer-init
+      - --disable-uvicorn-access-log
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 1h  # the first start compiles kernels
+
+  # CRIMSON with upstream's own judge path: its HF pipeline (bf16, one study per forward
+  # pass), in this container, on one GPU (as ratescore). The reference.
+  crimson-hf:
+    <<: *offline
+    image: labrag/crimson:${LABRAG_COMMIT:-dev}
+    build:
+      context: crimson
+      additional_contexts:
+        upstream: ../external/CRIMSON
+    gpus:
+      - driver: nvidia
+        device_ids: ["${CUDA_VISIBLE_DEVICES:-unset}"]
+    environment:
+      - OMP_NUM_THREADS  # required by run.py
+      # no home for the job's uid in the image (HOME=/), and no network
+      - HF_HOME=/tmp/huggingface
+      - HF_HUB_OFFLINE=1
+      - XDG_CACHE_HOME=/tmp/.cache
+
+  # CRIMSON with its judge served by vLLM (crimson-judge): the same image as crimson-hf
+  # (built by that service), no GPU. Everything but the forward passes runs here, with
+  # upstream's code (eval/crimson/run.py): prompts, chat template, tokenizer, decoding,
+  # parsing, scoring. It loads the judge's weights on the CPU, unused: upstream's
+  # pipeline object, whose text steps it runs, needs them. `run` starts crimson-judge
+  # first and waits until it answers.
+  crimson-vllm:
+    image: labrag/crimson:${LABRAG_COMMIT:-dev}
+    pull_policy: never
+    networks: [judge]
+    volumes: *models
+    depends_on:
+      crimson-judge:
+        condition: service_healthy
+    environment:  # as crimson-hf's, plus where the judge answers
+      - OMP_NUM_THREADS  # required by run.py
+      - HF_HOME=/tmp/huggingface
+      - HF_HUB_OFFLINE=1
+      - XDG_CACHE_HOME=/tmp/.cache
+      - CRIMSON_JUDGE_URL=http://crimson-judge:8000
+
+  # CRIMSON's judge served by vLLM, on the job's one GPU: the same pinned image and
+  # settings as green-judge, except: --dtype bfloat16 is upstream's dtype (and the
+  # checkpoint's); --max-model-len 16384 holds a prompt (≈1.9k tokens on the pilot) plus
+  # the generation config's max_new_tokens 8192, which upstream's HF path generates up
+  # to (the client checks every prompt fits); --generation-config vllm, so the server
+  # adds no defaults of its own from the checkpoint (the client sends that config's
+  # greedy decoding, cap and eos itself); --skip-tokenizer-init: requests and responses
+  # are token ids (crimson-vllm tokenizes, in upstream's env).
+  crimson-judge:
+    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+    pull_policy: never
+    user: "65534:65534"
+    networks: [judge]
+    volumes: *models
+    gpus:
+      - driver: nvidia
+        device_ids: ["${CUDA_VISIBLE_DEVICES:-unset}"]
+    ipc: host  # as the generators' server (src/labrag/serving.py)
+    environment:
+      - HOME=/tmp
+      - USER=labrag
+      - HF_HUB_OFFLINE=1
+      - VLLM_NO_USAGE_STATS=1
+      - DO_NOT_TRACK=1
+    command:
+      - /models/rajpurkarlab/medgemma-4b-it-crimson
+      - --host=0.0.0.0
+      - --port=8000
+      - --dtype=bfloat16
+      - --max-model-len=16384
       - --generation-config=vllm
       - --skip-tokenizer-init
       - --disable-uvicorn-access-log

@@ -25,11 +25,18 @@ def revision(model_dir: Path, filename: str) -> str | None:
 def resolve(name: str, models_root: Path | None = None) -> tuple[Path, dict]:
     """Check one entry of configs/weights.yaml and return (model dir, provenance record).
 
-    Fails if any listed file is missing or its sha256 differs from the config. The record
-    (repo, dir, and per file its sha256 and revision) goes into artifact manifests.
+    Fails if any listed file is missing or its sha256 differs from the config, or if a
+    file the entry lists under ``absent`` is present. The record (repo, dir, and per file
+    its sha256 and revision) goes into artifact manifests.
     """
     entry = load_config()[name]
     model_dir = (models_root or paths.MODELS_ROOT) / entry["repo"]
+    for filename in entry.get("absent", []):
+        if (model_dir / filename).exists():
+            raise SystemExit(
+                f"weights {name}: {model_dir / filename} must not be there "
+                "(see configs/weights.yaml)"
+            )
     for filename in entry["files"]:
         if not (model_dir / filename).is_file():
             raise SystemExit(

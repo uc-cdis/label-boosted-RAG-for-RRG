@@ -114,3 +114,28 @@ cxr-report-metric.radgraph:
   repo: radgraph/model_checkpoint
   files:
     model.tar.gz: f7310cc53dd6d2ea3c6426c076504bc1677027d52f3106ac29866f8cfd79a901
+
+# RaTEScore's two models (the Hub names its RaTEScore() defaults load), as full clones of
+# the latest head; both heads predate RaTEScore 0.6.0 (2025-05-18), so they are what
+# ReXrank's unpinned download got. Files: what transformers opens for them (traced with
+# strace over a run, 2026-11-13; the same in transformers 4.36.0 and 4.40.0).
+# RaTE-NER-Deberta: the entity tagger (DeBERTa-v3 fine-tuned on RaTE-NER), revision
+# 66d4b818; tokenizer.json makes spm.model unread.
+ratescore.rate-ner-deberta:
+  repo: Angelakeke/RaTE-NER-Deberta
+  files:
+    config.json: 54dd4e8195e8594146c89af45a54cdf67e29b71e2979dd24aae196cfc11edf24
+    model.safetensors: b380aae68a26fc608cbb568994006910d0fc7156c63fd05308b3bbaf77ed53f2
+    tokenizer.json: 05402ffae6dd382a8491b1d29bfc139bec5d332662e86a026f433ce54c25c202
+    tokenizer_config.json: 557b3d33d3f41b81ad769244e506549e98a1857d41dd58160aacd4d98d710b5a
+
+# BioLORD-2023-C: the entity encoder (synonym matching), revision 4bb5abd1. transformers
+# prefers model.safetensors over the repo's pytorch_model.bin.
+ratescore.biolord-2023-c:
+  repo: FremyCompany/BioLORD-2023-C
+  files:
+    config.json: fb1fe36beae900aefd2ab7e82f5484a3f5c3258bec12a7bb65640c05ddf7bec9
+    model.safetensors: 6164f3a7476eaaeee4b7fa2d4dea655f8ca1927853b867d59fb9d66507f5d36f
+    special_tokens_map.json: 9ef40e9c160511bf3f46ceb71f1471dafa1e9473d5120bb816c36b2efa75f8ba
+    tokenizer_config.json: 99d291450cad8c10d9b172409d64d3fad2721e5da2bec09202d4841a896222b0
+    vocab.txt: dbd90cb94e2247bd4d4ccaecbf616d2290e66691d7d5e5bb81f063c2d0649ada

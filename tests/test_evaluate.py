@@ -80,6 +80,27 @@ def test_score_round_trip(monkeypatch):
     assert seen["args"][:2] == ("run", "--rm")
 
 
+def test_gpu_metric_needs_exactly_one_gpu(monkeypatch):
+    spec = evaluate.METRICS["ratescore"]
+
+    def fake_compose(*args, tag):
+        out = args[-1]
+        pd.read_csv(args[-2]).assign(ratescore=0.5).to_csv(out, index=False)
+        Path(out).with_suffix(".json").write_text("{}")
+
+    monkeypatch.setattr(evaluate, "compose", fake_compose)
+    pairs = evaluate.pair_reports(rows("x."), {"patient0_study1": "r"}, "findings", "x")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3")
+    scores, _ = evaluate.score(spec, {"tag": "abc"}, pairs)
+    assert scores == [{"ratescore": 0.5}]
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
+    with pytest.raises(SystemExit, match="one GPU"):
+        evaluate.score(spec, {"tag": "abc"}, pairs)
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES")
+    with pytest.raises(SystemExit, match="CUDA_VISIBLE_DEVICES"):
+        evaluate.score(spec, {"tag": "abc"}, pairs)
+
+
 def test_summarize_radcliq_is_corpus_level():
     records = [{"RadCliQ-v1": 1.0}, {"RadCliQ-v1": 3.0}]
     summary = evaluate.summarize(records, ["RadCliQ-v1"])

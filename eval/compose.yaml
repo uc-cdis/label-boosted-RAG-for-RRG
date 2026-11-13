@@ -42,3 +42,22 @@ services:
       # matplotlib its config dir and fontconfig its cache somewhere writable.
       - MPLCONFIGDIR=/tmp/matplotlib
       - XDG_CACHE_HOME=/tmp/.cache
+
+  # RaTEScore. One GPU: the job's, from Slurm's CUDA_VISIBLE_DEVICES (a host index; by
+  # hand, set it yourself). It is not passed into the container, which sees that GPU as 0.
+  ratescore:
+    <<: *offline
+    image: labrag/ratescore:${LABRAG_COMMIT:-dev}
+    build:
+      context: ratescore
+      additional_contexts:
+        upstream: ../external/RaTEScore
+    gpus:
+      - driver: nvidia
+        device_ids: ["${CUDA_VISIBLE_DEVICES:-unset}"]
+    environment:
+      - OMP_NUM_THREADS  # required by run.py
+      # no home for the job's uid in the image (HOME=/), and no network
+      - HF_HOME=/tmp/huggingface
+      - HF_HUB_OFFLINE=1
+      - XDG_CACHE_HOME=/tmp/.cache

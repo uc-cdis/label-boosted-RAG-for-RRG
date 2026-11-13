@@ -7,3 +7,6 @@
 [submodule "external/CXR-Report-Metric"]
 	path = external/CXR-Report-Metric
 	url = https://github.com/rajpurkarlab/CXR-Report-Metric.git
+[submodule "external/RaTEScore"]
+	path = external/RaTEScore
+	url = https://github.com/MAGIC-AI4Med/RaTEScore.git

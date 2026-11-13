@@ -7,6 +7,10 @@ the set, in generation order, with ``study_id``, ``set`` and the metric's per-st
 scores. The manifest's ``summary`` has the means and, for CXR-Report-Metric, the
 leaderboard's ``1/RadCliQ-v1`` = 1 / mean(RadCliQ-v1) (corpus-level, as ReXrank).
 
+Metrics: ``cxr-report-metric`` (BLEU-2, BERTScore, SembScore, RadGraph F1, RadCliQ;
+CPU only) and ``ratescore`` (one GPU: submit with --gres=gpu:1; the container gets the
+job's GPU from CUDA_VISIBLE_DEVICES).
+
 Each metric is one service of eval/compose.yaml: the upstream's own code and pins in its
 own image (docs/revision-plan.md §7). The stage builds the image from this checkout
 before running it (BuildKit's cache makes that near-instant when nothing changed); the
@@ -39,17 +43,19 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from labrag import artifacts, paths, weights
+from labrag import artifacts, paths, serving, weights
 
 COMPOSE_FILE = paths.REPO_ROOT / "eval" / "compose.yaml"
 SECTION_PREFIX = {"findings": "Findings: "}
 
-# metric -> compose service, the upstream submodule its image is built from, the
-# configs/weights.yaml entries it reads under /models, and its per-study score columns
+# metric -> compose service, the upstream submodule its image is built from, whether it
+# runs on the job's GPU, the configs/weights.yaml entries it reads under /models, and its
+# per-study score columns
 METRICS = {
     "cxr-report-metric": {
         "service": "cxr-report-metric",
         "upstream": "external/CXR-Report-Metric",
+        "gpu": False,
         "weights": [
             "chexbert",
             "cxr-report-metric.bert-base-uncased",
@@ -65,6 +71,13 @@ METRICS = {
             "RadCliQ-v0",
             "RadCliQ-v1",
         ],
+    },
+    "ratescore": {
+        "service": "ratescore",
+        "upstream": "external/RaTEScore",
+        "gpu": True,
+        "weights": ["ratescore.rate-ner-deberta", "ratescore.biolord-2023-c"],
+        "scores": ["ratescore"],
     },
 }
 
@@ -183,6 +196,10 @@ def pair_reports(
 
 def score(spec: dict, image: dict, pairs: pd.DataFrame) -> tuple[list[dict], dict]:
     """Run the metric's image on one set of pairs; per-study scores in pair order."""
+    if spec["gpu"]:  # compose reads CUDA_VISIBLE_DEVICES itself (eval/compose.yaml)
+        devices = serving.gpu_devices()
+        if len(devices) != 1:
+            raise SystemExit(f"{spec['service']} runs on one GPU, got {devices}")
     # Local disk, not NFS: the container writes its intermediates next to the inputs.
     with tempfile.TemporaryDirectory(prefix="labrag-eval-") as work:
         work = Path(work)
@@ -217,7 +234,7 @@ def score(spec: dict, image: dict, pairs: pd.DataFrame) -> tuple[list[dict], dic
 
 
 def torch_threads() -> int:
-    """Threads for torch 1.x in the container: half the job's CPUs.
+    """Threads for torch in the container: half the job's CPUs.
 
     torch 1.6 parallelizes even tiny ops, so one preempted thread stalls each op;
     threads == CPUs on a shared node ran RadGraph ~7x slower (2026-11-13). Our Slurm

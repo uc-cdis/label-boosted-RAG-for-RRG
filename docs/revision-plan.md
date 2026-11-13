@@ -275,6 +275,7 @@ Settled:
   - **CXR-Report-Metric env:** the original authors' pins (Python 3.7, torch 1.6), on CPU. In ReXrank's published env RadGraph's checkpoint doesn't load, and BERTScore tokenizes the first word differently.
   - **GREEN:** the pins of the GREEN commit that was current when ReXrank published its pipeline (ReXrank's README env contradicts GREEN's setup.py). The judge is served by vLLM, while GREEN's own code does the prompts, tokenization and parsing. Against upstream's HF generate on the pilot: upstream's reproduction test 5/5, the same judge text in 96–97% of studies, set means within 0.0012.
   - **CRIMSON patient context:** undecided. ReXrank uses age and indication, in an unpublished format.
+  - **ReXrank's RaTEScore and GREEN values may come from prefixed text.** It is unclear: its 2026-08 content-only re-score did not recompute them, on the claim that they don't depend on the prefix. On our pilot they do: dropping the prefix changed RaTEScore in about half the studies and GREEN's judge text in about 43%, with set means shifting by up to 0.003.
   - Leaderboard numbers are never presented as comparable to ours.
 - **Label-space overlap:** one table footnote.
   - SembScore uses CheXbert, the labeler that produces the boosting labels, and RadCliQ includes SembScore.

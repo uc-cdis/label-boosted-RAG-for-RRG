@@ -135,10 +135,10 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
             "stage": "evaluate",
             "generations": f"generations/{rel}",
             "metric": metric,
-            # What determines the scores: the upstream commit and this repo's image
-            # definition (Dockerfile, patch, wrapper), by git tree hash. Not
-            # eval/compose.yaml: it also holds the other services and run settings
-            # (recorded in the manifest's image record instead).
+            # What determines the scores: the service that runs, the upstream commit
+            # and this repo's image definition (Dockerfile, patch, wrapper), by git
+            # tree hash. Not eval/compose.yaml: it also holds the other services and
+            # run settings (recorded in the manifest's image record instead).
             "image": image_source(spec),
             "format": {
                 "whitespace": "runs collapsed to one space",
@@ -185,9 +185,9 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
         loaded.append((out, config, inputs, rows, pairs))
 
     image = build_image(spec)
-    if "judge" in spec:  # one run, one server and one queue for every set
+    if "judge" in spec:  # one run and one server for every set, a set at a time
         started = artifacts.now()
-        judged = score_sets(spec, image, [pairs for *_, pairs in loaded])
+        judged = score_sets(spec, image, {out: pairs for out, *_, pairs in loaded})
     built = []
     for k, (out, config, inputs, rows, pairs) in enumerate(loaded):
         if "judge" in spec:
@@ -270,35 +270,48 @@ def score(spec: dict, image: dict, pairs: pd.DataFrame) -> tuple[list[dict], dic
 
 
 def score_sets(
-    spec: dict, image: dict, sets: list[pd.DataFrame]
+    spec: dict, image: dict, sets: dict[str, pd.DataFrame]
 ) -> list[tuple[list[dict], dict]]:
-    """Run a judged metric on several sets of pairs at once (its ``score`` command):
-    per set, the per-study scores in pair order and the timing. The timing is the run's
-    (the GPU time is shared by every request of the job) plus the set's own finish
-    reasons and token counts, the job's GPU, the server's counters and the run's wall
-    time including the server's startup."""
+    """Run a judged metric on several sets of pairs (artifact name -> pairs) in one run
+    of its ``score`` command, which judges them one set at a time on one server.
+
+    Per set, in order: the per-study scores in pair order and the timing. Everything at
+    the timing's top level is the set's own: its time on the server, finish reasons,
+    token counts and server counters (the counters' change over the set), and the job's
+    GPU. ``run`` is shared by every set of the run, so count it once per run: the sets
+    and ``overhead_seconds``, the run's wall time (server startup and shutdown included)
+    minus the sets' own times."""
     devices = check_gpu(spec)
     with tempfile.TemporaryDirectory(prefix="labrag-eval-") as work:
         work = Path(work)
         dirs = [work / str(i) for i in range(len(sets))]
-        for d, pairs in zip(dirs, sets):
+        for d, pairs in zip(dirs, sets.values()):
             d.mkdir()
             write_pairs(pairs, d)
         start = time.monotonic()
         with_judge(spec, image, lambda: run_service(
             spec, image, work, "score", *map(str, dirs)
         ))  # fmt: skip
-        run_seconds = round(time.monotonic() - start)
+        run_seconds = time.monotonic() - start
         results = []
-        for d, pairs in zip(dirs, sets):
+        for d, pairs in zip(dirs, sets.values()):
             timing = json.loads((d / "out.json").read_text())
             timing["gpus"] = serving.gpu_names(devices)
-            timing["run_seconds"] = run_seconds
-            timing["vllm_counters"] = serving.counter_totals(
-                (d / "out.prom").read_text()
+            before, after = (
+                serving.counter_totals((d / f"out.{when}.prom").read_text())
+                for when in ("start", "end")
             )
+            timing["vllm_counters"] = {
+                k: v - before.get(k, 0.0) for k, v in after.items()
+            }
             results.append((read_scores(spec, d / "out.csv", pairs), timing))
-        return results
+        shared = {
+            "sets": list(sets),
+            "overhead_seconds": round(
+                run_seconds - sum(t["seconds"] for _, t in results)
+            ),
+        }
+        return [(scores, {**timing, "run": shared}) for scores, timing in results]
 
 
 def with_judge(spec: dict, image: dict, run) -> None:
@@ -425,10 +438,13 @@ def torch_threads() -> int:
 
 
 def image_source(spec: dict) -> dict:
-    """Git ids of what the image is built from (committed state of this checkout)."""
-    service, context, _ = image_build(spec)
+    """The compose service the metric runs (green-vllm and green-hf share one image,
+    so this is what tells them apart) and the git ids of what its image is built from
+    (committed state of this checkout).
+    """
+    _, context, _ = image_build(spec)
     return {
-        "service": service,
+        "service": spec["service"],
         "upstream_commit": _git("rev-parse", f"HEAD:{spec['upstream']}"),
         "definition_tree": _git("rev-parse", f"HEAD:{context}"),
     }

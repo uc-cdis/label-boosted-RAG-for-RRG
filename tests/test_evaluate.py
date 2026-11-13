@@ -154,7 +154,8 @@ def test_metric_image_is_built_by_a_compose_service(metric):
 
 def fake_judged_compose(calls, fail=False):
     """A fake compose for a judged metric: `run ... score <dirs>` writes each set's
-    out.csv (scores = study_id, rows reversed), out.json and out.prom."""
+    out.csv (scores = study_id, rows reversed), out.json (1 s per study) and the
+    server's metrics before and after it (7 generated tokens per study)."""
     spec = evaluate.METRICS["green"]
 
     def fake(*args, tag, check=True):
@@ -165,6 +166,7 @@ def fake_judged_compose(calls, fail=False):
             raise subprocess.CalledProcessError(1, "docker compose run")
         i = args.index("green-vllm")
         assert args[i + 1] == "score"
+        tokens = 100.0  # the server's counter before the first set
         for d in map(Path, args[i + 2 :]):
             df = pd.read_csv(d / "pred.csv")[["study_id"]]
             for c in spec["scores"]:
@@ -172,23 +174,33 @@ def fake_judged_compose(calls, fail=False):
             df["green_analysis"] = "text " + df["study_id"].astype(str)
             df.iloc[::-1].to_csv(d / "out.csv", index=False)
             (d / "out.json").write_text(
-                json.dumps({"reports": len(df), "finish_reason": {"stop": len(df)}})
+                json.dumps(
+                    {
+                        "reports": len(df),
+                        "seconds": float(len(df)),
+                        "finish_reason": {"stop": len(df)},
+                    }
+                )
             )
-            (d / "out.prom").write_text('vllm:generation_tokens_total{a="0"} 7.0\n')
+            for when, value in (("start", tokens), ("end", tokens + 7 * len(df))):
+                (d / f"out.{when}.prom").write_text(
+                    f'vllm:generation_tokens_total{{a="0"}} {value}\n'
+                )
+            tokens += 7 * len(df)
 
     return spec, fake
 
 
 def judged_sets():
-    return [
-        evaluate.pair_reports(
+    return {
+        f"scores/set{n}/green": evaluate.pair_reports(
             rows(*[f"r{i}." for i in range(n)]),
             {f"patient{i}_study1": "a" for i in range(n)},
             "findings",
             "x",
         )
         for n in (3, 2)
-    ]
+    }
 
 
 def test_score_sets_one_run_then_down(monkeypatch):
@@ -203,8 +215,14 @@ def test_score_sets_one_run_then_down(monkeypatch):
     assert [s["green_score"] for s in s0] == [0.0, 1.0, 2.0]  # mapped back by id
     assert [s["green_analysis"] for s in s1] == ["text 0", "text 1"]
     assert t0["finish_reason"] == {"stop": 3} and t1["reports"] == 2
-    assert t0["gpus"] == ["H200"] and t0["run_seconds"] >= 0
-    assert t0["vllm_counters"] == {"vllm:generation_tokens_total": 7.0}
+    assert t0["gpus"] == ["H200"]
+    # each set's own counters: the change over the set, not the server's totals
+    assert t0["vllm_counters"] == {"vllm:generation_tokens_total": 21.0}
+    assert t1["vllm_counters"] == {"vllm:generation_tokens_total": 14.0}
+    # shared by the run: the same block in both, naming both sets
+    assert t0["run"] == t1["run"]
+    assert t0["run"]["sets"] == ["scores/set3/green", "scores/set2/green"]
+    assert isinstance(t0["run"]["overhead_seconds"], int)
 
 
 def test_score_sets_takes_the_judge_down_on_failure(monkeypatch):
@@ -224,7 +242,10 @@ def test_judged_metric_records_the_judge_and_hf_shares_its_image():
     spec = evaluate.METRICS["green"]
     hf = evaluate.METRICS["green-hf"]
     assert evaluate.image_build(spec) == ("green-hf", "eval/green", "labrag/green")
-    assert evaluate.image_source(spec) == evaluate.image_source(hf)
+    source, hf_source = evaluate.image_source(spec), evaluate.image_source(hf)
+    assert source.pop("service") == "green-vllm"
+    assert hf_source.pop("service") == "green-hf"
+    assert source == hf_source  # same image
     assert "judge" not in evaluate.METRICS["green-hf"]
     judge = evaluate.judge_definition(spec)
     assert judge["service"] == "green-judge"

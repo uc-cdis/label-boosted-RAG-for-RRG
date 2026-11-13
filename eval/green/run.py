@@ -39,8 +39,12 @@ Two ways to run the judge (eval/compose.yaml):
    decoded with the prompt, as get_response does (the prompt is part of the decoded
    text there; clean_responses cuts it off); then GREEN's own results code. `score`
    takes directories that each hold one set's gt.csv and pred.csv (out.csv is written
-   next to them), and sends every set's requests in one queue. <out>.json also gets the
-   finish reasons and token counts; <out>.prom the server's Prometheus metrics at the end.
+   next to them) and judges them one set at a time, on one server: every request of a
+   set is answered before the next set's are sent, so the server's batches only ever
+   hold one set's studies and the set's time is its own; each set's requests carry
+   their own cache_salt, so no set reuses another's prefix cache either (no other set
+   can change its outputs). <out>.json also gets the finish reasons and token counts; <out>.start.prom
+   and <out>.end.prom the server's Prometheus metrics just before and after the set.
    One difference from upstream: HF counts max_length on the left-padded batch, so there
    a study's cap also depends on its batch neighbours' prompt lengths; here it is its
    own. It only matters if the judge reaches the cap (see finish_reason "length").
@@ -226,21 +230,23 @@ def results_of(scorer, dataset, texts):
     return scores, results
 
 
-async def request_all(prompts, eos):
-    """One greedy completion per prompt (token ids) from the served judge, in order:
-    (generated token ids, finish reason) each, the server's version and its metrics."""
+async def request_all(sets, eos):
+    """One greedy completion per prompt (token ids) from the served judge, one set of
+    prompts at a time (a set is finished before the next starts). Per set, in order:
+    the (generated token ids, finish reason) of each prompt, the seconds from its first
+    request to its last answer, and the server's metrics just before and after it.
+    Also the server's version."""
     import aiohttp
     from tqdm import tqdm
 
     gate = asyncio.Semaphore(CONCURRENCY)
-    bar = tqdm(total=len(prompts), desc="judge", mininterval=30)
     async with aiohttp.ClientSession(
         JUDGE_URL,
         timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_S),
         connector=aiohttp.TCPConnector(limit=CONCURRENCY),
     ) as session:
 
-        async def one(tokens):
+        async def one(tokens, salt):
             body = {
                 "prompt": tokens,
                 "max_tokens": MAX_LENGTH - len(tokens),
@@ -248,6 +254,8 @@ async def request_all(prompts, eos):
                 "n": 1,
                 "stop_token_ids": [eos],
                 "return_token_ids": True,
+                # the server reuses cached prompt blocks only within one salt
+                "cache_salt": salt,
             }
             async with gate, session.post("/v1/completions", json=body) as r:
                 if r.status != 200:
@@ -258,34 +266,43 @@ async def request_all(prompts, eos):
             bar.update()
             return choice["token_ids"], choice["finish_reason"]
 
-        try:
-            outputs = await asyncio.gather(*(one(t) for t in prompts))
-        finally:
-            bar.close()
+        async def metrics():
+            async with session.get("/metrics") as r:
+                return await r.text()
+
+        # One cache salt per set: a set never reuses prompt blocks an earlier set left
+        # in the server's prefix cache, so each starts as on a fresh server (its own
+        # requests still share their common prefix). vLLM salts a prompt's first block,
+        # and every later block's hash chains from it (v0.32.0 kv_cache_utils.py).
+        done = []
+        for k, prompts in enumerate(sets):
+            before = await metrics()
+            bar = tqdm(total=len(prompts), desc=f"judge {k}", mininterval=30)
+            start = time.monotonic()
+            try:
+                outputs = await asyncio.gather(*(one(t, f"set-{k}") for t in prompts))
+            finally:
+                bar.close()
+            seconds = time.monotonic() - start
+            done.append((outputs, seconds, before, await metrics()))
         async with session.get("/version") as r:
             version = (await r.json())["version"]
-        async with session.get("/metrics") as r:
-            metrics = await r.text()
-    return outputs, version, metrics
+    return done, version
 
 
 def judge_served(scorer, sets):
-    """Judge texts for several sets of (references, predictions), all in one queue.
+    """Judge texts for several sets of (references, predictions), one set at a time.
 
-    Returns per set (dataset, texts, run info) and the run's server metrics."""
+    Returns per set (dataset, texts, info, (server metrics before, after))."""
     eos = scorer.tokenizer.eos_token_id
     assert scorer.max_length == MAX_LENGTH  # the tokenizer's truncation
     datasets = [prompts_of(scorer, refs, preds) for refs, preds in sets]
     prompts = [[tokenize(scorer, p) for p in d["prompt"]] for d in datasets]
-    everything = [t for ps in prompts for t in ps]
-    start = time.time()
-    outputs, version, metrics = asyncio.run(request_all(everything, eos))
-    seconds = time.time() - start
-    print(f"judged {len(everything)} studies in {seconds:.1f} s (vLLM {version})")
+    done, version = asyncio.run(request_all(prompts, eos))
 
-    results, i = [], 0
-    for dataset, ps in zip(datasets, prompts):
-        part, i = outputs[i : i + len(ps)], i + len(ps)
+    results = []
+    for dataset, ps, (part, seconds, before, after) in zip(datasets, prompts, done):
+        print(f"judged {len(ps)} studies in {seconds:.1f} s (vLLM {version})")
         # get_response: decode the whole sequence (prompt + output; pad and eos are
         # special tokens, skipped); results_of applies clean_responses
         texts = scorer.tokenizer.batch_decode(
@@ -297,16 +314,16 @@ def judge_served(scorer, sets):
         info = {
             "reports": len(ps),
             "judge": {"server": "vllm", "version": version},
-            # the run's wall time over all its requests (one queue, one GPU)
+            # this set's own time: its first request to its last answer, alone on
+            # the server (its last batch's tail included)
             "seconds": round(seconds, 1),
-            "requests_in_run": len(everything),
-            "seconds_per_request": seconds / len(everything),
+            "seconds_per_request": seconds / len(ps),
             "finish_reason": dict(sorted(finish.items())),
             "prompt_tokens": stats([len(p) for p in ps]),
             "completion_tokens": stats([len(tokens) for tokens, _ in part]),
         }
-        results.append((dataset, texts, info))
-    return results, metrics
+        results.append((dataset, texts, info, (before, after)))
+    return results
 
 
 def stats(values):
@@ -325,8 +342,8 @@ def score_served(files):
     """Score sets of (gt.csv, pred.csv, out.csv) with the served judge."""
     scorer = load_text_scorer()
     inputs = [read_inputs(gt, pred) for gt, pred, _ in files]
-    judged, metrics = judge_served(scorer, [(refs, preds) for _, refs, preds in inputs])
-    for (_, _, out_csv), (ids, _, preds), (dataset, texts, info) in zip(
+    judged = judge_served(scorer, [(refs, preds) for _, refs, preds in inputs])
+    for (_, _, out_csv), (ids, _, preds), (dataset, texts, info, metrics) in zip(
         files, inputs, judged
     ):
         scores, results = results_of(scorer, dataset, texts)
@@ -334,8 +351,9 @@ def score_served(files):
         base = os.path.splitext(out_csv)[0]
         with open(base + ".json", "w") as f:
             json.dump(info, f, indent=2)
-        with open(base + ".prom", "w") as f:
-            f.write(metrics)
+        for when, text in zip(("start", "end"), metrics):
+            with open(f"{base}.{when}.prom", "w") as f:
+                f.write(text)
         print(f"{out_csv}: scored {len(ids)} studies, finish {info['finish_reason']}")
 
 
@@ -385,7 +403,7 @@ def repro():
     refs, hyps, _, _ = repro_cases()
     if JUDGE_URL:
         scorer = load_text_scorer()
-        [(dataset, texts, info)], _ = judge_served(scorer, [(refs, hyps)])
+        [(dataset, texts, info, _)] = judge_served(scorer, [(refs, hyps)])
         print(f"finish: {info['finish_reason']}, vLLM {info['judge']['version']}")
         scores, results = results_of(scorer, dataset, texts)
     else:

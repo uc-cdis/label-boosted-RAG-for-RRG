@@ -295,7 +295,7 @@ Settled:
 - **Stages:**
   - `embed` → `classify` (including out-of-fold) → `build-prompts` (hashed JSONL)
   - `generate`: an async client against `vllm serve`, resumable and cached
-  - `evaluate`: per-study scores. The LLM judges run inside their own metric containers, with their upstream's own inference code (not vLLM).
+  - `evaluate`: per-study scores, on content-only text (no section header), as ReXrank's Findings board. Each metric runs in its own container with its upstream's code. GREEN's judge is served by a pinned vLLM, while GREEN's own image does all the text work; upstream's HF generate is kept as the reference.
 - **Hard cap: never more than 8 GPUs in use at once** across all our jobs. Of the cluster's 16 H200s, at most 8 are ours at any time. Steven enforces it when scheduling; the runner doesn't.
 - **GPU wrapper (sbatch):**
   - tensor-parallel size taken from `CUDA_VISIBLE_DEVICES`

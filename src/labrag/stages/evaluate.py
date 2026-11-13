@@ -26,26 +26,30 @@ own image (docs/revision-plan.md §7). The stage builds the image from this chec
 before running it (BuildKit's cache makes that near-instant when nothing changed); the
 image is tagged with the commit, so jobs at different commits never share an image.
 
-Inputs are formatted as ReXrank's pipeline does (rajpurkarlab/ReXrank-metric,
-scripts/json_to_csv.py):
-- whitespace runs (CheXpert Plus keeps its line wraps) are collapsed to one space; the
-  texts ReXrank scores have none (e.g. its CheXpert Plus example patient64545_study1);
-- the section name is prepended, ``Findings: <text>``, to the reference (as ReXrank)
-  and to the generated report (ReXrank scores submissions as sent, and they carry it;
-  our generations don't, so it is added here, at evaluation time only);
-- study ids are integers 0..n-1 in generation order (upstream casts them with int()).
+Inputs (Findings only, for now; other sections are refused until their format is
+decided):
+- content only, as ReXrank's Findings board scores every metric since 2026-08-06
+  (rajpurkarlab/ReXrank gh-pages 1db77de): no section header on either text; a
+  leading "Findings:" on a generated report is removed (our references have none);
+- whitespace runs (CheXpert Plus keeps its line wraps) are collapsed to one space. Our
+  correction, not ReXrank's (its json_to_csv.py passes texts as they are): upstream's
+  BLEU splits on " " only, so a line break would join two words into one token;
+- study ids are integers 0..n-1 in generation order, as ReXrank-metric's json_to_csv.py
+  (upstream casts them with int()).
 
 Model weights: each metric lists the configs/weights.yaml entries its container reads
 under /models (the host weights root, mounted read-only); they are checked (present,
 sha256) before anything is built and recorded in the manifest's inputs.
 
 Studies without a report (the output cap was hit while thinking, or an empty answer)
-are refused for now: how to score them is not decided yet.
+are scored as the text "EMPTY" and stay in every mean; each record has ``empty_report``
+and the summary counts them. Empty references are refused.
 """
 
 import gzip
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -58,7 +62,18 @@ import yaml
 from labrag import artifacts, paths, serving, weights
 
 COMPOSE_FILE = paths.REPO_ROOT / "eval" / "compose.yaml"
-SECTION_PREFIX = {"findings": "Findings: "}
+SECTIONS = ["findings"]  # the sections whose scoring format is decided
+FINDINGS_HEADER = re.compile(r"^findings\s*:\s*", re.IGNORECASE)
+# An empty generated report (thinking hit the output cap, or an empty answer) is scored
+# as this text by every metric, so each metric gives its own verdict on a report that
+# says nothing (the preprint's rrg/eval.py did the same, spelled "EMTPY").
+EMPTY_REPORT = "EMPTY"
+FORMAT = {
+    "whitespace": "runs collapsed to one space",
+    "section_header": "none; a leading 'Findings:' is removed",
+    "study_ids": "0..n-1 in generation order",
+    "empty_report": f"scored as the text {EMPTY_REPORT!r}",
+}
 
 # metric -> compose service, the upstream submodule its image is built from, whether it
 # runs on the job's GPU, the configs/weights.yaml entries it reads under /models, its
@@ -121,9 +136,9 @@ METRICS["green-hf"] = {  # the reference: upstream's HF generate
 }
 
 
-def format_report(text: str, section: str) -> str:
-    """Report text as ReXrank scores it: whitespace collapsed, section name prepended."""
-    return SECTION_PREFIX[section] + " ".join(text.split())
+def format_report(text: str) -> str:
+    """Findings text as scored: whitespace collapsed, a leading "Findings:" removed."""
+    return FINDINGS_HEADER.sub("", " ".join(text.split()), count=1)
 
 
 def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Path]:
@@ -140,11 +155,7 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
             # tree hash. Not eval/compose.yaml: it also holds the other services and
             # run settings (recorded in the manifest's image record instead).
             "image": image_source(spec),
-            "format": {
-                "whitespace": "runs collapsed to one space",
-                "prefix": SECTION_PREFIX,
-                "study_ids": "0..n-1 in generation order",
-            },
+            "format": FORMAT,
         }
         if "judge" in spec:
             config["judge"] = judge_definition(spec)
@@ -196,8 +207,8 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
             started = artifacts.now()
             scores, timing = score(spec, image, pairs)
         records = [
-            {"study_id": r["study_id"], "set": r["set"], **s}
-            for r, s in zip(rows, scores)
+            {"study_id": r["study_id"], "set": r["set"], "empty_report": e, **s}
+            for r, e, s in zip(rows, pairs["empty_report"].tolist(), scores)
         ]
         extra = {
             "image": image,
@@ -230,24 +241,23 @@ def pair_reports(
     rows: list[dict], references: dict[str, str], section: str, name: str
 ) -> pd.DataFrame:
     """Integer id, formatted reference and formatted report per generation, in order."""
+    if section not in SECTIONS:
+        raise SystemExit(f"{name}: how to score {section} is not decided yet")
     missing = [r["study_id"] for r in rows if r["study_id"] not in references]
     if missing:
         raise SystemExit(f"{name}: {len(missing)} studies have no reference")
-    empty = [r["study_id"] for r in rows if not (r["report"] or "").strip()]
-    if empty:
-        raise SystemExit(
-            f"{name}: {len(empty)} studies have no report (e.g. {empty[0]}); how to "
-            "score them is not decided yet"
-        )
+    reference = [format_report(references[r["study_id"]]) for r in rows]
+    if not all(reference):
+        raise SystemExit(f"{name}: empty reference texts")
+    generated = [format_report(r["report"] or "") for r in rows]
     if len({r["study_id"] for r in rows}) != len(rows):
         raise SystemExit(f"{name}: duplicate study ids")
     return pd.DataFrame(
         {
             "study_id": range(len(rows)),
-            "reference": [
-                format_report(references[r["study_id"]], section) for r in rows
-            ],
-            "generated": [format_report(r["report"], section) for r in rows],
+            "reference": reference,
+            "generated": [text or EMPTY_REPORT for text in generated],
+            "empty_report": [not text for text in generated],
         }
     )
 
@@ -500,7 +510,11 @@ def compose(*args: str, tag: str, check: bool = True) -> None:
 
 def summarize(records: list[dict], columns: list[str]) -> dict:
     df = pd.DataFrame(records)
-    summary = {"n": len(df), "mean": {c: float(df[c].mean()) for c in columns}}
+    summary = {
+        "n": len(df),
+        "empty_reports": int(df["empty_report"].sum()),
+        "mean": {c: float(df[c].mean()) for c in columns},
+    }
     if "RadCliQ-v1" in columns:
         summary["1/RadCliQ-v1"] = float(1.0 / np.mean(df["RadCliQ-v1"]))
     return summary

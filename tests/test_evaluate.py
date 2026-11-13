@@ -13,11 +13,22 @@ from labrag.stages import evaluate
 SPEC = evaluate.METRICS["cxr-report-metric"]
 
 
-def test_format_report_collapses_whitespace_and_prefixes():
+def test_format_report_collapses_whitespace_without_header():
     text = "\n\nThe heart is\nnormal. \nNo effusion.  \n"
-    assert evaluate.format_report(text, "findings") == (
-        "Findings: The heart is normal. No effusion."
-    )
+    assert evaluate.format_report(text) == "The heart is normal. No effusion."
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Findings: Heart normal.", "\nFINDINGS:\nHeart normal.", "findings:Heart normal."],
+)
+def test_format_report_removes_leading_findings_header(text):
+    assert evaluate.format_report(text) == "Heart normal."
+
+
+def test_format_report_keeps_findings_mid_text():
+    text = "No new findings: heart normal. Findings: stable."
+    assert evaluate.format_report(text) == text
 
 
 def rows(*reports):
@@ -32,16 +43,27 @@ def test_pair_reports_integer_ids_in_generation_order():
     refs = {"patient0_study1": "ref\nzero", "patient1_study1": "ref one"}
     pairs = evaluate.pair_reports(gen, refs, "findings", "x")
     assert pairs["study_id"].tolist() == [0, 1]
-    assert pairs["reference"].tolist() == ["Findings: ref zero", "Findings: ref one"]
-    assert pairs["generated"].tolist() == ["Findings: B report.", "Findings: A report."]
+    assert pairs["reference"].tolist() == ["ref zero", "ref one"]
+    assert pairs["generated"].tolist() == ["B report.", "A report."]
 
 
-@pytest.mark.parametrize("report", [None, "", " \n "])
-def test_pair_reports_refuses_studies_without_report(report):
+def test_pair_reports_refuses_undecided_sections():
+    with pytest.raises(SystemExit, match="not decided"):
+        evaluate.pair_reports(rows("a."), {"patient0_study1": "b"}, "impression", "x")
+
+
+@pytest.mark.parametrize("report", [None, "", " \n ", "Findings: "])
+def test_pair_reports_scores_empty_reports_as_placeholder(report):
     gen = rows("fine.", report)
     refs = {"patient0_study1": "a", "patient1_study1": "b"}
-    with pytest.raises(SystemExit, match="no report"):
-        evaluate.pair_reports(gen, refs, "findings", "x")
+    pairs = evaluate.pair_reports(gen, refs, "findings", "x")
+    assert pairs["generated"].tolist() == ["fine.", "EMPTY"]
+    assert pairs["empty_report"].tolist() == [False, True]
+
+
+def test_pair_reports_refuses_empty_reference():
+    with pytest.raises(SystemExit, match="empty reference"):
+        evaluate.pair_reports(rows("a."), {"patient0_study1": " \n"}, "findings", "x")
 
 
 def test_pair_reports_refuses_missing_reference():
@@ -125,8 +147,12 @@ def test_text_columns_kept_as_written(monkeypatch):
 
 
 def test_summarize_radcliq_is_corpus_level():
-    records = [{"RadCliQ-v1": 1.0}, {"RadCliQ-v1": 3.0}]
+    records = [
+        {"empty_report": False, "RadCliQ-v1": 1.0},
+        {"empty_report": True, "RadCliQ-v1": 3.0},
+    ]
     summary = evaluate.summarize(records, ["RadCliQ-v1"])
+    assert summary["empty_reports"] == 1
     assert summary["1/RadCliQ-v1"] == pytest.approx(0.5)  # 1/mean, not mean of 1/x
     assert summary["mean"]["RadCliQ-v1"] == pytest.approx(2.0)
 

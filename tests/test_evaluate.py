@@ -1,5 +1,7 @@
 """Evaluate: input formatting and the round trip through a fake metric container."""
 
+import json
+import subprocess
 from pathlib import Path
 
 import pandas as pd
@@ -141,3 +143,101 @@ def test_metric_weights_are_pinned(metric):
     config = weights.load_config()
     for name in evaluate.METRICS[metric]["weights"]:
         assert config[name]["files"], name
+
+
+@pytest.mark.parametrize("metric", sorted(evaluate.METRICS))
+def test_metric_image_is_built_by_a_compose_service(metric):
+    service, context, name = evaluate.image_build(evaluate.METRICS[metric])
+    assert (evaluate.paths.REPO_ROOT / context / "Dockerfile").is_file()
+    assert name == f"labrag/{Path(context).name}"
+
+
+def fake_judged_compose(calls, fail=False):
+    """A fake compose for a judged metric: `run ... score <dirs>` writes each set's
+    out.csv (scores = study_id, rows reversed), out.json and out.prom."""
+    spec = evaluate.METRICS["green"]
+
+    def fake(*args, tag, check=True):
+        calls.append((args[0], check))
+        if args[0] != "run":
+            return
+        if fail:
+            raise subprocess.CalledProcessError(1, "docker compose run")
+        i = args.index("green-vllm")
+        assert args[i + 1] == "score"
+        for d in map(Path, args[i + 2 :]):
+            df = pd.read_csv(d / "pred.csv")[["study_id"]]
+            for c in spec["scores"]:
+                df[c] = df["study_id"] * 1.0
+            df["green_analysis"] = "text " + df["study_id"].astype(str)
+            df.iloc[::-1].to_csv(d / "out.csv", index=False)
+            (d / "out.json").write_text(
+                json.dumps({"reports": len(df), "finish_reason": {"stop": len(df)}})
+            )
+            (d / "out.prom").write_text('vllm:generation_tokens_total{a="0"} 7.0\n')
+
+    return spec, fake
+
+
+def judged_sets():
+    return [
+        evaluate.pair_reports(
+            rows(*[f"r{i}." for i in range(n)]),
+            {f"patient{i}_study1": "a" for i in range(n)},
+            "findings",
+            "x",
+        )
+        for n in (3, 2)
+    ]
+
+
+def test_score_sets_one_run_then_down(monkeypatch):
+    calls = []
+    spec, fake = fake_judged_compose(calls)
+    monkeypatch.setattr(evaluate, "compose", fake)
+    monkeypatch.setattr(evaluate.serving, "gpu_names", lambda devices: ["H200"])
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3")
+    (s0, t0), (s1, t1) = evaluate.score_sets(spec, {"tag": "abc"}, judged_sets())
+    # one container run for both sets; the judge's log, then the project taken down
+    assert calls == [("run", True), ("logs", False), ("down", False)]
+    assert [s["green_score"] for s in s0] == [0.0, 1.0, 2.0]  # mapped back by id
+    assert [s["green_analysis"] for s in s1] == ["text 0", "text 1"]
+    assert t0["finish_reason"] == {"stop": 3} and t1["reports"] == 2
+    assert t0["gpus"] == ["H200"] and t0["run_seconds"] >= 0
+    assert t0["vllm_counters"] == {"vllm:generation_tokens_total": 7.0}
+
+
+def test_score_sets_takes_the_judge_down_on_failure(monkeypatch):
+    calls = []
+    spec, fake = fake_judged_compose(calls, fail=True)
+    monkeypatch.setattr(evaluate, "compose", fake)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3")
+    with pytest.raises(subprocess.CalledProcessError):
+        evaluate.score_sets(spec, {"tag": "abc"}, judged_sets())
+    assert calls == [("run", True), ("logs", False), ("down", False)]
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
+    with pytest.raises(SystemExit, match="one GPU"):
+        evaluate.score_sets(spec, {"tag": "abc"}, judged_sets())
+
+
+def test_judged_metric_records_the_judge_and_hf_shares_its_image():
+    spec = evaluate.METRICS["green"]
+    hf = evaluate.METRICS["green-hf"]
+    assert evaluate.image_build(spec) == ("green-hf", "eval/green", "labrag/green")
+    assert evaluate.image_source(spec) == evaluate.image_source(hf)
+    assert "judge" not in evaluate.METRICS["green-hf"]
+    judge = evaluate.judge_definition(spec)
+    assert judge["service"] == "green-judge"
+    assert "@sha256:" in judge["image"]  # pinned by digest
+    assert "--generation-config=vllm" in judge["command"]
+    assert "--skip-tokenizer-init" in judge["command"]
+
+
+def test_compose_runs_as_the_jobs_own_project(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        evaluate.subprocess, "run", lambda cmd, env, check: seen.update(cmd=cmd)
+    )
+    monkeypatch.setenv("SLURM_JOB_ID", "123")
+    evaluate.compose("down", tag="abc")
+    assert seen["cmd"][4:7] == ["-p", "labrag-eval-123", "down"]

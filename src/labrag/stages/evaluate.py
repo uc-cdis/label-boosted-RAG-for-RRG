@@ -12,6 +12,15 @@ CPU only), ``ratescore`` and ``green`` (GREEN score, its clinically significant 
 counts and matched findings, plus the judge's text). The GPU metrics run on one GPU:
 submit with --gres=gpu:1; the container gets the job's GPU from CUDA_VISIBLE_DEVICES.
 
+``green`` serves GREEN's judge with vLLM (compose service green-judge, on the job's
+GPU; the client is service green-vllm); GREEN's image does all the text work with
+upstream's code (see eval/green/run.py). One container run scores every set of the
+job, in one request queue; the job's compose project, server included, is taken down
+at the end. ``green-hf``, the reference: the same scores by upstream's own HF generate
+(service green-hf, ≈1.6 s per study on an H200). ``labrag evaluate --metric green[-hf]
+--repro`` runs upstream's
+5-case reproduction test through either judge path.
+
 Each metric is one service of eval/compose.yaml: the upstream's own code and pins in its
 own image (docs/revision-plan.md §7). The stage builds the image from this checkout
 before running it (BuildKit's cache makes that near-instant when nothing changed); the
@@ -39,10 +48,12 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from labrag import artifacts, paths, serving, weights
 
@@ -52,7 +63,9 @@ SECTION_PREFIX = {"findings": "Findings: "}
 # metric -> compose service, the upstream submodule its image is built from, whether it
 # runs on the job's GPU, the configs/weights.yaml entries it reads under /models, its
 # per-study score columns (numbers, averaged in the summary) and optional text columns
-# (kept per study, e.g. an LLM judge's output)
+# (kept per study, e.g. an LLM judge's output). Optional: ``build``, the service that
+# builds the image (default: the service itself); ``judge``, the compose service that
+# serves the metric's LLM judge (``run`` starts it; the stage takes it down).
 METRICS = {
     "cxr-report-metric": {
         "service": "cxr-report-metric",
@@ -82,7 +95,8 @@ METRICS = {
         "scores": ["ratescore"],
     },
     "green": {
-        "service": "green",
+        "service": "green-vllm",
+        "build": "green-hf",
         "upstream": "external/GREEN",
         "gpu": True,
         "weights": ["green.radllama2-7b"],
@@ -98,7 +112,12 @@ METRICS = {
             "green_unparsed",
         ],
         "texts": ["green_analysis"],
+        "judge": "green-judge",
     },
+}
+METRICS["green-hf"] = {  # the reference: upstream's HF generate
+    **{k: v for k, v in METRICS["green"].items() if k not in ("build", "judge")},
+    "service": "green-hf",
 }
 
 
@@ -127,6 +146,8 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
                 "study_ids": "0..n-1 in generation order",
             },
         }
+        if "judge" in spec:
+            config["judge"] = judge_definition(spec)
         jobs.append((f"generations/{rel}", f"scores/{rel}/{metric}", config))
     todo = [j for j in jobs if not artifacts.is_built(j[1], j[2], overwrite)]
     for _, out, _ in jobs:
@@ -138,6 +159,7 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
     # Check every input before building the image: the weights the container reads
     # (present, with the sha256 in configs/weights.yaml), then the artifacts.
     weight_records = {name: weights.resolve(name)[1] for name in spec["weights"]}
+    judge_image = judge_image_record(spec) if "judge" in spec else None
     loaded = []
     for gen_rel, out, config in todo:
         gen_dir = paths.SHARED_ROOT / gen_rel
@@ -158,13 +180,21 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
             "prompts": prompt_record,
             "weights": weight_records,
         }
+        if judge_image:
+            inputs["judge_image"] = judge_image
         loaded.append((out, config, inputs, rows, pairs))
 
     image = build_image(spec)
-    built = []
-    for out, config, inputs, rows, pairs in loaded:
+    if "judge" in spec:  # one run, one server and one queue for every set
         started = artifacts.now()
-        scores, timing = score(spec, image, pairs)
+        judged = score_sets(spec, image, [pairs for *_, pairs in loaded])
+    built = []
+    for k, (out, config, inputs, rows, pairs) in enumerate(loaded):
+        if "judge" in spec:
+            scores, timing = judged[k]
+        else:
+            started = artifacts.now()
+            scores, timing = score(spec, image, pairs)
         records = [
             {"study_id": r["study_id"], "set": r["set"], **s}
             for r, s in zip(rows, scores)
@@ -224,42 +254,130 @@ def pair_reports(
 
 def score(spec: dict, image: dict, pairs: pd.DataFrame) -> tuple[list[dict], dict]:
     """Run the metric's image on one set of pairs; per-study scores in pair order."""
-    if spec["gpu"]:  # compose reads CUDA_VISIBLE_DEVICES itself (eval/compose.yaml)
-        devices = serving.gpu_devices()
-        if len(devices) != 1:
-            raise SystemExit(f"{spec['service']} runs on one GPU, got {devices}")
+    check_gpu(spec)
     # Local disk, not NFS: the container writes its intermediates next to the inputs.
     with tempfile.TemporaryDirectory(prefix="labrag-eval-") as work:
         work = Path(work)
-        for column, name in (("reference", "gt"), ("generated", "pred")):
-            pairs.rename(columns={column: "report"})[["study_id", "report"]].to_csv(
-                work / f"{name}.csv", index=False
-            )
-        compose(
-            "run",
-            "--rm",
-            "--no-TTY",
-            "--pull",
-            "never",
-            "--user",
-            f"{os.getuid()}:{os.getgid()}",
-            "--volume",
-            f"{work}:{work}",
-            "--env",
-            f"OMP_NUM_THREADS={torch_threads()}",
-            spec["service"],
-            str(work / "gt.csv"),
-            str(work / "pred.csv"),
-            str(work / "out.csv"),
-            tag=image["tag"],
+        write_pairs(pairs, work)
+        run_service(
+            spec,
+            image,
+            work,
+            *(str(work / f) for f in ("gt.csv", "pred.csv", "out.csv")),
         )
-        out = pd.read_csv(work / "out.csv").set_index("study_id")
-        texts = spec.get("texts", [])
-        if texts:  # as written: "" and "NA" stay strings
-            out[texts] = pd.read_csv(
-                work / "out.csv", keep_default_na=False, dtype={t: str for t in texts}
-            ).set_index("study_id")[texts]
         timing = json.loads((work / "out.json").read_text())
+        return read_scores(spec, work / "out.csv", pairs), timing
+
+
+def score_sets(
+    spec: dict, image: dict, sets: list[pd.DataFrame]
+) -> list[tuple[list[dict], dict]]:
+    """Run a judged metric on several sets of pairs at once (its ``score`` command):
+    per set, the per-study scores in pair order and the timing. The timing is the run's
+    (the GPU time is shared by every request of the job) plus the set's own finish
+    reasons and token counts, the job's GPU, the server's counters and the run's wall
+    time including the server's startup."""
+    devices = check_gpu(spec)
+    with tempfile.TemporaryDirectory(prefix="labrag-eval-") as work:
+        work = Path(work)
+        dirs = [work / str(i) for i in range(len(sets))]
+        for d, pairs in zip(dirs, sets):
+            d.mkdir()
+            write_pairs(pairs, d)
+        start = time.monotonic()
+        with_judge(spec, image, lambda: run_service(
+            spec, image, work, "score", *map(str, dirs)
+        ))  # fmt: skip
+        run_seconds = round(time.monotonic() - start)
+        results = []
+        for d, pairs in zip(dirs, sets):
+            timing = json.loads((d / "out.json").read_text())
+            timing["gpus"] = serving.gpu_names(devices)
+            timing["run_seconds"] = run_seconds
+            timing["vllm_counters"] = serving.counter_totals(
+                (d / "out.prom").read_text()
+            )
+            results.append((read_scores(spec, d / "out.csv", pairs), timing))
+        return results
+
+
+def with_judge(spec: dict, image: dict, run) -> None:
+    """Call ``run`` (a compose run that starts the judge service), then always take the
+    job's compose project down (the server included), after copying the judge's log
+    into the job log; also when the job is cancelled (Slurm's SIGTERM)."""
+    serving.raise_on_sigterm()
+    try:
+        run()
+    finally:
+        compose("logs", "--no-color", spec["judge"], tag=image["tag"], check=False)
+        compose("down", "--timeout", "30", tag=image["tag"], check=False)
+
+
+def repro(metric: str) -> None:
+    """Upstream's reproduction test of an LLM-judge metric through its judge path (the
+    service's ``--repro``); exits 1 on a mismatch."""
+    spec = METRICS[metric]
+    if spec["upstream"] != "external/GREEN":
+        raise SystemExit(f"--repro: no reproduction test for {metric}")
+    check_gpu(spec)
+    weights.resolve(spec["weights"][0])
+    if "judge" in spec:
+        judge_image_record(spec)
+    image = build_image(spec)
+    with tempfile.TemporaryDirectory(prefix="labrag-eval-") as work:
+        work = Path(work)
+        if "judge" in spec:
+            with_judge(spec, image, lambda: run_service(spec, image, work, "--repro"))
+        else:
+            run_service(spec, image, work, "--repro")
+
+
+def check_gpu(spec: dict) -> list[str]:
+    """The job's one GPU, for a GPU metric (compose reads CUDA_VISIBLE_DEVICES itself)."""
+    if not spec["gpu"]:
+        return []
+    devices = serving.gpu_devices()
+    if len(devices) != 1:
+        raise SystemExit(f"{spec['service']} runs on one GPU, got {devices}")
+    return devices
+
+
+def write_pairs(pairs: pd.DataFrame, work: Path) -> None:
+    """The service's inputs: gt.csv and pred.csv (study_id, report) in ``work``."""
+    for column, name in (("reference", "gt"), ("generated", "pred")):
+        pairs.rename(columns={column: "report"})[["study_id", "report"]].to_csv(
+            work / f"{name}.csv", index=False
+        )
+
+
+def run_service(spec: dict, image: dict, work: Path, *args: str) -> None:
+    """One run of the metric's container, with ``work`` mounted at the same path."""
+    compose(
+        "run",
+        "--rm",
+        "--no-TTY",
+        "--pull",
+        "never",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "--volume",
+        f"{work}:{work}",
+        "--env",
+        f"OMP_NUM_THREADS={torch_threads()}",
+        spec["service"],
+        *args,
+        tag=image["tag"],
+    )
+
+
+def read_scores(spec: dict, out_csv: Path, pairs: pd.DataFrame) -> list[dict]:
+    """Per-study scores (and texts) of a service's out.csv, in pair order."""
+    out = pd.read_csv(out_csv).set_index("study_id")
+    texts = spec.get("texts", [])
+    if texts:  # as written: "" and "NA" stay strings
+        out[texts] = pd.read_csv(
+            out_csv, keep_default_na=False, dtype={t: str for t in texts}
+        ).set_index("study_id")[texts]
     out = out.loc[pairs["study_id"]]
     if out[spec["scores"]].isna().any().any():
         raise SystemExit("the metric returned missing scores")
@@ -269,7 +387,30 @@ def score(spec: dict, image: dict, pairs: pd.DataFrame) -> tuple[list[dict], dic
             **{k: row[k] for k in texts},
         }
         for _, row in out.iterrows()
-    ], timing
+    ]
+
+
+def judge_definition(spec: dict) -> dict:
+    """The judge service's image and command (what determines its outputs), for the
+    artifact config; the rest of eval/compose.yaml is not part of it."""
+    service = yaml.safe_load(COMPOSE_FILE.read_text())["services"][spec["judge"]]
+    return {"service": spec["judge"], **{k: service[k] for k in ("image", "command")}}
+
+
+def judge_image_record(spec: dict) -> dict:
+    """The judge's pinned image, after checking this node has it (jobs never pull)."""
+    ref = judge_definition(spec)["image"]
+    out = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", ref],
+        capture_output=True,
+        text=True,
+    )
+    if out.returncode != 0:
+        raise SystemExit(
+            f"judge image {ref} not on this node; pre-pull it with\n"
+            f"  docker pull {ref}\n{out.stderr.strip()}"
+        )
+    return {"ref": ref, "image_id": out.stdout.strip()}
 
 
 def torch_threads() -> int:
@@ -285,12 +426,23 @@ def torch_threads() -> int:
 
 def image_source(spec: dict) -> dict:
     """Git ids of what the image is built from (committed state of this checkout)."""
-    service_dir = f"eval/{spec['service']}"
+    service, context, _ = image_build(spec)
     return {
-        "service": spec["service"],
+        "service": service,
         "upstream_commit": _git("rev-parse", f"HEAD:{spec['upstream']}"),
-        "definition_tree": _git("rev-parse", f"HEAD:{service_dir}"),
+        "definition_tree": _git("rev-parse", f"HEAD:{context}"),
     }
+
+
+def image_build(spec: dict) -> tuple[str, str, str]:
+    """The compose service that builds the metric's image, its build context (relative
+    to the repo) and its image name without the tag, as eval/compose.yaml defines them.
+    """
+    service = spec.get("build", spec["service"])
+    definition = yaml.safe_load(COMPOSE_FILE.read_text())["services"][service]
+    context = (COMPOSE_FILE.parent / definition["build"]["context"]).resolve()
+    name = definition["image"].split(":")[0]
+    return service, str(context.relative_to(paths.REPO_ROOT)), name
 
 
 def build_image(spec: dict) -> dict:
@@ -298,8 +450,9 @@ def build_image(spec: dict) -> dict:
     commit = artifacts.git_commit()
     # A dirty dev tree builds what's on disk, which no commit describes.
     tag = "dev" if commit["dirty"] else commit["sha"]
-    compose("build", spec["service"], tag=tag)
-    ref = f"labrag/{spec['service']}:{tag}"
+    service, _, name = image_build(spec)
+    compose("build", service, tag=tag)
+    ref = f"{name}:{tag}"
     image_id = subprocess.run(
         ["docker", "image", "inspect", "--format", "{{.Id}}", ref],
         capture_output=True,
@@ -314,16 +467,19 @@ def build_image(spec: dict) -> dict:
     }
 
 
-def compose(*args: str, tag: str) -> None:
+def compose(*args: str, tag: str, check: bool = True) -> None:
+    """docker compose on eval/compose.yaml, as this job's own project (jobs sharing a
+    node never share a container or network)."""
     # The container mounts the weights root the stage checked.
     env = {
         **os.environ,
         "LABRAG_COMMIT": tag,
         "LABRAG_MODELS_ROOT": str(paths.MODELS_ROOT),
     }
-    cmd = ["docker", "compose", "-f", str(COMPOSE_FILE), *args]
+    project = f"labrag-eval-{os.environ.get('SLURM_JOB_ID') or os.getpid()}"
+    cmd = ["docker", "compose", "-f", str(COMPOSE_FILE), "-p", project, *args]
     print("+", " ".join(cmd), flush=True)
-    subprocess.run(cmd, env=env, check=True)
+    subprocess.run(cmd, env=env, check=check)
 
 
 def summarize(records: list[dict], columns: list[str]) -> dict:

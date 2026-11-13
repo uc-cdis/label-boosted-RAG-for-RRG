@@ -28,6 +28,17 @@ def splits_pilot(args: argparse.Namespace) -> None:
     print(f"Wrote {out} ({len(drawn)} patients)")
 
 
+def evaluate_command(args: argparse.Namespace) -> None:
+    if args.repro:
+        if args.generations:
+            sys.exit("evaluate: --repro takes no --generations")
+        evaluate.repro(args.metric)
+    elif not args.generations:
+        sys.exit("evaluate: --generations is required")
+    else:
+        evaluate.run(args.generations, args.metric, args.overwrite)
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="labrag")
     sub = ap.add_subparsers(dest="command", required=True)
@@ -144,7 +155,6 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument(
         "--generations",
-        required=True,
         nargs="+",
         help="generations artifacts, relative to generations/",
     )
@@ -152,7 +162,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument(
         "--overwrite", action="store_true", help="replace existing artifacts"
     )
-    p.set_defaults(func=lambda a: evaluate.run(a.generations, a.metric, a.overwrite))
+    p.add_argument(
+        "--repro",
+        action="store_true",
+        help="instead: run the metric's upstream reproduction test (green, green-hf)",
+    )
+    p.set_defaults(func=evaluate_command)
 
     args = ap.parse_args(argv)
     args.func(args)

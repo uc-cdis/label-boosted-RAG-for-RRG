@@ -10,22 +10,32 @@
 # other's image. The stage builds before it runs; BuildKit's layer cache makes that
 # near-instant when nothing changed. vLLM generation is not here (src/labrag/serving.py).
 #
-# Every service: no network (all model files come from /models, the host weights root,
-# read-only) and no GPU unless it says so.
+# Every service: no outside network (all model files come from /models, the host weights
+# root, read-only) and no GPU unless it says so. The served GREEN judge and its client
+# talk over an internal network (no outside access), the only network here.
+#
+# The stage runs each job as its own compose project (-p labrag-eval-<job id>), so jobs
+# sharing a node never share a container or network, and takes it down at the end.
 
 name: labrag-eval
 
+x-models: &models
+  # long syntax: a node without the weights root fails here, instead of Docker creating
+  # an empty directory in its place
+  - type: bind
+    source: ${LABRAG_MODELS_ROOT:-/opt/gpudata/models}
+    target: /models
+    read_only: true
+    bind:
+      create_host_path: false
+
 x-offline: &offline
   network_mode: none
-  volumes:
-    # long syntax: a node without the weights root fails here, instead of Docker
-    # creating an empty directory in its place
-    - type: bind
-      source: ${LABRAG_MODELS_ROOT:-/opt/gpudata/models}
-      target: /models
-      read_only: true
-      bind:
-        create_host_path: false
+  volumes: *models
+
+networks:
+  judge:
+    internal: true
 
 services:
   # BLEU-2, BERTScore, SembScore, RadGraph F1, RadCliQ-v1. CPU only (see its Dockerfile).
@@ -62,8 +72,9 @@ services:
       - HF_HUB_OFFLINE=1
       - XDG_CACHE_HOME=/tmp/.cache
 
-  # GREEN, with its 7B judge. One GPU, as ratescore.
-  green:
+  # GREEN with upstream's own judge path: HF generate of its 7B judge, in this
+  # container, on one GPU (as ratescore).
+  green-hf:
     <<: *offline
     image: labrag/green:${LABRAG_COMMIT:-dev}
     build:
@@ -81,3 +92,69 @@ services:
       - HF_HUB_OFFLINE=1
       - MPLCONFIGDIR=/tmp/matplotlib
       - XDG_CACHE_HOME=/tmp/.cache
+
+  # GREEN with its judge served by vLLM (green-judge): the same image as green-hf (built
+  # by that service), no GPU. Everything but the forward passes runs here, with upstream's
+  # code (eval/green/run.py): prompts, tokenizer, the requests, decoding, parsing.
+  # `run` starts green-judge first and waits until it answers.
+  green-vllm:
+    image: labrag/green:${LABRAG_COMMIT:-dev}
+    pull_policy: never
+    networks: [judge]
+    volumes: *models  # the judge's tokenizer
+    depends_on:
+      green-judge:
+        condition: service_healthy
+    environment:  # as green-hf's, plus where the judge answers
+      - OMP_NUM_THREADS  # required by run.py
+      - HF_HOME=/tmp/huggingface
+      - HF_HUB_OFFLINE=1
+      - MPLCONFIGDIR=/tmp/matplotlib
+      - XDG_CACHE_HOME=/tmp/.cache
+      - GREEN_JUDGE_URL=http://green-judge:8000
+
+  # GREEN's judge served by vLLM, on the job's one GPU. Its own pin, independent of the
+  # generators' (configs/containers.yaml): the latest stable release when pinned
+  # (v0.32.0, 2026-11-12; the multi-arch index digest; pre-pulled, jobs never pull).
+  # Arguments: --dtype float16 is upstream's torch_dtype (the checkpoint is bf16);
+  # --max-model-len is the max_length upstream generates to; --generation-config vllm
+  # ignores the checkpoint's generation_config.json, which samples (temperature 0.6,
+  # top_p 0.9) where upstream decodes greedily (the client sends temperature 0);
+  # --skip-tokenizer-init: requests and responses are token ids, so vLLM never loads the
+  # judge's custom tokenizer code (green-vllm tokenizes, in upstream's env);
+  # --disable-uvicorn-access-log: no log line per request (≈1.9M at full scale).
+  # Runs as an unprivileged uid with nothing writable from the host; its compile caches
+  # stay in the container (HOME), so each job compiles once at startup. USER: torch's
+  # compile cache asks getpass for a user name, and this uid has no passwd entry.
+  green-judge:
+    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+    pull_policy: never
+    user: "65534:65534"
+    networks: [judge]
+    volumes: *models
+    gpus:
+      - driver: nvidia
+        device_ids: ["${CUDA_VISIBLE_DEVICES:-unset}"]
+    ipc: host  # as the generators' server (src/labrag/serving.py)
+    environment:
+      - HOME=/tmp
+      - USER=labrag
+      - HF_HUB_OFFLINE=1
+      - VLLM_NO_USAGE_STATS=1
+      - DO_NOT_TRACK=1
+    command:
+      - /models/StanfordAIMI/GREEN-RadLlama2-7b
+      - --host=0.0.0.0
+      - --port=8000
+      - --dtype=float16
+      - --max-model-len=2048
+      - --generation-config=vllm
+      - --skip-tokenizer-init
+      - --disable-uvicorn-access-log
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 1h  # the first start compiles kernels

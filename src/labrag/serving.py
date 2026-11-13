@@ -120,7 +120,7 @@ def _running(name: str) -> bool:
     return out.stdout.strip() == "true"
 
 
-def _raise_on_sigterm() -> None:
+def raise_on_sigterm() -> None:
     """Turn Slurm's SIGTERM (scancel, time limit) into SystemExit, so cleanup runs."""
 
     def handler(signum, frame):
@@ -134,7 +134,7 @@ def vllm_server(
     served_name: str, model_dir: Path, image: dict, serve_args: list[str]
 ) -> Iterator[dict]:
     """Yield the server's URLs, vLLM version, devices and GPU models while it runs."""
-    _raise_on_sigterm()
+    raise_on_sigterm()
     devices = gpu_devices()
     port = _free_port()
     name = f"labrag-{os.environ.get('SLURM_JOB_ID', 'local')}-{port}"

@@ -262,11 +262,20 @@ Settled:
 ---
 
 ## 7. Metrics
-- **Suite: the ReXrank metrics**: BLEU, BERTScore, SembScore, RadGraph F1, RaTEScore, 1/RadCliQ-v1, **GREEN** and **CRIMSON**.
+- **Suite** (the metrics ReXrank reports): BLEU, BERTScore, SembScore, RadGraph F1, RaTEScore, 1/RadCliQ-v1, **GREEN** and **CRIMSON**.
   - **Official implementations, one container per upstream:** CXR-Report-Metric (BLEU-2, BERTScore, SembScore, RadGraph F1, RadCliQ-v1), GREEN, RaTEScore and CRIMSON. They can't share an env: GREEN pins transformers 4.40, while CRIMSON needs transformers ≥5.3. ReXrank's own pipeline also splits them across two envs. RadEval reimplements all of them in one package, but its parity with ReXrank is unverified, so it is not used.
   - Everything runs locally. GREEN uses a fixed open-weight model. **CRIMSON:** by default the `crimson-score` package uses a fine-tuned MedGemma 4B judge (`rajpurkarlab/medgemma-4b-it-crimson`). GPT-5.2 is an optional API backend that we won't use. CRIMSON scores abnormal findings only, and can take patient age and indication as context. Caveat: the judge is from the MedGemma family, which is also a generator in D and E.
   - The LLM judges (GREEN, CRIMSON) generate one output per scored report. That is evaluation cost, not part of the generation budget, which counts only the reports the experiments generate (Appendix, "not counted").
   - **F1-CheXbert is not in the suite** (ReXrank doesn't report it). It only appears in the error breakdown below.
+- **Deviations from ReXrank.** ReXrank is not one consistent protocol. Its two boards use different text conventions. Its live scoring code, CRIMSON's included, is unpublished. Its published env can't run RadGraph, and it documents no rule for missing reports. So we keep each metric's official code and choose the input conventions on merit. Where we differ (checked 2026-11-13 against ReXrank gh-pages 002d1e6 and ReXrank-metric d6be678):
+  - **Section headers:** none on either text, in every section; a leading header in a generated report is removed. This is what ReXrank's Findings board does since 2026-08. Its Findings+Impression board still scores "Findings: … Impression: …".
+  - **Whitespace:** runs are collapsed to one space. Upstream BLEU splits on spaces only, so a line break would join two words into one token. ReXrank passes texts as they are.
+  - **Empty generated reports:** every metric scores them as the text "EMPTY" (as the preprint did), and they stay in every mean; the rate is reported per condition. ReXrank documents no rule. Checked on 20 pilot studies: "EMPTY" scores below the real report of the same study on every metric except SembScore (about the 22nd percentile of real reports).
+  - **Findings+Impression:** the model writes both headers, and a strict parser splits its output (failures counted per condition). Primary: the joint score of the whole content, with no headers. Secondary: each section against its reference section (a missing section counts as "EMPTY"). ReXrank scores one joint string, with headers.
+  - **CXR-Report-Metric env:** the original authors' pins (Python 3.7, torch 1.6), on CPU. In ReXrank's published env RadGraph's checkpoint doesn't load, and BERTScore tokenizes the first word differently.
+  - **GREEN:** the pins of the GREEN commit that was current when ReXrank published its pipeline (ReXrank's README env contradicts GREEN's setup.py). The judge is served by vLLM, while GREEN's own code does the prompts, tokenization and parsing. Against upstream's HF generate on the pilot: upstream's reproduction test 5/5, the same judge text in 96–97% of studies, set means within 0.0012.
+  - **CRIMSON patient context:** undecided. ReXrank uses age and indication, in an unpublished format.
+  - Leaderboard numbers are never presented as comparable to ours.
 - **Label-space overlap:** one table footnote.
   - SembScore uses CheXbert, the labeler that produces the boosting labels, and RadCliQ includes SembScore.
   - No claim rests on these two alone. BLEU, BERTScore, RadGraph F1, RaTEScore, GREEN and CRIMSON do not depend on the label set.

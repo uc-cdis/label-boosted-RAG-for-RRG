@@ -6,7 +6,7 @@ from pathlib import Path
 
 from labrag import paths, serving
 from labrag.data import DATASETS, chexpertplus
-from labrag.stages import build_prompts, classify, embed, generate, labels
+from labrag.stages import build_prompts, classify, embed, evaluate, generate, labels
 
 PILOT_SPLIT_FILE = chexpertplus.PILOT_SPLIT_FILE
 
@@ -138,6 +138,21 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(
         func=lambda a: generate.run(a.prompts, a.set, a.model, a.sampling, a.overwrite)
     )
+
+    p = sub.add_parser(
+        "evaluate", help="per-study scores by official metric code (stage evaluate)"
+    )
+    p.add_argument(
+        "--generations",
+        required=True,
+        nargs="+",
+        help="generations artifacts, relative to generations/",
+    )
+    p.add_argument("--metric", required=True, choices=sorted(evaluate.METRICS))
+    p.add_argument(
+        "--overwrite", action="store_true", help="replace existing artifacts"
+    )
+    p.set_defaults(func=lambda a: evaluate.run(a.generations, a.metric, a.overwrite))
 
     args = ap.parse_args(argv)
     args.func(args)

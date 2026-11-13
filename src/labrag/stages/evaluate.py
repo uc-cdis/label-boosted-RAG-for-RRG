@@ -8,8 +8,9 @@ scores. The manifest's ``summary`` has the means and, for CXR-Report-Metric, the
 leaderboard's ``1/RadCliQ-v1`` = 1 / mean(RadCliQ-v1) (corpus-level, as ReXrank).
 
 Metrics: ``cxr-report-metric`` (BLEU-2, BERTScore, SembScore, RadGraph F1, RadCliQ;
-CPU only) and ``ratescore`` (one GPU: submit with --gres=gpu:1; the container gets the
-job's GPU from CUDA_VISIBLE_DEVICES).
+CPU only), ``ratescore`` and ``green`` (GREEN score, its clinically significant error
+counts and matched findings, plus the judge's text). The GPU metrics run on one GPU:
+submit with --gres=gpu:1; the container gets the job's GPU from CUDA_VISIBLE_DEVICES.
 
 Each metric is one service of eval/compose.yaml: the upstream's own code and pins in its
 own image (docs/revision-plan.md §7). The stage builds the image from this checkout
@@ -49,8 +50,9 @@ COMPOSE_FILE = paths.REPO_ROOT / "eval" / "compose.yaml"
 SECTION_PREFIX = {"findings": "Findings: "}
 
 # metric -> compose service, the upstream submodule its image is built from, whether it
-# runs on the job's GPU, the configs/weights.yaml entries it reads under /models, and its
-# per-study score columns
+# runs on the job's GPU, the configs/weights.yaml entries it reads under /models, its
+# per-study score columns (numbers, averaged in the summary) and optional text columns
+# (kept per study, e.g. an LLM judge's output)
 METRICS = {
     "cxr-report-metric": {
         "service": "cxr-report-metric",
@@ -78,6 +80,24 @@ METRICS = {
         "gpu": True,
         "weights": ["ratescore.rate-ner-deberta", "ratescore.biolord-2023-c"],
         "scores": ["ratescore"],
+    },
+    "green": {
+        "service": "green",
+        "upstream": "external/GREEN",
+        "gpu": True,
+        "weights": ["green.radllama2-7b"],
+        "scores": [
+            "green_score",
+            "green_sig_false_finding",
+            "green_sig_missing_finding",
+            "green_sig_location",
+            "green_sig_severity",
+            "green_sig_false_comparison",
+            "green_sig_missing_comparison",
+            "green_matched_findings",
+            "green_unparsed",
+        ],
+        "texts": ["green_analysis"],
     },
 }
 
@@ -143,6 +163,7 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
     image = build_image(spec)
     built = []
     for out, config, inputs, rows, pairs in loaded:
+        started = artifacts.now()
         scores, timing = score(spec, image, pairs)
         records = [
             {"study_id": r["study_id"], "set": r["set"], **s}
@@ -163,7 +184,14 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
             return extra
 
         built.append(
-            artifacts.publish(out, config, {**inputs, "image": image}, build, overwrite)
+            artifacts.publish(
+                out,
+                config,
+                {**inputs, "image": image},
+                build,
+                overwrite,
+                started=started,
+            )
         )
     return built
 
@@ -225,12 +253,23 @@ def score(spec: dict, image: dict, pairs: pd.DataFrame) -> tuple[list[dict], dic
             str(work / "out.csv"),
             tag=image["tag"],
         )
-        out = pd.read_csv(work / "out.csv")
+        out = pd.read_csv(work / "out.csv").set_index("study_id")
+        texts = spec.get("texts", [])
+        if texts:  # as written: "" and "NA" stay strings
+            out[texts] = pd.read_csv(
+                work / "out.csv", keep_default_na=False, dtype={t: str for t in texts}
+            ).set_index("study_id")[texts]
         timing = json.loads((work / "out.json").read_text())
-    out = out.set_index("study_id").loc[pairs["study_id"], spec["scores"]]
-    if out.isna().any().any():
+    out = out.loc[pairs["study_id"]]
+    if out[spec["scores"]].isna().any().any():
         raise SystemExit("the metric returned missing scores")
-    return [{k: float(v) for k, v in row.items()} for _, row in out.iterrows()], timing
+    return [
+        {
+            **{k: float(row[k]) for k in spec["scores"]},
+            **{k: row[k] for k in texts},
+        }
+        for _, row in out.iterrows()
+    ], timing
 
 
 def torch_threads() -> int:

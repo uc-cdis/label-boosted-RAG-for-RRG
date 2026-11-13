@@ -32,6 +32,15 @@ def test_publish_writes_manifest(tmp_path, monkeypatch):
     assert final.stat().st_mode == (tmp_path / "plain").stat().st_mode
 
 
+def test_started_covers_work_done_before_publish(tmp_path):
+    begun = artifacts.now()
+    final = artifacts.publish(
+        "a", {}, {}, _build("v"), shared_root=tmp_path, started=begun
+    )
+    m = json.loads((final / "manifest.json").read_text())
+    assert m["started"] == begun and m["finished"] >= begun
+
+
 def test_same_config_skips_different_refuses_overwrite_replaces(tmp_path):
     publish = lambda cfg, text, **kw: artifacts.publish(  # noqa: E731
         "a", cfg, {}, _build(text), shared_root=tmp_path, **kw

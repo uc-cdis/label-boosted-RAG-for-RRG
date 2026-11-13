@@ -1,0 +1,111 @@
+# GREEN's env: the exact pins of the upstream commit this image builds (d72c195, setup.py
+# install_requires), Python 3.12 (its python_requires is ==3.12.1; the Dockerfile uses
+# that). Its unpinned requirements (scipy, matplotlib, scikit-learn, pandas, numpy < 2,
+# pytest) are resolved as of 2025-09-10, the day after that commit. setuptools is added
+# so the package itself builds from this lock (--no-build-isolation).
+#
+# Why these pins and not GREEN's HEAD (2956704, 2026-08-04): the package code is
+# byte-identical, but HEAD's setup.py swaps these pins for ranges (torch >=2.4,<2.6) in a
+# commit its authors titled "updated setup but not tested". d72c195 was HEAD when ReXrank
+# published its pipeline (2026-02-19), so these are the pins its `pip install -e GREEN`
+# would install (its README's Python 3.10 contradicts GREEN's python_requires).
+#
+# Generated with uv 0.13.7:
+#   uv pip compile requirements.in --python-version 3.12 \
+#     --python-platform x86_64-manylinux_2_28 --exclude-newer 2025-09-10 --no-annotate
+# where requirements.in is:
+#   torch==2.2.2
+#   transformers==4.40.0
+#   accelerate==0.30.1
+#   pillow==10.3.0
+#   sentencepiece==0.2.0
+#   sentence-transformers==3.0.1
+#   datasets==3.2.0
+#   torchvision==0.17.2
+#   opencv-python==4.10.0.84
+#   dill==0.3.8
+#   protobuf==5.29.1
+#   scipy
+#   matplotlib
+#   scikit-learn
+#   pandas
+#   numpy<2
+#   pytest
+#   setuptools
+accelerate==0.30.1
+aiohappyeyeballs==2.6.1
+aiohttp==3.12.15
+aiosignal==1.4.0
+attrs==25.3.0
+certifi==2025.8.3
+charset-normalizer==3.4.3
+contourpy==1.3.3
+cycler==0.12.1
+datasets==3.2.0
+dill==0.3.8
+filelock==3.19.1
+fonttools==4.59.2
+frozenlist==1.7.0
+fsspec==2024.9.0
+hf-xet==1.1.9
+huggingface-hub==0.34.4
+idna==3.10
+iniconfig==2.1.0
+jinja2==3.1.6
+joblib==1.5.2
+kiwisolver==1.4.9
+markupsafe==3.0.2
+matplotlib==3.10.6
+mpmath==1.3.0
+multidict==6.6.4
+multiprocess==0.70.16
+networkx==3.5
+numpy==1.26.4
+nvidia-cublas-cu12==12.1.3.1
+nvidia-cuda-cupti-cu12==12.1.105
+nvidia-cuda-nvrtc-cu12==12.1.105
+nvidia-cuda-runtime-cu12==12.1.105
+nvidia-cudnn-cu12==8.9.2.26
+nvidia-cufft-cu12==11.0.2.54
+nvidia-curand-cu12==10.3.2.106
+nvidia-cusolver-cu12==11.4.5.107
+nvidia-cusparse-cu12==12.1.0.106
+nvidia-nccl-cu12==2.19.3
+nvidia-nvjitlink-cu12==12.9.86
+nvidia-nvtx-cu12==12.1.105
+opencv-python==4.10.0.84
+packaging==25.0
+pandas==2.3.2
+pillow==10.3.0
+pluggy==1.6.0
+propcache==0.3.2
+protobuf==5.29.1
+psutil==7.0.0
+pyarrow==21.0.0
+pygments==2.19.2
+pyparsing==3.2.3
+pytest==8.4.2
+python-dateutil==2.9.0.post0
+pytz==2025.2
+pyyaml==6.0.2
+regex==2025.9.1
+requests==2.32.5
+safetensors==0.6.2
+scikit-learn==1.7.2
+scipy==1.16.1
+sentence-transformers==3.0.1
+sentencepiece==0.2.0
+setuptools==80.9.0
+six==1.17.0
+sympy==1.14.0
+threadpoolctl==3.6.0
+tokenizers==0.19.1
+torch==2.2.2
+torchvision==0.17.2
+tqdm==4.67.1
+transformers==4.40.0
+typing-extensions==4.15.0
+tzdata==2025.2
+urllib3==2.5.0
+xxhash==3.5.0
+yarl==1.20.1

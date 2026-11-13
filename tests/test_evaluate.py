@@ -101,6 +101,27 @@ def test_gpu_metric_needs_exactly_one_gpu(monkeypatch):
         evaluate.score(spec, {"tag": "abc"}, pairs)
 
 
+def test_text_columns_kept_as_written(monkeypatch):
+    spec = {**evaluate.METRICS["ratescore"], "gpu": False, "texts": ["analysis"]}
+    texts = ['two\nlines, "quoted"', "", "NA"]
+
+    def fake_compose(*args, tag):
+        out = args[-1]
+        df = pd.read_csv(args[-2]).assign(ratescore=0.5, analysis=texts)
+        df.to_csv(out, index=False)
+        Path(out).with_suffix(".json").write_text("{}")
+
+    monkeypatch.setattr(evaluate, "compose", fake_compose)
+    pairs = evaluate.pair_reports(
+        rows("x.", "y.", "z."),
+        {f"patient{i}_study1": "r" for i in range(3)},
+        "findings",
+        "x",
+    )
+    scores, _ = evaluate.score(spec, {"tag": "abc"}, pairs)
+    assert scores == [{"ratescore": 0.5, "analysis": t} for t in texts]
+
+
 def test_summarize_radcliq_is_corpus_level():
     records = [{"RadCliQ-v1": 1.0}, {"RadCliQ-v1": 3.0}]
     summary = evaluate.summarize(records, ["RadCliQ-v1"])

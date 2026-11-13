@@ -10,3 +10,6 @@
 [submodule "external/RaTEScore"]
 	path = external/RaTEScore
 	url = https://github.com/MAGIC-AI4Med/RaTEScore.git
+[submodule "external/GREEN"]
+	path = external/GREEN
+	url = https://github.com/Stanford-AIMI/GREEN.git

@@ -61,3 +61,23 @@ services:
       - HF_HOME=/tmp/huggingface
       - HF_HUB_OFFLINE=1
       - XDG_CACHE_HOME=/tmp/.cache
+
+  # GREEN, with its 7B judge. One GPU, as ratescore.
+  green:
+    <<: *offline
+    image: labrag/green:${LABRAG_COMMIT:-dev}
+    build:
+      context: green
+      additional_contexts:
+        upstream: ../external/GREEN
+    gpus:
+      - driver: nvidia
+        device_ids: ["${CUDA_VISIBLE_DEVICES:-unset}"]
+    environment:
+      - OMP_NUM_THREADS  # required by run.py
+      # no home for the job's uid in the image (HOME=/), and no network; HF_HOME also
+      # receives the judge's tokenizer code (trust_remote_code)
+      - HF_HOME=/tmp/huggingface
+      - HF_HUB_OFFLINE=1
+      - MPLCONFIGDIR=/tmp/matplotlib
+      - XDG_CACHE_HOME=/tmp/.cache

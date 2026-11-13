@@ -139,3 +139,26 @@ ratescore.biolord-2023-c:
     special_tokens_map.json: 9ef40e9c160511bf3f46ceb71f1471dafa1e9473d5120bb816c36b2efa75f8ba
     tokenizer_config.json: 99d291450cad8c10d9b172409d64d3fad2721e5da2bec09202d4841a896222b0
     vocab.txt: dbd90cb94e2247bd4d4ccaecbf616d2290e66691d7d5e5bb81f063c2d0649ada
+
+# GREEN's judge, GREEN-RadLlama2-7b (Ostmeier et al. 2024), revision 832389d5: unchanged
+# since 2024-05-16, so it is also what ReXrank's 2026 download got.
+# The Hub id is StanfordAIMI/GREEN-RadLlama2-7b; GREEN's default spelling
+# (GREEN-radllama2-7b) redirects to it. Files: what transformers 4.40.0 opens for GREEN's
+# tokenizer load (the repo's slow CheXagentTokenizer, trust_remote_code: its
+# tokenization_chexagent.py) and the model's two configs, traced with a Python audit hook
+# (2026-11-13); plus the safetensors index and the shards it lists, which safetensors
+# opens outside Python's audit hooks. Never opened: added_tokens.json and
+# special_tokens_map.json (tokenizer_config.json has both), README.md, trainer_state.json,
+# training_args.bin.
+green.radllama2-7b:
+  repo: StanfordAIMI/GREEN-RadLlama2-7b
+  files:
+    config.json: d001b4b2b08dd2bd05d47e726cf271aac01923d56f9cba237b2c9953737a8c3d
+    generation_config.json: 16ee210ea76bb5a21cd2adb1904e80fc4c81c2d844e7f3bc9a588c073f328889
+    model-00001-of-00003.safetensors: 6123664f7ec846809e176164cfcbe5d1fc093db533e03d710c42a6304b58f74b
+    model-00002-of-00003.safetensors: 624058eaf73ec34d4113390bdda20be416fb73cd9ab08f27a2e81b101dc62b33
+    model-00003-of-00003.safetensors: d1082c88976866c4c91fad6522c521a911a5f5026f0b371357d0341c2c9be21b
+    model.safetensors.index.json: 091fdb60b8ee3713df38fd6f9849c3aa82d7eeeb5f6d224a77139543b1db8652
+    tokenization_chexagent.py: 41cd5a036cb6f78b0ed3e8557e36a9f16739f9e977568c3d6d8e50f7e6d98b07
+    tokenizer.model: 9e556afd44213b6bd1be2b850ebbbd98f5481437a8021afaf58ee7fb1818d347
+    tokenizer_config.json: f3f9570f456ef91657c1f3f38b75f48a54f59db84fcc8e55a5c04057b1540685

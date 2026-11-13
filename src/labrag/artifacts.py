@@ -87,7 +87,7 @@ def _normalize(config: dict) -> dict:
     return json.loads(json.dumps(config))
 
 
-def _now() -> str:
+def now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
 
 
@@ -126,12 +126,15 @@ def publish(
     build: Callable[[Path], dict | None],
     overwrite: bool = False,
     shared_root: Path | None = None,
+    started: str | None = None,
 ) -> Path:
     """Build the artifact at <shared_root>/<relpath>, unless an identical one exists.
 
     ``build(out_dir)`` writes the output files into a local staging directory and may
     return extra manifest fields (e.g. counts). ``inputs`` maps names to provenance
     records (file_record, weights.resolve, ...). Returns the artifact directory.
+    ``started`` (from ``now()``): when the work began, for stages that compute before
+    publishing (a model run shared by several artifacts); default: when build starts.
     """
     final = (shared_root or paths.SHARED_ROOT) / relpath
     config = _normalize(config)
@@ -139,7 +142,7 @@ def publish(
         print(f"SKIP: {final} already built with this config")
         return final
 
-    started = _now()
+    started = started or now()
     with tempfile.TemporaryDirectory(prefix="labrag-") as stage:
         stage = Path(stage)
         extra = build(stage) or {}
@@ -153,7 +156,7 @@ def publish(
             "commit": git_commit(),
             "node": socket.gethostname(),
             "started": started,
-            "finished": _now(),
+            "finished": now(),
             "python": platform.python_version(),
             "packages": {p: importlib.metadata.version(p) for p in VERSIONED_PACKAGES},
         }

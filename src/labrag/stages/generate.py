@@ -30,7 +30,6 @@ configs/containers.yaml; weights: configs/weights.yaml.
 """
 
 import asyncio
-import datetime
 import gzip
 import json
 import time
@@ -98,14 +97,13 @@ def run(
     with serving.vllm_server(
         model, model_dir, image, model_cfg["serve_args"]
     ) as server:
-        started = _now()
+        started = artifacts.now()
         t0 = time.monotonic()
         everything = [row for _, _, _, rows in loaded for row in rows]
         results = asyncio.run(
             _generate(server["base_url"], model, sampling_cfg, everything, tokenizer)
         )
         seconds = time.monotonic() - t0
-        finished = _now()
         metrics = serving.metrics_text(server["root_url"])  # job-level, for costs
 
     built, i = [], 0
@@ -125,8 +123,6 @@ def run(
                 "concurrency": CONCURRENCY,
             },
             "generation": {
-                "started": started,
-                "finished": finished,
                 "seconds": round(seconds),
                 "n_requests_in_job": len(everything),
                 # Cost: the job's GPU time shared over all its requests (one queue).
@@ -149,7 +145,9 @@ def run(
             print(out, json.dumps(summary["summary"], indent=2))
             return summary
 
-        built.append(artifacts.publish(out, config, inputs, build, overwrite))
+        built.append(
+            artifacts.publish(out, config, inputs, build, overwrite, started=started)
+        )
     return built
 
 
@@ -238,7 +236,3 @@ def summarize(records: list[dict]) -> dict:
         "reasoning_tokens": stats([r["reasoning_tokens"] for r in records]),
         "prompt_tokens": stats([r["prompt_tokens"] for r in records]),
     }
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")

@@ -165,7 +165,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument(
         "--repro",
         action="store_true",
-        help="instead: run the metric's upstream reproduction test (green, green-hf)",
+        help="instead: run the metric's upstream reproduction test (green, green-native)",
     )
     p.set_defaults(func=evaluate_command)
 

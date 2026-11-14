@@ -1,10 +1,10 @@
 """Score reports with GREEN, inside its image.
 
-  docker compose -f eval/compose.yaml run --rm green-hf <gt.csv> <pred.csv> <out.csv>
-  docker compose -f eval/compose.yaml run --rm green-hf --repro
-  docker compose -f eval/compose.yaml run --rm green-vllm <gt.csv> <pred.csv> <out.csv>
-  docker compose -f eval/compose.yaml run --rm green-vllm score <dir>...
-  docker compose -f eval/compose.yaml run --rm green-vllm --repro
+  docker compose -f eval/compose.yaml run --rm green-native <gt.csv> <pred.csv> <out.csv>
+  docker compose -f eval/compose.yaml run --rm green-native --repro
+  docker compose -f eval/compose.yaml run --rm green-client <gt.csv> <pred.csv> <out.csv>
+  docker compose -f eval/compose.yaml run --rm green-client score <dir>...
+  docker compose -f eval/compose.yaml run --rm green-client --repro
 
 (the image's entry point; the paths are inside the container, so mount their directory).
 
@@ -21,7 +21,7 @@ row per study, the same ids in both. out.csv gets per study, in input order:
 
 Two ways to run the judge (eval/compose.yaml):
 
-1. service green-hf: upstream's own HF generate, as ReXrank calls it
+1. service green-native: upstream's own HF generate, as ReXrank calls it
    (rajpurkarlab/ReXrank-metric, scripts/run_green.py): GREEN(model, output_dir,
    cpu=False, compute_summary_stats=False) on the reports as strings, references first;
    everything else at upstream's defaults (greedy, fp16, batch 8, max_length 2048). The
@@ -29,8 +29,8 @@ Two ways to run the judge (eval/compose.yaml):
    jobs run with no network), passed as the constructor's own argument, so upstream's
    code is unpatched. One GPU.
 
-2. service green-vllm (GREEN_JUDGE_URL set): the judge served by vLLM (service
-   green-judge, greedy, fp16); this container has no GPU and does everything but the
+2. service green-client (GREEN_JUDGE_URL set): the judge served by vLLM (service
+   green-vllm, greedy, fp16); this container has no GPU and does everything but the
    forward passes, with upstream's code. Per study: the prompt (GREEN's make_prompt and
    chat template), tokenized as GREEN's get_response does, one study per batch (no
    padding: the same ids as the unpadded part of upstream's batch); a request with
@@ -69,7 +69,7 @@ import time
 MODEL = "/models/StanfordAIMI/GREEN-RadLlama2-7b"
 REPRO_TEST = "/opt/GREEN/tests/test_repro.py"
 MAX_LENGTH = 2048  # GREEN.get_response: model.generate(..., max_length=2048)
-JUDGE_URL = os.environ.get("GREEN_JUDGE_URL")  # set by compose for green-vllm
+JUDGE_URL = os.environ.get("GREEN_JUDGE_URL")  # set by compose for green-client
 CONCURRENCY = 256  # requests in flight; vLLM batches them
 REQUEST_TIMEOUT_S = 3600
 

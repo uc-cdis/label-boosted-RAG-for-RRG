@@ -12,14 +12,15 @@ CPU only), ``ratescore`` and ``green`` (GREEN score, its clinically significant 
 counts and matched findings, plus the judge's text). The GPU metrics run on one GPU:
 submit with --gres=gpu:1; the container gets the job's GPU from CUDA_VISIBLE_DEVICES.
 
-``green`` serves GREEN's judge with vLLM (compose service green-judge, on the job's
-GPU; the client is service green-vllm); GREEN's image does all the text work with
-upstream's code (see eval/green/run.py). One container run scores every set of the
+``green`` serves GREEN's judge with vLLM (compose service green-vllm, on the job's
+GPU; the client is service green-client), in vLLM's batch-invariant mode, so a study's
+score doesn't depend on what it is batched with; GREEN's image does all the text work
+with upstream's code (see eval/green/run.py). One container run scores every set of the
 job, in one request queue; the job's compose project, server included, is taken down
-at the end. ``green-hf``, the reference: the same scores by upstream's own HF generate
-(service green-hf, ≈1.6 s per study on an H200). ``labrag evaluate --metric green[-hf]
---repro`` runs upstream's
-5-case reproduction test through either judge path.
+at the end. ``green-native``, the reference: the same scores by upstream's own HF
+generate (service green-native, ≈1.6 s per study on an H200). ``labrag evaluate
+--metric green[-native] --repro`` runs upstream's 5-case reproduction test through
+either judge path.
 
 Each metric is one service of eval/compose.yaml: the upstream's own code and pins in its
 own image (docs/revision-plan.md §7). The stage builds the image from this checkout
@@ -110,8 +111,8 @@ METRICS = {
         "scores": ["ratescore"],
     },
     "green": {
-        "service": "green-vllm",
-        "build": "green-hf",
+        "service": "green-client",
+        "build": "green-native",
         "upstream": "external/GREEN",
         "gpu": True,
         "weights": ["green.radllama2-7b"],
@@ -127,12 +128,12 @@ METRICS = {
             "green_unparsed",
         ],
         "texts": ["green_analysis"],
-        "judge": "green-judge",
+        "judge": "green-vllm",
     },
 }
-METRICS["green-hf"] = {  # the reference: upstream's HF generate
+METRICS["green-native"] = {  # the reference: upstream's HF generate
     **{k: v for k, v in METRICS["green"].items() if k not in ("build", "judge")},
-    "service": "green-hf",
+    "service": "green-native",
 }
 
 
@@ -414,10 +415,12 @@ def read_scores(spec: dict, out_csv: Path, pairs: pd.DataFrame) -> list[dict]:
 
 
 def judge_definition(spec: dict) -> dict:
-    """The judge service's image and command (what determines its outputs), for the
-    artifact config; the rest of eval/compose.yaml is not part of it."""
+    """The judge service's image, environment and command (what determines its
+    outputs, e.g. VLLM_BATCH_INVARIANT), for the artifact config; the rest of
+    eval/compose.yaml is not part of it."""
     service = yaml.safe_load(COMPOSE_FILE.read_text())["services"][spec["judge"]]
-    return {"service": spec["judge"], **{k: service[k] for k in ("image", "command")}}
+    keys = ("image", "environment", "command")
+    return {"service": spec["judge"], **{k: service[k] for k in keys}}
 
 
 def judge_image_record(spec: dict) -> dict:
@@ -448,9 +451,9 @@ def torch_threads() -> int:
 
 
 def image_source(spec: dict) -> dict:
-    """The compose service the metric runs (green-vllm and green-hf share one image,
-    so this is what tells them apart) and the git ids of what its image is built from
-    (committed state of this checkout).
+    """The compose service the metric runs (green-client and green-native share one
+    image, so this is what tells them apart) and the git ids of what its image is built
+    from (committed state of this checkout).
     """
     _, context, _ = image_build(spec)
     return {

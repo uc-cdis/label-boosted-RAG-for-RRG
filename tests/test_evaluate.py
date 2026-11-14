@@ -190,7 +190,7 @@ def fake_judged_compose(calls, fail=False):
             return
         if fail:
             raise subprocess.CalledProcessError(1, "docker compose run")
-        i = args.index("green-vllm")
+        i = args.index("green-client")
         assert args[i + 1] == "score"
         tokens = 100.0  # the server's counter before the first set
         for d in map(Path, args[i + 2 :]):
@@ -264,20 +264,21 @@ def test_score_sets_takes_the_judge_down_on_failure(monkeypatch):
         evaluate.score_sets(spec, {"tag": "abc"}, judged_sets())
 
 
-def test_judged_metric_records_the_judge_and_hf_shares_its_image():
+def test_judged_metric_records_the_judge_and_native_shares_its_image():
     spec = evaluate.METRICS["green"]
-    hf = evaluate.METRICS["green-hf"]
-    assert evaluate.image_build(spec) == ("green-hf", "eval/green", "labrag/green")
-    source, hf_source = evaluate.image_source(spec), evaluate.image_source(hf)
-    assert source.pop("service") == "green-vllm"
-    assert hf_source.pop("service") == "green-hf"
-    assert source == hf_source  # same image
-    assert "judge" not in evaluate.METRICS["green-hf"]
+    native = evaluate.METRICS["green-native"]
+    assert evaluate.image_build(spec) == ("green-native", "eval/green", "labrag/green")
+    source, native_source = evaluate.image_source(spec), evaluate.image_source(native)
+    assert source.pop("service") == "green-client"
+    assert native_source.pop("service") == "green-native"
+    assert source == native_source  # same image
+    assert "judge" not in evaluate.METRICS["green-native"]
     judge = evaluate.judge_definition(spec)
-    assert judge["service"] == "green-judge"
+    assert judge["service"] == "green-vllm"
     assert "@sha256:" in judge["image"]  # pinned by digest
     assert "--generation-config=vllm" in judge["command"]
     assert "--skip-tokenizer-init" in judge["command"]
+    assert "VLLM_BATCH_INVARIANT=1" in judge["environment"]
 
 
 def test_compose_runs_as_the_jobs_own_project(monkeypatch):

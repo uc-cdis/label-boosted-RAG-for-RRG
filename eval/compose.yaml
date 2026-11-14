@@ -74,7 +74,7 @@ services:
 
   # GREEN with upstream's own judge path: HF generate of its 7B judge, in this
   # container, on one GPU (as ratescore).
-  green-hf:
+  green-native:
     <<: *offline
     image: labrag/green:${LABRAG_COMMIT:-dev}
     build:
@@ -93,25 +93,26 @@ services:
       - MPLCONFIGDIR=/tmp/matplotlib
       - XDG_CACHE_HOME=/tmp/.cache
 
-  # GREEN with its judge served by vLLM (green-judge): the same image as green-hf (built
-  # by that service), no GPU. Everything but the forward passes runs here, with upstream's
-  # code (eval/green/run.py): prompts, tokenizer, the requests, decoding, parsing.
-  # `run` starts green-judge first and waits until it answers.
-  green-vllm:
+  # GREEN with its judge served by vLLM (green-vllm): the same image as green-native
+  # (built by that service), no GPU. Everything but the forward passes runs here, with
+  # upstream's code (eval/green/run.py): prompts, tokenizer, the requests, decoding,
+  # parsing.
+  # `run` starts green-vllm first and waits until it answers.
+  green-client:
     image: labrag/green:${LABRAG_COMMIT:-dev}
     pull_policy: never
     networks: [judge]
     volumes: *models  # the judge's tokenizer
     depends_on:
-      green-judge:
+      green-vllm:
         condition: service_healthy
-    environment:  # as green-hf's, plus where the judge answers
+    environment:  # as green-native's, plus where the judge answers
       - OMP_NUM_THREADS  # required by run.py
       - HF_HOME=/tmp/huggingface
       - HF_HUB_OFFLINE=1
       - MPLCONFIGDIR=/tmp/matplotlib
       - XDG_CACHE_HOME=/tmp/.cache
-      - GREEN_JUDGE_URL=http://green-judge:8000
+      - GREEN_JUDGE_URL=http://green-vllm:8000
 
   # GREEN's judge served by vLLM, on the job's one GPU. Its own pin, independent of the
   # generators' (configs/containers.yaml): the latest stable release when pinned
@@ -121,12 +122,16 @@ services:
   # ignores the checkpoint's generation_config.json, which samples (temperature 0.6,
   # top_p 0.9) where upstream decodes greedily (the client sends temperature 0);
   # --skip-tokenizer-init: requests and responses are token ids, so vLLM never loads the
-  # judge's custom tokenizer code (green-vllm tokenizes, in upstream's env);
+  # judge's custom tokenizer code (green-client tokenizes, in upstream's env);
   # --disable-uvicorn-access-log: no log line per request (≈1.9M at full scale).
   # Runs as an unprivileged uid with nothing writable from the host; its compile caches
   # stay in the container (HOME), so each job compiles once at startup. USER: torch's
   # compile cache asks getpass for a user name, and this uid has no passwd entry.
-  green-judge:
+  # VLLM_BATCH_INVARIANT=1: a study's judge output no longer depends on what it is
+  # batched with (pilot, 2026-11-14: 600/600 identical tokens run to run, concurrency 1
+  # vs 256, and shuffled or mixed sets; off: 593/600). Costs ≈16% judge time. Its
+  # environment is part of the scores' config, with image and command.
+  green-vllm:
     image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
     pull_policy: never
     user: "65534:65534"
@@ -142,6 +147,7 @@ services:
       - HF_HUB_OFFLINE=1
       - VLLM_NO_USAGE_STATS=1
       - DO_NOT_TRACK=1
+      - VLLM_BATCH_INVARIANT=1
     command:
       - /models/StanfordAIMI/GREEN-RadLlama2-7b
       - --host=0.0.0.0

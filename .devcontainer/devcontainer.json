@@ -19,12 +19,14 @@
     "source=/opt/gpudata/models,target=/opt/gpudata/models,type=bind,consistency=cached,readonly",
     "source=/opt/gpudata/cxr,target=/opt/gpudata/cxr,type=bind,consistency=cached,readonly"
   ],
+  "runArgs": ["--gpus", "all"],
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
     "CONDA_ENVS_PATH": "${localEnv:HOME}/miniforge3/envs",
     "UV_CACHE_DIR": "${localEnv:HOME}/.cache/uv",
     "UV_PYTHON_INSTALL_DIR": "${localEnv:HOME}/.local/share/uv/python",
-    "UV_LINK_MODE": "copy"
+    "UV_LINK_MODE": "copy",
+    "LABRAG_RUN_ROOT": "${localEnv:HOME}/labrag-run"
   },
   "remoteEnv": {
     "PATH": "${localEnv:HOME}/.local/bin:${containerEnv:PATH}"

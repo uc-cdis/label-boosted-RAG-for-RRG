@@ -11,6 +11,16 @@ Metrics: ``cxr-report-metric`` (BLEU-2, BERTScore, SembScore, RadGraph F1, RadCl
 CPU only), ``ratescore`` and ``green`` (GREEN score, its clinically significant error
 counts and matched findings, plus the judge's text). The GPU metrics run on one GPU:
 submit with --gres=gpu:1; the container gets the job's GPU from CUDA_VISIBLE_DEVICES.
+``--metric`` runs one metric alone (e.g. to rerun the one that failed; the suite also
+skips every metric already built with its config).
+
+Submit the suite with --gres=gpu:1 --cpus-per-task=2 × (12 + 8 × W) for W
+CXR-Report-Metric containers at a time (plan_threads): half the job's CPUs are torch
+threads (torch_threads; one per physical core on our nodes, 2 CPUs per core), 8 for
+RaTEScore, 4 for GREEN's client, 8 per container. One container scores ≈0.48 s per
+study and GREEN, the slowest on the GPU, ≈0.12 s alongside RaTEScore (job 28835, H200),
+so W = 4 (88 CPUs) finishes with the GPU, plus the judge's startup (≈75–90 s) once per
+job; fewer containers make CXR-Report-Metric the long pole.
 
 One job runs the whole suite (``SUITE``, the default) at once, so the metrics share its
 GPU and CPUs and finish at about the same time: cxr-report-metric starts first, on CPU;
@@ -106,8 +116,10 @@ METRICS = {
         # 8 threads: 0.48 s per study vs 0.42 at 16 (pilot, 2026-11-13), so more
         # containers of fewer threads score more studies per CPU
         "threads": 8,
-        # ~15 s of model loads per container run, ≈3% of a chunk
-        "chunk": 1000,
+        # Evals run after each trial, on one set, so a set must split across the
+        # containers: 250 gives PadChest-GR (915 studies) 4 chunks and MIMIC (2,347) 10.
+        # Each run loads the models (~15-20 s, ≈15% of a 250-study chunk).
+        "chunk": 250,
         "weights": [
             "chexbert",
             "cxr-report-metric.bert-base-uncased",
@@ -200,14 +212,19 @@ def run(
         for plan in plans:
             if not plan["spec"]["gpu"]:
                 futures[pool.submit(score_metric, plan, overwrite)] = plan["metric"]
-        session = (
-            judge_session(judged["spec"], judged["image"], judged)
-            if judged
-            else contextlib.nullcontext()
-        )
-        with session:  # the judge sizes its KV cache before anything else is on the GPU
+        with contextlib.ExitStack() as session:
+            # the judge sizes its KV cache before anything else is on the GPU
+            if judged:
+                try:
+                    session.enter_context(
+                        judge_session(judged["spec"], judged["image"], judged)
+                    )
+                except Exception as e:  # its metric fails; the others still run
+                    failed_judge = concurrent.futures.Future()
+                    failed_judge.set_exception(e)
+                    futures[failed_judge] = judged["metric"]
             for plan in plans:
-                if plan["spec"]["gpu"]:
+                if plan["spec"]["gpu"] and plan["metric"] not in futures.values():
                     futures[pool.submit(score_metric, plan, overwrite)] = plan["metric"]
             concurrent.futures.wait(futures)
     finally:
@@ -636,7 +653,8 @@ def torch_threads() -> int:
 
     torch 1.6 parallelizes even tiny ops, so one preempted thread stalls each op;
     threads == CPUs on a shared node ran RadGraph ~7x slower (2026-11-13). Our Slurm
-    doesn't confine jobs, so the job's share is --cpus-per-task, not the node.
+    doesn't confine jobs, so the job's share is --cpus-per-task, not the node
+    (slurm/job.sh refuses jobs without it); the CPU affinity is for runs outside Slurm.
     """
     ncpu = int(os.environ.get("SLURM_CPUS_PER_TASK") or len(os.sched_getaffinity(0)))
     return max(1, ncpu // 2)

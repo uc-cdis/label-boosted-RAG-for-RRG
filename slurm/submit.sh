@@ -3,8 +3,9 @@
 # with the Slurm client.
 #
 #   slurm/submit.sh [--with-nvl02] [sbatch options...] -- <command> [args...]
-#   e.g. slurm/submit.sh --gres=gpu:1 -- labrag labels --dataset chexpertplus --section findings
-#   (request a rail type, gpu:h200_rail0/1, only when the job needs rail alignment)
+#   e.g. slurm/submit.sh --gres=gpu:1 --cpus-per-task=16 -- labrag labels --dataset chexpertplus --section findings
+#   (request a rail type, gpu:h200_rail0/1, only when the job needs rail alignment;
+#   --cpus-per-task is required: slurm/job.sh refuses to run without it)
 #
 # The job runs exactly the commit at HEAD, cloned from GitHub on each node (slurm/job.sh),
 # so the tree must be clean and HEAD must be on GitHub. kg35-nvl02 has no copy of the

@@ -364,6 +364,32 @@ def test_run_starts_cpu_metrics_before_the_judge_and_reports_failures(monkeypatc
     assert events[-1] == "judge down"  # after every metric, the failed one included
 
 
+def test_judge_that_fails_to_start_fails_only_its_metric(monkeypatch):
+    scored = []
+
+    @contextlib.contextmanager
+    def failing_session(spec, image, plan):
+        raise subprocess.CalledProcessError(1, ["docker", "compose", "up"])
+        yield
+
+    monkeypatch.setattr(
+        evaluate,
+        "prepare",
+        lambda m, g, o: ({"metric": m, "spec": evaluate.METRICS[m], "sets": []}, []),
+    )
+    monkeypatch.setattr(evaluate, "check_gpu", lambda spec: [])
+    monkeypatch.setattr(evaluate, "build_image", lambda spec: {"tag": "abc"})
+    monkeypatch.setattr(evaluate, "judge_session", failing_session)
+    monkeypatch.setattr(
+        evaluate, "score_metric", lambda plan, o: scored.append(plan["metric"]) or []
+    )
+    monkeypatch.setattr(evaluate.serving, "raise_on_sigterm", lambda: None)
+    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "64")
+    with pytest.raises(SystemExit, match="failed metrics: green$"):
+        evaluate.run(["g"])
+    assert sorted(scored) == ["cxr-report-metric", "ratescore"]
+
+
 def test_green_native_runs_alone():
     with pytest.raises(SystemExit, match="alone"):
         evaluate.run(["g"], ["green-native", "ratescore"])

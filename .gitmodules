@@ -13,6 +13,3 @@
 [submodule "external/GREEN"]
 	path = external/GREEN
 	url = https://github.com/Stanford-AIMI/GREEN.git
-[submodule "external/CRIMSON"]
-	path = external/CRIMSON
-	url = https://github.com/rajpurkarlab/CRIMSON.git

@@ -294,8 +294,9 @@ def plan_threads(plans: list[dict]) -> None:
     """Torch threads per container, and how many chunk containers run at a time.
 
     Half the job's CPUs in all, as torch_threads: the GPU metrics' containers first,
-    the rest to the chunked metric, at its threads per container. Our Slurm doesn't
-    confine jobs, so the job's share is --cpus-per-task, not the node."""
+    the rest to the chunked metric, at its threads per container (never more
+    containers than it has chunks). Our Slurm doesn't confine jobs, so the job's share
+    is --cpus-per-task, not the node."""
     budget = torch_threads()
     for plan in plans:
         plan["threads"] = min(plan["spec"]["threads"], budget)
@@ -303,7 +304,9 @@ def plan_threads(plans: list[dict]) -> None:
     left = budget - sum(p["threads"] for p in plans if "chunk" not in p["spec"])
     for plan in plans:
         if "chunk" in plan["spec"]:
-            plan["workers"] = max(1, left // plan["threads"])
+            size = plan["spec"]["chunk"]
+            chunks = sum(-(-len(s["pairs"]) // size) for s in plan["sets"])
+            plan["workers"] = max(1, min(left // plan["threads"], chunks))
         print(
             f"[{plan['metric']}] {len(plan['sets'])} sets, {plan['workers']} "
             f"container(s) at a time, {plan['threads']} threads each",

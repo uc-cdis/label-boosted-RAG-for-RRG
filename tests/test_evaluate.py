@@ -301,8 +301,9 @@ def test_chunks_score_each_set_in_order(monkeypatch):
     assert t1["chunks"] == 1
 
 
-def plans_of(*metrics):
-    return [{"metric": m, "spec": evaluate.METRICS[m], "sets": [{}]} for m in metrics]
+def plans_of(*metrics, studies=5000):
+    sets = [{"pairs": pd.DataFrame({"study_id": range(studies)})}]
+    return [{"metric": m, "spec": evaluate.METRICS[m], "sets": sets} for m in metrics]
 
 
 def test_plan_threads_gives_the_rest_to_the_chunked_metric(monkeypatch):
@@ -316,6 +317,11 @@ def test_plan_threads_gives_the_rest_to_the_chunked_metric(monkeypatch):
     plans = plans_of(*evaluate.SUITE)
     evaluate.plan_threads(plans)
     assert all(p["threads"] == 2 and p["workers"] == 1 for p in plans)
+    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "96")  # 3 sets of 200: 3 chunks
+    plans = plans_of(*evaluate.SUITE, studies=200)
+    plans[0]["sets"] = plans[0]["sets"] * 3
+    evaluate.plan_threads(plans)
+    assert plans[0]["workers"] == 3
 
 
 def test_run_starts_cpu_metrics_before_the_judge_and_reports_failures(monkeypatch):

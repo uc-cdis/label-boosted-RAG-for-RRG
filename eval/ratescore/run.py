@@ -9,10 +9,13 @@ report, one row per study, the same ids in both. out.csv gets study_id and rates
 <out>.json the timing.
 
 Called as ReXrank calls it (rajpurkarlab/ReXrank-metric, scripts/run_ratescore.py):
-RaTEScore() with its defaults (batch size 1, the "long" affinity matrix, GPU) on the
-reports as strings, predictions first. The one change: the two Hub models its defaults
-name are loaded from their local copies under /models (mounted read-only; jobs run with
-no network), passed as the constructor's own arguments, so upstream's code is unpatched.
+RaTEScore() with its defaults (the "long" affinity matrix, GPU) on the reports as
+strings, predictions first. Two changes, both through the constructor's own arguments,
+so upstream's code is unpatched: the two Hub models its defaults name are loaded from
+their local copies under /models (mounted read-only; jobs run with no network), and
+batch_size is 64, not 1 (it batches only the NER forward passes). Batch 64 gave the same
+scores as batch 1, bit for bit, on the pilot (600/600 studies on an H200, 2026-11-14),
+in ~10 s instead of 27.5 s per 200 studies.
 
 GPU required (use_gpu=True, ReXrank's setting): the stage passes the job's one GPU.
 OMP_NUM_THREADS must be set (unset, torch would use every core of the host).
@@ -27,6 +30,7 @@ MODELS = {
     "bert_model": "/models/Angelakeke/RaTE-NER-Deberta",
     "eval_model": "/models/FremyCompany/BioLORD-2023-C",
 }
+BATCH_SIZE = 64
 
 
 def read_inputs(gt_csv, pred_csv):
@@ -64,7 +68,8 @@ def main(gt_csv, pred_csv, out_csv):
 
     if not torch.cuda.is_available():
         raise SystemExit("no GPU visible: run with the job's GPU")
-    scorer = RaTEScore(**MODELS)  # every other argument at upstream's default
+    # every other argument at upstream's default
+    scorer = RaTEScore(**MODELS, batch_size=BATCH_SIZE)
 
     start = time.time()
     scores = scorer.compute_score(predictions, references)

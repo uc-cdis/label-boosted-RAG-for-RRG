@@ -30,13 +30,14 @@ def splits_pilot(args: argparse.Namespace) -> None:
 
 def evaluate_command(args: argparse.Namespace) -> None:
     if args.repro:
-        if args.generations:
-            sys.exit("evaluate: --repro takes no --generations")
+        if args.generations or not args.metric:
+            sys.exit("evaluate: --repro takes a --metric and no --generations")
         evaluate.repro(args.metric)
     elif not args.generations:
         sys.exit("evaluate: --generations is required")
     else:
-        evaluate.run(args.generations, args.metric, args.overwrite)
+        metrics = [args.metric] if args.metric else None
+        evaluate.run(args.generations, metrics, args.overwrite)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -158,7 +159,11 @@ def main(argv: list[str] | None = None) -> None:
         nargs="+",
         help="generations artifacts, relative to generations/",
     )
-    p.add_argument("--metric", required=True, choices=sorted(evaluate.METRICS))
+    p.add_argument(
+        "--metric",
+        choices=sorted(evaluate.METRICS),
+        help=f"one metric (default: the suite, {', '.join(evaluate.SUITE)}, at once)",
+    )
     p.add_argument(
         "--overwrite", action="store_true", help="replace existing artifacts"
     )

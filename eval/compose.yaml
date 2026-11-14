@@ -97,7 +97,9 @@ services:
   # (built by that service), no GPU. Everything but the forward passes runs here, with
   # upstream's code (eval/green/run.py): prompts, tokenizer, the requests, decoding,
   # parsing.
-  # `run` starts green-vllm first and waits until it answers.
+  # `run` starts green-vllm first and waits until it answers. The evaluate stage starts
+  # it itself (`up --wait`) before the other GPU metrics, so the judge sizes its KV
+  # cache (vLLM's default 92% of the GPU) on an empty GPU; RaTEScore fits in the rest.
   green-client:
     image: labrag/green:${LABRAG_COMMIT:-dev}
     pull_policy: never

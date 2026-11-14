@@ -1,7 +1,9 @@
 """Evaluate: input formatting and the round trip through a fake metric container."""
 
+import contextlib
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pandas as pd
@@ -74,7 +76,7 @@ def test_pair_reports_refuses_missing_reference():
 def test_score_round_trip(monkeypatch):
     seen = {}
 
-    def fake_compose(*args, tag):
+    def fake_compose(*args, tag, prefix=None):
         seen["args"], seen["tag"] = args, tag
         gt, pred, out = (args[-3], args[-2], args[-1])
         g, p = pd.read_csv(gt), pd.read_csv(pred)
@@ -107,7 +109,7 @@ def test_score_round_trip(monkeypatch):
 def test_gpu_metric_needs_exactly_one_gpu(monkeypatch):
     spec = evaluate.METRICS["ratescore"]
 
-    def fake_compose(*args, tag):
+    def fake_compose(*args, tag, prefix=None):
         out = args[-1]
         pd.read_csv(args[-2]).assign(ratescore=0.5).to_csv(out, index=False)
         Path(out).with_suffix(".json").write_text("{}")
@@ -129,7 +131,7 @@ def test_text_columns_kept_as_written(monkeypatch):
     spec = {**evaluate.METRICS["ratescore"], "gpu": False, "texts": ["analysis"]}
     texts = ['two\nlines, "quoted"', "", "NA"]
 
-    def fake_compose(*args, tag):
+    def fake_compose(*args, tag, prefix=None):
         out = args[-1]
         df = pd.read_csv(args[-2]).assign(ratescore=0.5, analysis=texts)
         df.to_csv(out, index=False)
@@ -184,7 +186,7 @@ def fake_judged_compose(calls, fail=False):
     server's metrics before and after it (7 generated tokens per study)."""
     spec = evaluate.METRICS["green"]
 
-    def fake(*args, tag, check=True):
+    def fake(*args, tag, check=True, prefix=None):
         calls.append((args[0], check))
         if args[0] != "run":
             return
@@ -229,15 +231,15 @@ def judged_sets():
     }
 
 
-def test_score_sets_one_run_then_down(monkeypatch):
+def test_score_sets_one_run(monkeypatch):
     calls = []
     spec, fake = fake_judged_compose(calls)
     monkeypatch.setattr(evaluate, "compose", fake)
     monkeypatch.setattr(evaluate.serving, "gpu_names", lambda devices: ["H200"])
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3")
-    (s0, t0), (s1, t1) = evaluate.score_sets(spec, {"tag": "abc"}, judged_sets())
-    # one container run for both sets; the judge's log, then the project taken down
-    assert calls == [("run", True), ("logs", False), ("down", False)]
+    plan = {"judge_startup_seconds": 40}
+    (s0, t0), (s1, t1) = evaluate.score_sets(spec, {"tag": "abc"}, judged_sets(), plan)
+    assert calls == [("run", True)]  # one container run for both sets
     assert [s["green_score"] for s in s0] == [0.0, 1.0, 2.0]  # mapped back by id
     assert [s["green_analysis"] for s in s1] == ["text 0", "text 1"]
     assert t0["finish_reason"] == {"stop": 3} and t1["reports"] == 2
@@ -249,19 +251,116 @@ def test_score_sets_one_run_then_down(monkeypatch):
     assert t0["run"] == t1["run"]
     assert t0["run"]["sets"] == ["scores/set3/green", "scores/set2/green"]
     assert isinstance(t0["run"]["overhead_seconds"], int)
-
-
-def test_score_sets_takes_the_judge_down_on_failure(monkeypatch):
-    calls = []
-    spec, fake = fake_judged_compose(calls, fail=True)
-    monkeypatch.setattr(evaluate, "compose", fake)
-    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3")
-    with pytest.raises(subprocess.CalledProcessError):
-        evaluate.score_sets(spec, {"tag": "abc"}, judged_sets())
-    assert calls == [("run", True), ("logs", False), ("down", False)]
+    assert t0["run"]["judge_startup_seconds"] == 40
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
     with pytest.raises(SystemExit, match="one GPU"):
         evaluate.score_sets(spec, {"tag": "abc"}, judged_sets())
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_judge_session_always_takes_the_project_down(monkeypatch, fail):
+    calls = []
+    monkeypatch.setattr(
+        evaluate, "compose", lambda *a, tag, check=True: calls.append(a[:2])
+    )
+    monkeypatch.setattr(evaluate.serving, "raise_on_sigterm", lambda: None)
+    plan = {}
+    raises = pytest.raises(RuntimeError) if fail else contextlib.nullcontext()
+    session = evaluate.judge_session(evaluate.METRICS["green"], {"tag": "abc"}, plan)
+    with raises, session:
+        assert calls == [("up", "--detach")]  # up (and healthy) before the body
+        if fail:
+            raise RuntimeError
+    assert calls[1:] == [("logs", "--no-color"), ("down", "--timeout")]
+    assert isinstance(plan["judge_startup_seconds"], int)
+
+
+def test_chunks_score_each_set_in_order(monkeypatch):
+    seen = []
+
+    def fake_score(spec, image, pairs, threads, prefix):
+        seen.append((pairs["study_id"].tolist(), threads))
+        scores = [{"bleu_score": float(i)} for i in pairs["study_id"]]
+        return scores, {"seconds": 1.5, "torch_threads": threads}
+
+    monkeypatch.setattr(evaluate, "score", fake_score)
+    spec = {**SPEC, "chunk": 2}
+    sets = [{"pairs": pd.DataFrame({"study_id": range(n)})} for n in (5, 2)]
+    plan = {"workers": 3, "threads": 8, "metric": "cxr-report-metric"}
+    (s0, t0), (s1, t1) = list(evaluate.score_chunks(spec, {}, sets, plan))
+    assert sorted(seen) == [([0, 1], 8), ([0, 1], 8), ([2, 3], 8), ([4], 8)]
+    assert [x["bleu_score"] for x in s0] == [0, 1, 2, 3, 4]  # chunks rejoined in order
+    assert [x["bleu_score"] for x in s1] == [0, 1]
+    assert t0 == {
+        "reports": 5,
+        "seconds": 4.5,
+        "chunks": 3,
+        "torch_threads": 8,
+        "parallel_containers": 3,
+    }
+    assert t1["chunks"] == 1
+
+
+def plans_of(*metrics):
+    return [{"metric": m, "spec": evaluate.METRICS[m], "sets": [{}]} for m in metrics]
+
+
+def test_plan_threads_gives_the_rest_to_the_chunked_metric(monkeypatch):
+    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "96")  # 48 threads in all
+    plans = plans_of(*evaluate.SUITE)
+    evaluate.plan_threads(plans)
+    by = {p["metric"]: (p["threads"], p["workers"]) for p in plans}
+    # ratescore 8 + green 4; cxr-report-metric: (48 - 12) // 8 containers of 8
+    assert by == {"ratescore": (8, 1), "green": (4, 1), "cxr-report-metric": (8, 4)}
+    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "4")  # never 0 threads or containers
+    plans = plans_of(*evaluate.SUITE)
+    evaluate.plan_threads(plans)
+    assert all(p["threads"] == 2 and p["workers"] == 1 for p in plans)
+
+
+def test_run_starts_cpu_metrics_before_the_judge_and_reports_failures(monkeypatch):
+    events, lock = [], threading.Lock()
+    judge_up = threading.Event()
+
+    def fake_prepare(metric, generations, overwrite):
+        return {"metric": metric, "spec": evaluate.METRICS[metric], "sets": []}, []
+
+    @contextlib.contextmanager
+    def fake_session(spec, image, plan):
+        judge_up.set()
+        with lock:
+            events.append("judge up")
+        yield
+        with lock:
+            events.append("judge down")
+
+    def fake_score_metric(plan, overwrite):
+        with lock:
+            events.append((plan["metric"], judge_up.is_set(), plan["alongside"]))
+        if plan["metric"] == "ratescore":
+            raise SystemExit("boom")
+        return [plan["metric"]]
+
+    monkeypatch.setattr(evaluate, "prepare", fake_prepare)
+    monkeypatch.setattr(evaluate, "check_gpu", lambda spec: [])
+    monkeypatch.setattr(evaluate, "build_image", lambda spec: {"tag": "abc"})
+    monkeypatch.setattr(evaluate, "judge_session", fake_session)
+    monkeypatch.setattr(evaluate, "score_metric", fake_score_metric)
+    monkeypatch.setattr(evaluate.serving, "raise_on_sigterm", lambda: None)
+    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "64")
+    with pytest.raises(SystemExit, match="failed metrics: ratescore"):
+        evaluate.run(["g"])
+    cpu = ("cxr-report-metric", False, ["ratescore", "green"])
+    assert events[0] in (cpu, "judge up")  # the CPU metric doesn't wait for the judge
+    assert cpu in events
+    assert ("ratescore", True, ["cxr-report-metric", "green"]) in events
+    assert ("green", True, ["cxr-report-metric", "ratescore"]) in events
+    assert events[-1] == "judge down"  # after every metric, the failed one included
+
+
+def test_green_native_runs_alone():
+    with pytest.raises(SystemExit, match="alone"):
+        evaluate.run(["g"], ["green-native", "ratescore"])
 
 
 def test_judged_metric_records_the_judge_and_native_shares_its_image():

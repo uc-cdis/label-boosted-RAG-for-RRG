@@ -12,6 +12,16 @@ CPU only), ``ratescore`` and ``green`` (GREEN score, its clinically significant 
 counts and matched findings, plus the judge's text). The GPU metrics run on one GPU:
 submit with --gres=gpu:1; the container gets the job's GPU from CUDA_VISIBLE_DEVICES.
 
+One job runs the whole suite (``SUITE``, the default) at once, so the metrics share its
+GPU and CPUs and finish at about the same time: cxr-report-metric starts first, on CPU;
+then GREEN's judge starts and sizes its KV cache on the empty GPU; then GREEN and
+RaTEScore share the GPU. cxr-report-metric, the slowest per study, scores each set in
+chunks of ``chunk`` studies (fixed, so a study's scores never depend on the job's CPU
+count), one container per chunk, as many at a time as the job's CPUs allow
+(``plan_threads``): --cpus-per-task is what balances it against the GPU metrics. Each
+metric publishes its artifacts when its own scores are in; a failed metric doesn't
+stop the others (the job then fails at the end).
+
 ``green`` serves GREEN's judge with vLLM (compose service green-vllm, on the job's
 GPU; the client is service green-client), in vLLM's batch-invariant mode, so a study's
 score doesn't depend on what it is batched with; GREEN's image does all the text work
@@ -47,13 +57,17 @@ are scored as the text "EMPTY" and stay in every mean; each record has ``empty_r
 and the summary counts them. Empty references are refused.
 """
 
+import concurrent.futures
+import contextlib
 import gzip
 import json
 import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -77,16 +91,23 @@ FORMAT = {
 }
 
 # metric -> compose service, the upstream submodule its image is built from, whether it
-# runs on the job's GPU, the configs/weights.yaml entries it reads under /models, its
-# per-study score columns (numbers, averaged in the summary) and optional text columns
-# (kept per study, e.g. an LLM judge's output). Optional: ``build``, the service that
-# builds the image (default: the service itself); ``judge``, the compose service that
-# serves the metric's LLM judge (``run`` starts it; the stage takes it down).
+# runs on the job's GPU, torch threads per container, the configs/weights.yaml entries
+# it reads under /models, its per-study score columns (numbers, averaged in the summary)
+# and optional text columns (kept per study, e.g. an LLM judge's output). Optional:
+# ``build``, the service that builds the image (default: the service itself); ``judge``,
+# the compose service that serves the metric's LLM judge (the stage starts it before
+# the GPU metrics and takes it down at the end); ``chunk``, studies per container run
+# (part of the scores' config; containers run in parallel, see plan_threads).
 METRICS = {
     "cxr-report-metric": {
         "service": "cxr-report-metric",
         "upstream": "external/CXR-Report-Metric",
         "gpu": False,
+        # 8 threads: 0.48 s per study vs 0.42 at 16 (pilot, 2026-11-13), so more
+        # containers of fewer threads score more studies per CPU
+        "threads": 8,
+        # ~15 s of model loads per container run, ≈3% of a chunk
+        "chunk": 1000,
         "weights": [
             "chexbert",
             "cxr-report-metric.bert-base-uncased",
@@ -107,6 +128,7 @@ METRICS = {
         "service": "ratescore",
         "upstream": "external/RaTEScore",
         "gpu": True,
+        "threads": 8,
         "weights": ["ratescore.rate-ner-deberta", "ratescore.biolord-2023-c"],
         "scores": ["ratescore"],
     },
@@ -115,6 +137,7 @@ METRICS = {
         "build": "green-native",
         "upstream": "external/GREEN",
         "gpu": True,
+        "threads": 4,  # GREEN's text work; the judge runs in its own container
         "weights": ["green.radllama2-7b"],
         "scores": [
             "green_score",
@@ -135,6 +158,10 @@ METRICS["green-native"] = {  # the reference: upstream's HF generate
     **{k: v for k, v in METRICS["green"].items() if k not in ("build", "judge")},
     "service": "green-native",
 }
+# The default of `labrag evaluate`: every metric of the suite, in one job.
+SUITE = ["cxr-report-metric", "ratescore", "green"]
+# artifacts.publish reads the umask by setting it, which isn't thread-safe.
+_PUBLISH = threading.Lock()
 
 
 def format_report(text: str) -> str:
@@ -142,7 +169,67 @@ def format_report(text: str) -> str:
     return FINDINGS_HEADER.sub("", " ".join(text.split()), count=1)
 
 
-def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Path]:
+def run(
+    generations: list[str], metrics: list[str] | None = None, overwrite: bool = False
+) -> list[Path]:
+    """Score generations artifacts with ``metrics`` (default: the suite), at once."""
+    metrics = metrics or SUITE
+    if "green-native" in metrics and len(metrics) > 1:
+        raise SystemExit("green-native runs alone (its judge would share the GPU)")
+    plans, done = [], []
+    for metric in metrics:
+        plan, built = prepare(metric, generations, overwrite)
+        done += built
+        if plan:
+            plans.append(plan)
+    if not plans:
+        return done
+    for plan in plans:  # before anything runs: a GPU metric needs the job's one GPU
+        check_gpu(plan["spec"])
+        plan["image"] = build_image(plan["spec"])
+    judged = next((p for p in plans if "judge" in p["spec"]), None)
+    plan_threads(plans)
+    for plan in plans:  # recorded with the timing: what shared the job's GPU and CPUs
+        plan["alongside"] = [p["metric"] for p in plans if p is not plan]
+
+    serving.raise_on_sigterm()
+    pool = concurrent.futures.ThreadPoolExecutor(len(plans))
+    futures = {}
+    try:
+        # CPU metrics first: they don't wait for the judge
+        for plan in plans:
+            if not plan["spec"]["gpu"]:
+                futures[pool.submit(score_metric, plan, overwrite)] = plan["metric"]
+        session = (
+            judge_session(judged["spec"], judged["image"], judged)
+            if judged
+            else contextlib.nullcontext()
+        )
+        with session:  # the judge sizes its KV cache before anything else is on the GPU
+            for plan in plans:
+                if plan["spec"]["gpu"]:
+                    futures[pool.submit(score_metric, plan, overwrite)] = plan["metric"]
+            concurrent.futures.wait(futures)
+    finally:
+        pool.shutdown(cancel_futures=True)
+    failed = []
+    for future, metric in futures.items():
+        if future.exception() is None:
+            done += future.result()
+        else:
+            failed.append(metric)
+            print(f"[{metric}] FAILED:", flush=True)
+            traceback.print_exception(future.exception())
+    if failed:
+        raise SystemExit(f"evaluate: failed metrics: {', '.join(failed)}")
+    return done
+
+
+def prepare(
+    metric: str, generations: list[str], overwrite: bool
+) -> tuple[dict | None, list[Path]]:
+    """What ``metric`` has to score: the sets not yet built with this config, their
+    inputs checked and loaded (None if every set is built), and the built ones."""
     spec = METRICS[metric]
     jobs = []  # (generations relpath, output relpath, config)
     for rel in generations:
@@ -160,19 +247,23 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
         }
         if "judge" in spec:
             config["judge"] = judge_definition(spec)
+        if "chunk" in spec:
+            config["chunk_studies"] = spec["chunk"]
         jobs.append((f"generations/{rel}", f"scores/{rel}/{metric}", config))
     todo = [j for j in jobs if not artifacts.is_built(j[1], j[2], overwrite)]
+    built = []
     for _, out, _ in jobs:
         if all(out != t[1] for t in todo):
             print(f"SKIP: {paths.SHARED_ROOT / out} already built with this config")
+            built.append(paths.SHARED_ROOT / out)
     if not todo:
-        return [paths.SHARED_ROOT / out for _, out, _ in jobs]
+        return None, built
 
     # Check every input before building the image: the weights the container reads
     # (present, with the sha256 in configs/weights.yaml), then the artifacts.
     weight_records = {name: weights.resolve(name)[1] for name in spec["weights"]}
     judge_image = judge_image_record(spec) if "judge" in spec else None
-    loaded = []
+    sets = []
     for gen_rel, out, config in todo:
         gen_dir = paths.SHARED_ROOT / gen_rel
         gen_record = artifacts.artifact_record(gen_dir)
@@ -194,48 +285,118 @@ def run(generations: list[str], metric: str, overwrite: bool = False) -> list[Pa
         }
         if judge_image:
             inputs["judge_image"] = judge_image
-        loaded.append((out, config, inputs, rows, pairs))
+        sets.append({"out": out, "config": config, "inputs": inputs, "rows": rows,
+                     "pairs": pairs})  # fmt: skip
+    return {"metric": metric, "spec": spec, "sets": sets}, built
 
-    image = build_image(spec)
-    if "judge" in spec:  # one run and one server for every set, a set at a time
-        started = artifacts.now()
-        judged = score_sets(spec, image, {out: pairs for out, *_, pairs in loaded})
-    built = []
-    for k, (out, config, inputs, rows, pairs) in enumerate(loaded):
-        if "judge" in spec:
-            scores, timing = judged[k]
-        else:
-            started = artifacts.now()
-            scores, timing = score(spec, image, pairs)
-        records = [
-            {"study_id": r["study_id"], "set": r["set"], "empty_report": e, **s}
-            for r, e, s in zip(rows, pairs["empty_report"].tolist(), scores)
-        ]
-        extra = {
-            "image": image,
-            "timing": timing,
-            "summary": summarize(records, spec["scores"]),
-        }
 
-        def build(dest: Path, records=records, extra=extra, out=out) -> dict:
-            with open(dest / "scores.jsonl.gz", "wb") as raw:
-                with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as f:
-                    for r in records:
-                        f.write((json.dumps(r) + "\n").encode())
-            print(out, json.dumps(extra["summary"], indent=2))
-            return extra
+def plan_threads(plans: list[dict]) -> None:
+    """Torch threads per container, and how many chunk containers run at a time.
 
-        built.append(
-            artifacts.publish(
-                out,
-                config,
-                {**inputs, "image": image},
-                build,
-                overwrite,
-                started=started,
-            )
+    Half the job's CPUs in all, as torch_threads: the GPU metrics' containers first,
+    the rest to the chunked metric, at its threads per container. Our Slurm doesn't
+    confine jobs, so the job's share is --cpus-per-task, not the node."""
+    budget = torch_threads()
+    for plan in plans:
+        plan["threads"] = min(plan["spec"]["threads"], budget)
+        plan["workers"] = 1
+    left = budget - sum(p["threads"] for p in plans if "chunk" not in p["spec"])
+    for plan in plans:
+        if "chunk" in plan["spec"]:
+            plan["workers"] = max(1, left // plan["threads"])
+        print(
+            f"[{plan['metric']}] {len(plan['sets'])} sets, {plan['workers']} "
+            f"container(s) at a time, {plan['threads']} threads each",
+            flush=True,
         )
+
+
+def score_metric(plan: dict, overwrite: bool) -> list[Path]:
+    """Score every set of the plan, publishing each set's artifact as its scores are
+    in (each manifest's ``started``: when the metric began, shared by its sets)."""
+    spec, image, sets = plan["spec"], plan["image"], plan["sets"]
+    started = artifacts.now()
+    start = time.monotonic()
+    if "judge" in spec:  # one client run for every set, on the one server
+        results = score_sets(spec, image, {s["out"]: s["pairs"] for s in sets}, plan)
+    elif "chunk" in spec:
+        results = score_chunks(spec, image, sets, plan)
+    else:
+        results = (
+            score(spec, image, s["pairs"], plan["threads"], plan["metric"])
+            for s in sets
+        )
+    built = [
+        publish_scores(plan, s, scores, timing, overwrite, started)
+        for s, (scores, timing) in zip(sets, results)
+    ]
+    print(f"[{plan['metric']}] done in {time.monotonic() - start:.0f} s", flush=True)
     return built
+
+
+def score_chunks(spec: dict, image: dict, sets: list[dict], plan: dict):
+    """Scores of each set (in order, as each set's chunks are in), from containers of
+    ``spec["chunk"]`` studies each, ``plan["workers"]`` at a time. A set's timing: its
+    containers' summed seconds and its chunk count."""
+    size = spec["chunk"]
+    pool = concurrent.futures.ThreadPoolExecutor(plan["workers"])
+    try:
+        chunks = [
+            [
+                pool.submit(score, spec, image, chunk, plan["threads"], plan["metric"])
+                for chunk in (
+                    s["pairs"].iloc[lo : lo + size]
+                    for lo in range(0, len(s["pairs"]), size)
+                )
+            ]
+            for s in sets
+        ]
+        for s, futures in zip(sets, chunks):
+            parts = [f.result() for f in futures]
+            timing = {
+                "reports": len(s["pairs"]),
+                "seconds": round(sum(t["seconds"] for _, t in parts), 1),
+                "chunks": len(parts),
+                "torch_threads": parts[0][1]["torch_threads"],
+                "parallel_containers": plan["workers"],
+            }
+            yield [x for scores, _ in parts for x in scores], timing
+    finally:
+        pool.shutdown(cancel_futures=True)
+
+
+def publish_scores(
+    plan: dict, s: dict, scores: list[dict], timing: dict, overwrite: bool, started: str
+) -> Path:
+    """Publish one set's scores artifact (``s``: an entry of the plan's sets)."""
+    spec, image = plan["spec"], plan["image"]
+    records = [
+        {"study_id": r["study_id"], "set": r["set"], "empty_report": e, **x}
+        for r, e, x in zip(s["rows"], s["pairs"]["empty_report"].tolist(), scores)
+    ]
+    extra = {
+        "image": image,
+        "timing": {**timing, "alongside": plan.get("alongside", [])},
+        "summary": summarize(records, spec["scores"]),
+    }
+
+    def build(dest: Path) -> dict:
+        with open(dest / "scores.jsonl.gz", "wb") as raw:
+            with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as f:
+                for r in records:
+                    f.write((json.dumps(r) + "\n").encode())
+        print(s["out"], json.dumps(extra["summary"], indent=2), flush=True)
+        return extra
+
+    with _PUBLISH:
+        return artifacts.publish(
+            s["out"],
+            s["config"],
+            {**s["inputs"], "image": image},
+            build,
+            overwrite,
+            started=started,
+        )
 
 
 def pair_reports(
@@ -263,7 +424,13 @@ def pair_reports(
     )
 
 
-def score(spec: dict, image: dict, pairs: pd.DataFrame) -> tuple[list[dict], dict]:
+def score(
+    spec: dict,
+    image: dict,
+    pairs: pd.DataFrame,
+    threads: int | None = None,
+    prefix: str | None = None,
+) -> tuple[list[dict], dict]:
     """Run the metric's image on one set of pairs; per-study scores in pair order."""
     check_gpu(spec)
     # Local disk, not NFS: the container writes its intermediates next to the inputs.
@@ -275,23 +442,27 @@ def score(spec: dict, image: dict, pairs: pd.DataFrame) -> tuple[list[dict], dic
             image,
             work,
             *(str(work / f) for f in ("gt.csv", "pred.csv", "out.csv")),
+            threads=threads,
+            prefix=prefix,
         )
         timing = json.loads((work / "out.json").read_text())
         return read_scores(spec, work / "out.csv", pairs), timing
 
 
 def score_sets(
-    spec: dict, image: dict, sets: dict[str, pd.DataFrame]
+    spec: dict, image: dict, sets: dict[str, pd.DataFrame], plan: dict | None = None
 ) -> list[tuple[list[dict], dict]]:
     """Run a judged metric on several sets of pairs (artifact name -> pairs) in one run
-    of its ``score`` command, which judges them one set at a time on one server.
+    of its ``score`` command, which judges them one set at a time on the judge server
+    (started by judge_session).
 
     Per set, in order: the per-study scores in pair order and the timing. Everything at
     the timing's top level is the set's own: its time on the server, finish reasons,
     token counts and server counters (the counters' change over the set), and the job's
-    GPU. ``run`` is shared by every set of the run, so count it once per run: the sets
-    and ``overhead_seconds``, the run's wall time (server startup and shutdown included)
-    minus the sets' own times."""
+    GPU. ``run`` is shared by every set of the run, so count it once per run: the sets,
+    ``overhead_seconds`` (the client run's wall time minus the sets' own times), the
+    judge's startup time and the metrics that shared the job's GPU and CPUs."""
+    plan = plan or {}
     devices = check_gpu(spec)
     with tempfile.TemporaryDirectory(prefix="labrag-eval-") as work:
         work = Path(work)
@@ -300,9 +471,10 @@ def score_sets(
             d.mkdir()
             write_pairs(pairs, d)
         start = time.monotonic()
-        with_judge(spec, image, lambda: run_service(
-            spec, image, work, "score", *map(str, dirs)
-        ))  # fmt: skip
+        run_service(
+            spec, image, work, "score", *map(str, dirs),
+            threads=plan.get("threads"), prefix=plan.get("metric"),
+        )  # fmt: skip
         run_seconds = time.monotonic() - start
         results = []
         for d, pairs in zip(dirs, sets.values()):
@@ -321,17 +493,25 @@ def score_sets(
             "overhead_seconds": round(
                 run_seconds - sum(t["seconds"] for _, t in results)
             ),
+            "judge_startup_seconds": plan.get("judge_startup_seconds"),
         }
         return [(scores, {**timing, "run": shared}) for scores, timing in results]
 
 
-def with_judge(spec: dict, image: dict, run) -> None:
-    """Call ``run`` (a compose run that starts the judge service), then always take the
-    job's compose project down (the server included), after copying the judge's log
-    into the job log; also when the job is cancelled (Slurm's SIGTERM)."""
+@contextlib.contextmanager
+def judge_session(spec: dict, image: dict, plan: dict | None = None):
+    """Start the metric's judge service and wait until it answers; on exit, always
+    copy its log into the job log and take the job's compose project down (the server
+    included), also when the job is cancelled (Slurm's SIGTERM). Records the startup
+    time in ``plan``."""
     serving.raise_on_sigterm()
+    start = time.monotonic()
     try:
-        run()
+        compose("up", "--detach", "--wait", spec["judge"], tag=image["tag"])
+        if plan is not None:
+            plan["judge_startup_seconds"] = round(time.monotonic() - start)
+        print(f"{spec['judge']} up in {time.monotonic() - start:.0f} s", flush=True)
+        yield
     finally:
         compose("logs", "--no-color", spec["judge"], tag=image["tag"], check=False)
         compose("down", "--timeout", "30", tag=image["tag"], check=False)
@@ -348,16 +528,15 @@ def repro(metric: str) -> None:
     if "judge" in spec:
         judge_image_record(spec)
     image = build_image(spec)
-    with tempfile.TemporaryDirectory(prefix="labrag-eval-") as work:
-        work = Path(work)
-        if "judge" in spec:
-            with_judge(spec, image, lambda: run_service(spec, image, work, "--repro"))
-        else:
-            run_service(spec, image, work, "--repro")
+    session = contextlib.nullcontext()
+    if "judge" in spec:
+        session = judge_session(spec, image)
+    with tempfile.TemporaryDirectory(prefix="labrag-eval-") as work, session:
+        run_service(spec, image, Path(work), "--repro")
 
 
 def check_gpu(spec: dict) -> list[str]:
-    """The job's one GPU, for a GPU metric (compose reads CUDA_VISIBLE_DEVICES itself)."""
+    """The job's one GPU, for a GPU metric (compose reads CUDA_VISIBLE_DEVICES)."""
     if not spec["gpu"]:
         return []
     devices = serving.gpu_devices()
@@ -374,8 +553,17 @@ def write_pairs(pairs: pd.DataFrame, work: Path) -> None:
         )
 
 
-def run_service(spec: dict, image: dict, work: Path, *args: str) -> None:
-    """One run of the metric's container, with ``work`` mounted at the same path."""
+def run_service(
+    spec: dict,
+    image: dict,
+    work: Path,
+    *args: str,
+    threads: int | None = None,
+    prefix: str | None = None,
+) -> None:
+    """One run of the metric's container, with ``work`` mounted at the same path, at
+    ``threads`` torch threads (default: torch_threads); its output lines get
+    ``[prefix] `` (metrics running at once share the job log)."""
     compose(
         "run",
         "--rm",
@@ -387,10 +575,11 @@ def run_service(spec: dict, image: dict, work: Path, *args: str) -> None:
         "--volume",
         f"{work}:{work}",
         "--env",
-        f"OMP_NUM_THREADS={torch_threads()}",
+        f"OMP_NUM_THREADS={threads or torch_threads()}",
         spec["service"],
         *args,
         tag=image["tag"],
+        prefix=prefix,
     )
 
 
@@ -496,9 +685,12 @@ def build_image(spec: dict) -> dict:
     }
 
 
-def compose(*args: str, tag: str, check: bool = True) -> None:
+def compose(
+    *args: str, tag: str, check: bool = True, prefix: str | None = None
+) -> None:
     """docker compose on eval/compose.yaml, as this job's own project (jobs sharing a
-    node never share a container or network)."""
+    node never share a container or network); with ``prefix``, each output line starts
+    with ``[prefix] ``."""
     # The container mounts the weights root the stage checked.
     env = {
         **os.environ,
@@ -507,8 +699,19 @@ def compose(*args: str, tag: str, check: bool = True) -> None:
     }
     project = f"labrag-eval-{os.environ.get('SLURM_JOB_ID') or os.getpid()}"
     cmd = ["docker", "compose", "-f", str(COMPOSE_FILE), "-p", project, *args]
-    print("+", " ".join(cmd), flush=True)
-    subprocess.run(cmd, env=env, check=check)
+    if prefix is None:
+        print("+", " ".join(cmd), flush=True)
+        subprocess.run(cmd, env=env, check=check)
+        return
+    print(f"[{prefix}] +", " ".join(cmd), flush=True)
+    # text mode reads progress bars' carriage returns as line ends
+    with subprocess.Popen(
+        cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    ) as proc:
+        for line in proc.stdout:
+            print(f"[{prefix}] {line}", end="", flush=True)
+    if check and proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
 
 
 def summarize(records: list[dict], columns: list[str]) -> dict:

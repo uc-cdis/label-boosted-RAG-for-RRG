@@ -181,6 +181,8 @@ services:
       # importing transformers' pipelines makes torch look up its compile cache dir,
       # which asks getpass for a user name; the job's uid has no passwd entry
       - USER=labrag
+      # progress lines reach the job log as they happen, not at exit
+      - PYTHONUNBUFFERED=1
 
   # CRIMSON with its judge served by vLLM (crimson-judge): the same image as crimson-hf
   # (built by that service), no GPU. Everything but the forward passes runs here, with
@@ -202,6 +204,7 @@ services:
       - HF_HUB_OFFLINE=1
       - XDG_CACHE_HOME=/tmp/.cache
       - USER=labrag
+      - PYTHONUNBUFFERED=1
       - CRIMSON_JUDGE_URL=http://crimson-judge:8000
 
   # CRIMSON's judge served by vLLM, on the job's one GPU: the same pinned image and

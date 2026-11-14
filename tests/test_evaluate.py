@@ -307,16 +307,21 @@ def plans_of(*metrics, studies=5000):
 
 
 def test_plan_threads_gives_the_rest_to_the_chunked_metric(monkeypatch):
-    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "96")  # 48 threads in all
+    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "72")  # 36 threads in all
     plans = plans_of(*evaluate.SUITE)
     evaluate.plan_threads(plans)
     by = {p["metric"]: (p["threads"], p["workers"]) for p in plans}
-    # ratescore 8 + green 4; cxr-report-metric: (48 - 12) // 8 containers of 8
-    assert by == {"ratescore": (8, 1), "green": (4, 1), "cxr-report-metric": (8, 4)}
-    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "4")  # never 0 threads or containers
+    # ratescore 8 + green 4; cxr-report-metric: (36 - 12) // 4 containers of 4
+    assert by == {"ratescore": (8, 1), "green": (4, 1), "cxr-report-metric": (4, 6)}
+    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "30")  # 15 < 8 + 4 + 4: refused
+    with pytest.raises(SystemExit, match="need 16 torch threads.*>= 32"):
+        evaluate.plan_threads(plans_of(*evaluate.SUITE))
+    monkeypatch.setenv(
+        "SLURM_CPUS_PER_TASK", "32"
+    )  # one container, never fewer threads
     plans = plans_of(*evaluate.SUITE)
     evaluate.plan_threads(plans)
-    assert all(p["threads"] == 2 and p["workers"] == 1 for p in plans)
+    assert [(p["threads"], p["workers"]) for p in plans] == [(4, 1), (8, 1), (4, 1)]
     monkeypatch.setenv("SLURM_CPUS_PER_TASK", "96")  # 3 sets of 200: 3 chunks
     plans = plans_of(*evaluate.SUITE, studies=200)
     plans[0]["sets"] = plans[0]["sets"] * 3
@@ -410,6 +415,21 @@ def test_judged_metric_records_the_judge_and_native_shares_its_image():
     assert "--generation-config=vllm" in judge["command"]
     assert "--skip-tokenizer-init" in judge["command"]
     assert "VLLM_BATCH_INVARIANT=1" in judge["environment"]
+
+
+def test_chunked_metric_config_records_its_container_layout(monkeypatch):
+    configs = []
+    monkeypatch.setattr(
+        evaluate.artifacts,
+        "is_built",
+        lambda out, config, overwrite: configs.append(config) or True,
+    )
+    plan, built = evaluate.prepare("cxr-report-metric", ["g"], False)
+    assert plan is None and len(built) == 1
+    assert configs[0]["chunk_studies"] == 250
+    assert configs[0]["torch_threads"] == 4
+    evaluate.prepare("ratescore", ["g"], False)
+    assert "torch_threads" not in configs[1]
 
 
 def test_compose_runs_as_the_jobs_own_project(monkeypatch):

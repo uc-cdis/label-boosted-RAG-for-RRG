@@ -14,13 +14,15 @@ submit with --gres=gpu:1; the container gets the job's GPU from CUDA_VISIBLE_DEV
 ``--metric`` runs one metric alone (e.g. to rerun the one that failed; the suite also
 skips every metric already built with its config).
 
-Submit the suite with --gres=gpu:1 --cpus-per-task=2 × (12 + 8 × W) for W
+Submit the suite with --gres=gpu:1 --cpus-per-task=2 × (12 + 4 × W) for W
 CXR-Report-Metric containers at a time (plan_threads): half the job's CPUs are torch
 threads (torch_threads; one per physical core on our nodes, 2 CPUs per core), 8 for
-RaTEScore, 4 for GREEN's client, 8 per container. One container scores ≈0.48 s per
-study and GREEN, the slowest on the GPU, ≈0.12 s alongside RaTEScore (job 28835, H200),
-so W = 4 (88 CPUs) finishes with the GPU, plus the judge's startup (≈75–90 s) once per
-job; fewer containers make CXR-Report-Metric the long pole.
+RaTEScore, 4 for GREEN's client, 4 per container. W = 6 (72 CPUs, a GPU's even share of
+a node) scores ≈0.115 s per study (job 28836) and GREEN, the slowest on the GPU, ≈0.12 s
+alongside RaTEScore (job 28835, H200), so they finish together, plus the judge's startup
+(≈75–90 s) once per job; fewer containers make CXR-Report-Metric the long pole. A job too
+small for every metric's threads is refused: threads are never lowered, since
+CXR-Report-Metric's scores depend on them.
 
 One job runs the whole suite (``SUITE``, the default) at once, so the metrics share its
 GPU and CPUs and finish at about the same time: cxr-report-metric starts first, on CPU;
@@ -107,15 +109,18 @@ FORMAT = {
 # ``build``, the service that builds the image (default: the service itself); ``judge``,
 # the compose service that serves the metric's LLM judge (the stage starts it before
 # the GPU metrics and takes it down at the end); ``chunk``, studies per container run
-# (part of the scores' config; containers run in parallel, see plan_threads).
+# (containers run in parallel, see plan_threads; chunk and threads are then part of the
+# scores' config).
 METRICS = {
     "cxr-report-metric": {
         "service": "cxr-report-metric",
         "upstream": "external/CXR-Report-Metric",
         "gpu": False,
-        # 8 threads: 0.48 s per study vs 0.42 at 16 (pilot, 2026-11-13), so more
-        # containers of fewer threads score more studies per CPU
-        "threads": 8,
+        # Thinner containers score more studies per CPU: 24 threads as 3×8 / 4×6 / 6×4 /
+        # 8×3 gave 0.152 / 0.142 / 0.115 / 0.095 s per study (job 28836). The thread
+        # count changes a few studies' scores in the last float32 bit (1-2 per 200 at
+        # 3-6 threads vs 8), the same at a given count, so it is in the config.
+        "threads": 4,
         # Evals run after each trial, on one set, so a set must split across the
         # containers: 250 gives PadChest-GR (915 studies) 4 chunks and MIMIC (2,347) 10.
         # Each run loads the models (~15-20 s, ≈15% of a 250-study chunk).
@@ -264,8 +269,9 @@ def prepare(
         }
         if "judge" in spec:
             config["judge"] = judge_definition(spec)
-        if "chunk" in spec:
+        if "chunk" in spec:  # the container layout, which changes scores (last bit)
             config["chunk_studies"] = spec["chunk"]
+            config["torch_threads"] = spec["threads"]
         jobs.append((f"generations/{rel}", f"scores/{rel}/{metric}", config))
     todo = [j for j in jobs if not artifacts.is_built(j[1], j[2], overwrite)]
     built = []
@@ -310,14 +316,22 @@ def prepare(
 def plan_threads(plans: list[dict]) -> None:
     """Torch threads per container, and how many chunk containers run at a time.
 
-    Half the job's CPUs in all, as torch_threads: the GPU metrics' containers first,
+    Half the job's CPUs in all, as torch_threads: the other metrics' containers first,
     the rest to the chunked metric, at its threads per container (never more
-    containers than it has chunks). Our Slurm doesn't confine jobs, so the job's share
-    is --cpus-per-task, not the node."""
+    containers than it has chunks). Every metric runs at its own threads, never fewer
+    (CXR-Report-Metric's scores depend on them), so a job too small for one container of
+    each is refused. Our Slurm doesn't confine jobs, so the job's share is
+    --cpus-per-task, not the node."""
     budget = torch_threads()
     for plan in plans:
-        plan["threads"] = min(plan["spec"]["threads"], budget)
+        plan["threads"] = plan["spec"]["threads"]
         plan["workers"] = 1
+    need = sum(p["threads"] for p in plans)
+    if need > budget:
+        raise SystemExit(
+            f"evaluate: {', '.join(p['metric'] for p in plans)} need {need} torch "
+            f"threads, i.e. --cpus-per-task >= {2 * need} (got {budget} threads)"
+        )
     left = budget - sum(p["threads"] for p in plans if "chunk" not in p["spec"])
     for plan in plans:
         if "chunk" in plan["spec"]:

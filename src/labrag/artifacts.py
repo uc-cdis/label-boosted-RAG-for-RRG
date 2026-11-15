@@ -8,7 +8,10 @@ Publishing rules (docs/revision-plan.md §8):
 - the directory is built on local disk, then copied to shared storage once and renamed
   into place, so readers never see a half-written artifact;
 - same path and same config: already done, skipped (even at a newer commit);
-- same path, different config: refused. Pick a new name, or pass overwrite=True.
+- same path, different config: refused. Pick a new name, or pass overwrite=True;
+- same path and config, but built from inputs that have changed since (stale_inputs):
+  refused as stale. Rebuild it with overwrite=True. A stage also refuses to read a
+  stale artifact (artifact_record), so staleness never passes downstream.
 """
 
 import datetime
@@ -75,11 +78,106 @@ def artifact_record(artifact_dir: Path) -> dict:
     for name, sha in manifest["outputs"].items():
         if sha256_file(artifact_dir / name) != sha:
             raise SystemExit(f"CHANGED: {artifact_dir / name} differs from {MANIFEST}")
+    if reasons := stale_inputs(manifest):
+        raise SystemExit(
+            f"STALE INPUT: {artifact_dir} was built from inputs that changed:\n"
+            + _bullets(reasons)
+            + "\nRebuild it first (--overwrite)."
+        )
     return {
         "path": str(artifact_dir),
         "commit": manifest["commit"]["sha"],
         "outputs": manifest["outputs"],
     }
+
+
+def stale_inputs(manifest: dict) -> list[str]:
+    """What no longer holds of an artifact's recorded inputs (empty if all still hold).
+
+    - each upstream artifact must still have the outputs (sha256) it had when this one
+      was built. Content, not runs: an upstream rebuilt to the same bytes changes
+      nothing;
+    - each model's files must still be pinned to the same sha256 in configs/weights.yaml.
+
+    Reads only the upstream manifests and the config (no hashing; artifact_record checks
+    an artifact's files when a stage reads it). Source files, splits, images and code
+    commits are not checked here.
+    """
+    from labrag import weights  # imported here: weights imports this module
+
+    pins = None
+    reasons = []
+    for kind, record in _input_records(manifest["inputs"]):
+        if kind == "artifact":
+            upstream = read_manifest(Path(record["path"]))
+            if upstream is None:
+                reasons.append(f"{record['path']} is gone")
+            elif upstream["outputs"] != record["outputs"]:
+                reasons.append(f"{record['path']} has other outputs now")
+        else:
+            pins = pins or weights.load_config()
+            files = {f: v["sha256"] for f, v in record["files"].items()}
+            same_repo = [
+                e["files"] for e in pins.values() if e["repo"] == record["repo"]
+            ]
+            if not same_repo:
+                reasons.append(f"weights {record['repo']}: no longer pinned")
+            elif files not in same_repo:
+                reasons.append(f"weights {record['repo']}: pinned to other files now")
+    return reasons
+
+
+def _input_records(inputs):
+    """The (kind, record) of every upstream artifact and model in a manifest's inputs.
+
+    kind "artifact": an artifact_record (path, commit, outputs); kind "weights": a
+    weights.resolve record (repo, dir, files). Other records are skipped.
+    """
+    if isinstance(inputs, dict):
+        if "path" in inputs and "outputs" in inputs:
+            yield "artifact", inputs
+        elif "repo" in inputs and "files" in inputs:
+            yield "weights", inputs
+        else:
+            for v in inputs.values():
+                yield from _input_records(v)
+    elif isinstance(inputs, list):
+        for v in inputs:
+            yield from _input_records(v)
+
+
+def stale_tree(root: Path | None = None) -> tuple[int, dict[Path, list[str]]]:
+    """Every artifact under ``root`` (default: the shared root) that is stale.
+
+    Stale: its own inputs changed (stale_inputs), or an upstream artifact is stale,
+    through the whole chain. Reads every manifest once. Returns (artifacts seen,
+    {stale artifact dir: reasons}).
+    """
+    manifests = {}
+    for dirpath, dirnames, filenames in os.walk(root or paths.SHARED_ROOT):
+        # hidden: publish's .incoming-/.old- dirs; an artifact holds no artifacts
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        if MANIFEST in filenames:
+            manifests[Path(dirpath)] = read_manifest(Path(dirpath))
+            dirnames[:] = []
+    stale = {d: r for d, m in manifests.items() if (r := stale_inputs(m))}
+    upstreams = {
+        d: [Path(r["path"]) for k, r in _input_records(m["inputs"]) if k == "artifact"]
+        for d, m in manifests.items()
+    }
+    while True:
+        new = {
+            d: [f"{u} is stale" for u in ups if u in stale]
+            for d, ups in upstreams.items()
+            if d not in stale and any(u in stale for u in ups)
+        }
+        if not new:
+            return len(manifests), stale
+        stale |= new
+
+
+def _bullets(lines: list[str]) -> str:
+    return "\n".join(f"  - {line}" for line in lines)
 
 
 def _normalize(config: dict) -> dict:
@@ -96,8 +194,9 @@ def is_built(
 ) -> bool:
     """True if the artifact exists with this config (publish would skip it).
 
-    Raises SystemExit where publish would refuse: a different config without
-    ``overwrite``, or a directory without a manifest. Lets a stage skip expensive setup
+    Raises SystemExit where publish would refuse: a different config, or inputs that
+    changed since it was built (stale_inputs), without ``overwrite``; or a directory
+    without a manifest. Lets a stage skip expensive setup
     (e.g. starting a model server) when everything it would build already exists.
     """
     final = (shared_root or paths.SHARED_ROOT) / relpath
@@ -105,6 +204,12 @@ def is_built(
     existing = read_manifest(final)
     if existing is not None and not overwrite:
         if existing["config"] == config:
+            if reasons := stale_inputs(existing):
+                raise SystemExit(
+                    f"STALE: {final} was built from inputs that changed:\n"
+                    + _bullets(reasons)
+                    + "\nUse --overwrite to rebuild it."
+                )
             return True
         raise SystemExit(
             f"REFUSED: {final} exists with a different config.\n"

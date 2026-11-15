@@ -308,6 +308,7 @@ Settled:
   - `generate`: an async client against `vllm serve`, resumable and cached
   - `evaluate`: per-study scores, on content-only text (no section header), as ReXrank's Findings board. Each metric runs in its own container with its upstream's code. GREEN's judge is served by a pinned vLLM, while GREEN's own image does all the text work; upstream's HF generate is kept as the reference. One job (one GPU) runs the whole suite at once: GREEN and RaTEScore share the GPU, while CXR-Report-Metric scores fixed-size chunks in parallel CPU containers, so `--cpus-per-task` sets the balance.
   - `compare`: each condition's mean and every pair's difference, with paired-bootstrap 95% CIs (§3, Statistics), from the conditions' scores artifacts. CPU only, about a second.
+- **Provenance:** each artifact's manifest records the output checksums of the artifacts it read and the checksums of the model files it loaded. If an upstream artifact now has other outputs, or a model's pins in `configs/weights.yaml` changed, the artifact is stale: it is refused (rebuilt only with `--overwrite`), and no stage reads it. `labrag provenance` lists every stale artifact on shared storage, through the whole chain.
 - **Hard cap: never more than 8 GPUs in use at once** across all our jobs. Of the cluster's 16 H200s, at most 8 are ours at any time. Steven enforces it when scheduling; the runner doesn't.
 - **GPU wrapper (sbatch):**
   - tensor-parallel size taken from `CUDA_VISIBLE_DEVICES`

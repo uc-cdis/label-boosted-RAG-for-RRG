@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from labrag import paths, serving
+from labrag import artifacts, paths, serving
 from labrag.data import DATASETS, chexpertplus
 from labrag.stages import (
     build_prompts,
@@ -46,6 +46,18 @@ def evaluate_command(args: argparse.Namespace) -> None:
     else:
         metrics = [args.metric] if args.metric else None
         evaluate.run(args.generations, metrics, args.overwrite)
+
+
+def provenance_command(args: argparse.Namespace) -> None:
+    """List every stale artifact under the shared root (read-only)."""
+    seen, stale = artifacts.stale_tree()
+    for path, reasons in sorted(stale.items()):
+        print(f"STALE {path.relative_to(paths.SHARED_ROOT)}")
+        for reason in reasons:
+            print(f"  - {reason}")
+    print(f"{seen} artifacts, {len(stale)} stale")
+    if stale:
+        sys.exit(1)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -208,6 +220,9 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(
         func=lambda a: compare.run(a.generations, a.out, a.metric, a.overwrite)
     )
+
+    p = sub.add_parser("provenance", help=provenance_command.__doc__)
+    p.set_defaults(func=provenance_command)
 
     args = ap.parse_args(argv)
     args.func(args)

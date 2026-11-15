@@ -14,14 +14,14 @@ submit with --gres=gpu:1; the container gets the job's GPU from CUDA_VISIBLE_DEV
 ``--metric`` runs one metric alone (e.g. to rerun the one that failed; the suite also
 skips every metric already built with its config).
 
-Submit the suite with --gres=gpu:1 --cpus-per-task=2 × (12 + 4 × W) for W
-CXR-Report-Metric containers at a time (plan_threads): half the job's CPUs are torch
-threads (torch_threads; one per physical core on our nodes, 2 CPUs per core), 8 for
-RaTEScore, 4 for GREEN's client, 4 per container. W = 6 (72 CPUs, a GPU's even share of
-a node) scores ≈0.115 s per study (job 28836) and GREEN, the slowest on the GPU, ≈0.12 s
-alongside RaTEScore (job 28835, H200), so they finish together, plus the judge's startup
-(≈75–90 s) once per job; fewer containers make CXR-Report-Metric the long pole. A job too
-small for every metric's threads is refused: threads are never lowered, since
+Submit the suite with --gres=gpu:1, at slurm/job.sh's default --cpus-per-task=72 (a
+GPU's even share of a node). Half the job's CPUs are torch threads (torch_threads; one
+per physical core on our nodes): 8 for RaTEScore, 4 for GREEN's client, and 4 per
+CXR-Report-Metric container, so --cpus-per-task = 2 × (12 + 4 × W) runs W containers at
+a time (plan_threads). The thread counts were chosen so that 72 gives W = 6, which keeps
+about pace with GREEN, the slowest on the GPU; CXR-Report-Metric also runs during the
+judge's startup (≈90 s), and the 6 containers don't slow the GPU metrics (job 28851). A
+job too small for every metric's threads is refused: threads are never lowered, since
 CXR-Report-Metric's scores depend on them.
 
 One job runs the whole suite (``SUITE``, the default) at once, so the metrics share its
@@ -124,7 +124,10 @@ METRICS = {
         "threads": 4,
         # Evals run after each trial, on one set, so a set must split across the
         # containers: 250 gives PadChest-GR (915 studies) 4 chunks and MIMIC (2,347) 10.
-        # Each run loads the models (~15-20 s, ≈15% of a 250-study chunk).
+        # Each run loads the models (~15-20 s, ≈15% of a 250-study chunk). The chunk
+        # size changes a few studies' scores too (chunks of 100 vs 200, 4 threads:
+        # BERTScore in 6-8 studies per 200, ≤8e-7; RadCliQ ≤2.4e-6; the same at a given
+        # size; job 28851 vs 28849), so it is in the config, never sized per job.
         "chunk": 250,
         "weights": [
             "chexbert",
@@ -669,7 +672,7 @@ def torch_threads() -> int:
     torch 1.6 parallelizes even tiny ops, so one preempted thread stalls each op;
     threads == CPUs on a shared node ran RadGraph ~7x slower (2026-11-13). Our Slurm
     doesn't confine jobs, so the job's share is --cpus-per-task, not the node
-    (slurm/job.sh refuses jobs without it); the CPU affinity is for runs outside Slurm.
+    (slurm/job.sh's default: 72); the CPU affinity is for runs outside Slurm.
     """
     ncpu = int(os.environ.get("SLURM_CPUS_PER_TASK") or len(os.sched_getaffinity(0)))
     return max(1, ncpu // 2)

@@ -19,7 +19,13 @@
 #     setup.lock             held while a commit dir is being built
 #
 # Without Slurm (SLURM_JOB_ID unset) it runs the same steps on the local host.
+#
+# Our Slurm doesn't confine jobs, so the job's CPU share is only what --cpus-per-task
+# says (without it Slurm counts 1 CPU while the job could use the whole node). Default:
+# 72, a GPU's even share of a node, which labrag evaluate's container layout is sized
+# for; a job's own --cpus-per-task overrides it.
 #SBATCH --output=/tmp/labrag-%j.out
+#SBATCH --cpus-per-task=72
 set -euo pipefail
 
 usage="usage: job.sh <commit-sha> <repo-url> <command> [args...]"
@@ -34,13 +40,6 @@ mkdir -p "$root/logs"
 # Slurm's own log is node-local /tmp (the only dir sure to exist before this runs);
 # from here on everything also goes to the run root.
 exec > >(tee -a "$root/logs/${SLURM_JOB_ID:-local-$$}.out") 2>&1
-
-# Our Slurm doesn't confine jobs, so the job's CPU share is only what --cpus-per-task
-# says; without it Slurm counts 1 CPU while the job could use the whole node.
-if [[ -n ${SLURM_JOB_ID:-} && -z ${SLURM_CPUS_PER_TASK:-} ]]; then
-  echo "refusing to run: submit with --cpus-per-task (the job's CPU share)" >&2
-  exit 1
-fi
 
 # Build (once per node and commit) the commit dir and its env. Defined as a function so
 # srun can run it on every node of the job: the other nodes don't have this file.
@@ -85,7 +84,7 @@ export VIRTUAL_ENV=$dir/.venv PATH=$dir/.venv/bin:$PATH LABRAG_COMMIT=$sha
 # Our Slurm doesn't confine jobs with cgroups, so a process can use every core of the
 # node. OpenBLAS (numpy/scipy/sklearn) and OpenMP (torch) size their thread pools to the
 # whole machine by default, and joblib (sklearn n_jobs=-1) its worker count; cap all three
-# at the job's --cpus-per-task (required, above). These are per pool: joblib workers
+# at the job's --cpus-per-task (default 72, above). These are per pool: joblib workers
 # inherit the BLAS cap, so any n_jobs > 1 call must also pass
 # joblib.parallel_config(backend="loky", inner_max_num_threads=1).
 if [[ -n ${SLURM_JOB_ID:-} ]]; then

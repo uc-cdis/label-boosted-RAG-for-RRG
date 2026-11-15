@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
 
 s() { slurm/submit.sh --parsable --kill-on-invalid-dep=yes "$@"; }
 F=pilot/chexpertplus/findings

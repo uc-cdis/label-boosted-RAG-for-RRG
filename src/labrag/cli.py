@@ -1,7 +1,8 @@
 """Command-line entry point: ``labrag <command> ...``.
 
 Each command calls one function with the options given as keyword arguments; an
-omitted option is not passed, so the function's own default applies.
+omitted option is not passed, so the function's own default applies. Each command's
+parser is built by its own ``add_<command>`` function, listed in COMMANDS.
 """
 
 import argparse
@@ -35,6 +36,29 @@ OPTIONS = {
 }
 
 
+def command(sub, name: str, func, help: str) -> argparse.ArgumentParser:
+    """Subcommand ``name`` calling ``func`` with the options given."""
+    p = sub.add_parser(name, help=help, argument_default=argparse.SUPPRESS)
+    p.set_defaults(func=func)
+    return p
+
+
+def stage(sub, module, *options: str) -> argparse.ArgumentParser:
+    """Subcommand for a stage module: its name, the first line of its docstring as
+    help, ``module.run``, the given OPTIONS and --overwrite."""
+    name = module.__name__.rsplit(".", 1)[1].replace("_", "-")
+    help = module.__doc__.splitlines()[0].split(": ", 1)[1].rstrip(".")
+    p = command(sub, name, module.run, help.replace("%", "%%"))
+    for flag in options:
+        p.add_argument(flag, **OPTIONS[flag])
+    p.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="replace existing artifacts",
+    )
+    return p
+
+
 def splits_pilot(
     cxr_root: Path = paths.CXR_ROOT,
     out: Path = paths.SPLITS_DIR / chexpertplus.PILOT_SPLIT_FILE,
@@ -55,59 +79,7 @@ def splits_pilot(
     print(f"Wrote {out} ({len(drawn)} patients)")
 
 
-def evaluate_command(
-    generations: list[str] | None = None,
-    metric: str | None = None,
-    overwrite: bool = False,
-    repro: bool = False,
-) -> None:
-    if repro:
-        if generations or not metric:
-            sys.exit("evaluate: --repro takes a --metric and no --generations")
-        evaluate.repro(metric)
-    elif not generations:
-        sys.exit("evaluate: --generations is required")
-    else:
-        evaluate.run(generations, [metric] if metric else None, overwrite)
-
-
-def provenance() -> None:
-    """List every stale artifact under the shared root (read-only)."""
-    seen, stale = artifacts.stale_tree()
-    for path, reasons in sorted(stale.items()):
-        print(f"STALE {path.relative_to(paths.SHARED_ROOT)}")
-        for reason in reasons:
-            print(f"  - {reason}")
-    print(f"{seen} artifacts, {len(stale)} stale")
-    if stale:
-        sys.exit(1)
-
-
-def command(sub, name: str, func, help: str) -> argparse.ArgumentParser:
-    """Subcommand ``name`` calling ``func`` with the options given."""
-    p = sub.add_parser(name, help=help, argument_default=argparse.SUPPRESS)
-    p.set_defaults(func=func)
-    return p
-
-
-def stage(sub, module, *options: str, func=None) -> argparse.ArgumentParser:
-    """Subcommand for a stage module: its name, the first line of its docstring as
-    help, ``module.run`` (or ``func``), the given OPTIONS and --overwrite."""
-    name = module.__name__.rsplit(".", 1)[1].replace("_", "-")
-    help = module.__doc__.splitlines()[0].split(": ", 1)[1].rstrip(".")
-    p = command(sub, name, func or module.run, help.replace("%", "%%"))
-    for flag in options:
-        p.add_argument(flag, **OPTIONS[flag])
-    p.add_argument(
-        "--overwrite", action="store_true", help="replace existing artifacts"
-    )
-    return p
-
-
-def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(prog="labrag")
-    sub = ap.add_subparsers(dest="command", required=True)
-
+def add_splits(sub) -> None:
     splits = sub.add_parser("splits", help="frozen split files").add_subparsers(
         dest="split", required=True
     )
@@ -116,24 +88,71 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", type=Path)
     p.add_argument("--overwrite", action="store_true", help="replace the frozen file")
 
-    stage(sub, labels, "--dataset", "--section", "--labeler")
-    stage(sub, embed, "--dataset", "--encoder")
-    p = stage(
-        sub, classify, "--dataset", "--section", "--encoder", "--labeler", "--uncertain"
-    )
-    p.add_argument("--classifier", choices=classify.CLASSIFIERS)
 
-    p = stage(sub, build_prompts, "--section", "--uncertain")
-    p.add_argument(
-        "--experiment", required=True, choices=sorted(build_prompts.EXPERIMENTS)
+def add_labels(sub) -> None:
+    stage(
+        sub,
+        labels,
+        "--dataset",
+        "--section",
+        "--labeler",
     )
-    p.add_argument("--condition", required=True, choices=build_prompts.CONDITIONS)
+
+
+def add_embed(sub) -> None:
+    stage(
+        sub,
+        embed,
+        "--dataset",
+        "--encoder",
+    )
+
+
+def add_classify(sub) -> None:
+    p = stage(
+        sub,
+        classify,
+        "--dataset",
+        "--section",
+        "--encoder",
+        "--labeler",
+        "--uncertain",
+    )
+    p.add_argument(
+        "--classifier",
+        choices=classify.CLASSIFIERS,
+    )
+
+
+def add_build_prompts(sub) -> None:
+    p = stage(
+        sub,
+        build_prompts,
+        "--section",
+        "--uncertain",
+    )
+    p.add_argument(
+        "--experiment",
+        required=True,
+        choices=sorted(build_prompts.EXPERIMENTS),
+    )
+    p.add_argument(
+        "--condition",
+        required=True,
+        choices=build_prompts.CONDITIONS,
+    )
     defaults = ", ".join(f"{c} {v}" for c, v in build_prompts.DEFAULT_PROMPT.items())
     p.add_argument(
-        "--prompt", help=f"version in configs/prompts.yaml (default: {defaults})"
+        "--prompt",
+        help=f"version in configs/prompts.yaml (default: {defaults})",
     )
 
-    p = stage(sub, generate)
+
+def add_generate(sub) -> None:
+    p = stage(
+        sub,
+        generate,
+    )
     p.add_argument(
         "--prompts",
         required=True,
@@ -148,29 +167,35 @@ def main(argv: list[str] | None = None) -> None:
         help="target set, e.g. pilot",
     )
     p.add_argument(
-        "--model", required=True, choices=sorted(serving.load_config("models"))
+        "--model",
+        required=True,
+        choices=sorted(serving.load_config("models")),
     )
     p.add_argument(
-        "--sampling", required=True, choices=sorted(serving.load_config("sampling"))
+        "--sampling",
+        required=True,
+        choices=sorted(serving.load_config("sampling")),
     )
 
-    p = stage(sub, evaluate, func=evaluate_command)
+
+def add_evaluate(sub) -> None:
+    p = stage(sub, evaluate)
     p.add_argument(
         "--generations",
+        required=True,
         nargs="+",
         help="generations artifacts, relative to generations/",
     )
     p.add_argument(
         "--metric",
+        dest="metrics",
+        nargs="+",
         choices=sorted(evaluate.METRICS),
-        help=f"one metric (default: the suite, {SUITE}, at once)",
-    )
-    p.add_argument(
-        "--repro",
-        action="store_true",
-        help="instead: run the metric's upstream reproduction test (green, green-native)",
+        help=f"metrics (default: the suite, {SUITE}, at once)",
     )
 
+
+def add_compare(sub) -> None:
     p = stage(sub, compare)
     p.add_argument(
         "--generations",
@@ -180,7 +205,9 @@ def main(argv: list[str] | None = None) -> None:
         "studies, relative to generations/",
     )
     p.add_argument(
-        "--out", required=True, help="output artifact, relative to comparisons/"
+        "--out",
+        required=True,
+        help="output artifact, relative to comparisons/",
     )
     p.add_argument(
         "--metric",
@@ -190,7 +217,42 @@ def main(argv: list[str] | None = None) -> None:
         help=f"metrics (default: the suite, {SUITE})",
     )
 
+
+def provenance() -> None:
+    """List every stale artifact under the shared root (read-only)."""
+    seen, stale = artifacts.stale_tree()
+    for path, reasons in sorted(stale.items()):
+        print(f"STALE {path.relative_to(paths.SHARED_ROOT)}")
+        for reason in reasons:
+            print(f"  - {reason}")
+    print(f"{seen} artifacts, {len(stale)} stale")
+    if stale:
+        sys.exit(1)
+
+
+def add_provenance(sub) -> None:
     command(sub, "provenance", provenance, provenance.__doc__)
+
+
+# In pipeline order, as `labrag --help` lists them.
+COMMANDS = (
+    add_splits,
+    add_labels,
+    add_embed,
+    add_classify,
+    add_build_prompts,
+    add_generate,
+    add_evaluate,
+    add_compare,
+    add_provenance,
+)
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(prog="labrag")
+    sub = ap.add_subparsers(dest="command", required=True)
+    for add in COMMANDS:
+        add(sub)
 
     kwargs = vars(ap.parse_args(argv))
     func = kwargs.pop("func")

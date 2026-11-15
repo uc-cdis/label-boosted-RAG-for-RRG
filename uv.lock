@@ -629,6 +629,9 @@ dev = [
     { name = "pre-commit" },
     { name = "pytest" },
 ]
+test = [
+    { name = "pytest" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -658,6 +661,7 @@ dev = [
     { name = "pre-commit" },
     { name = "pytest" },
 ]
+test = [{ name = "pytest" }]
 
 [[package]]
 name = "markdown-it-py"

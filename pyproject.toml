@@ -30,7 +30,8 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest", "pre-commit", "ipykernel", "matplotlib"]
+test = ["pytest"]  # jobs install it too: the gpu tests run there
+dev = [{include-group = "test"}, "pre-commit", "ipykernel", "matplotlib"]
 
 [project.scripts]
 labrag = "labrag.cli:main"
@@ -47,6 +48,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not gpu'"  # a later -m on the command line replaces this
+markers = ["gpu: needs Docker and one GPU; runs only when asked for with -m gpu"]
 
 [tool.isort]
 profile = "black"

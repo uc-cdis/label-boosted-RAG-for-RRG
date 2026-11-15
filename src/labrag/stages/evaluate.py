@@ -7,10 +7,9 @@ the means and, for CXR-Report-Metric, 1/RadCliQ-v1 = 1 / mean(RadCliQ-v1), as Re
 Each metric is a service of eval/compose.yaml: the upstream's code and pins in its own
 image, built from this checkout and tagged with the commit. ``cxr-report-metric`` runs
 on CPU; ``ratescore`` and ``green`` (judge served by vLLM) share the job's GPU;
-``green-native`` (upstream's HF generate) is the reference and runs alone. ``--repro``
-runs GREEN's upstream reproduction test. Weights are checked (sha256) before any build.
+``green-native`` (upstream's HF generate) is the reference and runs alone. Weights are checked (sha256) before any build.
 
-One job runs the whole suite (``--metric`` runs one): --gres=gpu:1 at slurm/job.sh's
+One job runs the whole suite (``--metric`` picks metrics): --gres=gpu:1 at slurm/job.sh's
 default 72 CPUs. The judge starts first, sizing its KV cache on the empty GPU; meanwhile
 CXR-Report-Metric scores fixed chunks of studies in parallel CPU containers. Torch
 threads are half the job's CPUs: 8 RaTEScore + 4 GREEN client + 4 per CXR container, so
@@ -476,7 +475,7 @@ def judge_session(spec: dict, image: dict, plan: dict | None = None):
 
 def repro(metric: str) -> None:
     """Upstream's reproduction test of an LLM-judge metric through its judge path (the
-    service's ``--repro``); exits 1 on a mismatch."""
+    service's ``--repro``; run by tests/test_green_repro.py); fails on a mismatch."""
     spec = METRICS[metric]
     if spec["upstream"] != "external/GREEN":
         raise SystemExit(f"--repro: no reproduction test for {metric}")

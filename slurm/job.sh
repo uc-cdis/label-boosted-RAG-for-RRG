@@ -48,7 +48,7 @@ setup_commit() {
     git -C "$dir" -c init.templateDir= submodule -q update --init --depth 1
     local uv
     uv=$("$dir/envs/install-uv.sh")
-    (cd "$dir" && unset VIRTUAL_ENV && "$uv" sync --locked --no-dev)
+    (cd "$dir" && unset VIRTUAL_ENV && "$uv" sync --locked --no-dev --group test)
     touch "$dir/.ready"
   fi
   # Not used by jobs; kept here so every node that runs a job has it.

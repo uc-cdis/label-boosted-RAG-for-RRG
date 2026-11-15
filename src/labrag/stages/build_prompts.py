@@ -8,7 +8,9 @@ without), reference (trimmed only).
 Conditions: ``retrieval-only`` (top K by image similarity) and ``labrag.<labeler>``
 (Jaccard on positive labels, ties by image similarity; the target's predicted labels in
 the prompt; corpus studies carry reference labels, binarized like the classifier).
-Retrieval never returns a study of the target's patient.
+``labrag-oracle.<labeler>`` is labrag with the target's reference labels instead of
+predicted ones: the ceiling for any classifier. Retrieval never returns a study of the
+target's patient.
 """
 
 import gzip
@@ -30,8 +32,12 @@ EXPERIMENTS = {
         "corpus": ("train", "val"),
     },
 }
-CONDITIONS = ("retrieval-only", "labrag")
-DEFAULT_PROMPT = {"retrieval-only": "preprint-naive", "labrag": "preprint-simple"}
+CONDITIONS = ("retrieval-only", "labrag", "labrag-oracle")
+DEFAULT_PROMPT = {
+    "retrieval-only": "preprint-naive",
+    "labrag": "preprint-simple",
+    "labrag-oracle": "preprint-simple",
+}
 K = 5
 ENCODER = "raddino"
 CLASSIFIER = "lr"
@@ -53,7 +59,8 @@ def run(
     adapter = DATASETS[dataset]
     prompt = prompt or DEFAULT_PROMPT[condition]
     version = prompts.load(prompt)
-    with_labels = condition == "labrag"
+    with_labels = condition != "retrieval-only"
+    oracle = condition == "labrag-oracle"
     if prompts.uses_labels(version) != with_labels:
         raise SystemExit(f"prompt {prompt!r} does not fit condition {condition!r}")
 
@@ -90,15 +97,16 @@ def run(
         "prompt": {"name": prompt, **version},
         "report_text": "whitespace runs collapsed to one space",
     }
-    if with_labels:
+    if with_labels and not oracle:
         inputs["classifier"] = artifacts.artifact_record(clf_dir)
         for name in ("embeddings", "labels"):  # the classifier saw these same inputs
             clf_input = artifacts.read_manifest(clf_dir)["inputs"][name]["outputs"]
             assert clf_input == inputs[name]["outputs"], f"classifier {name} differ"
+        config["classifier"] = CLASSIFIER
+    if with_labels:
         config |= {
             "labeler": labeler,
-            "classifier": CLASSIFIER,
-            "target_labels": "predicted",
+            "target_labels": "reference" if oracle else "predicted",
             "corpus_labels": "reference",
             "binarize": BINARIZE[uncertain],
             "ranking": "jaccard of positive labels (empty vs empty = 1), then cosine",
@@ -130,11 +138,18 @@ def run(
         sim = retrieval.cosine(embeddings(target), embeddings(corpus))
         exclude = target.subject_id.to_numpy()[:, None] == corpus.subject_id.to_numpy()
         if with_labels:
-            corpus_y = labels.loc[corpus.index, names].isin(POSITIVE[uncertain])
-            corpus_y = corpus_y.to_numpy(dtype=int)
-            pred = pd.read_csv(clf_dir / "predictions.csv").set_index("study_id")
-            assert list(pred.columns) == names, "classifier labels differ"
-            target_y = pred.loc[target.index, names].to_numpy(dtype=int)
+
+            def reference(rows: pd.DataFrame) -> np.ndarray:
+                y = labels.loc[rows.index, names].isin(POSITIVE[uncertain])
+                return y.to_numpy(dtype=int)
+
+            corpus_y = reference(corpus)
+            if oracle:
+                target_y = reference(target)
+            else:
+                pred = pd.read_csv(clf_dir / "predictions.csv").set_index("study_id")
+                assert list(pred.columns) == names, "classifier labels differ"
+                target_y = pred.loc[target.index, names].to_numpy(dtype=int)
             overlap = retrieval.jaccard(target_y, corpus_y)
         else:
             overlap = None

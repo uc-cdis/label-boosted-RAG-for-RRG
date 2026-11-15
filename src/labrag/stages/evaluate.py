@@ -20,7 +20,7 @@ per physical core on our nodes): 8 for RaTEScore, 4 for GREEN's client, and 4 pe
 CXR-Report-Metric container, so --cpus-per-task = 2 × (12 + 4 × W) runs W containers at
 a time (plan_threads). The thread counts were chosen so that 72 gives W = 6, which keeps
 about pace with GREEN, the slowest on the GPU; CXR-Report-Metric also runs during the
-judge's startup (≈90 s), and the 6 containers don't slow the GPU metrics (job 28851). A
+judge's startup (≈90 s), and the 6 containers don't slow the GPU metrics. A
 job too small for every metric's threads is refused: threads are never lowered, since
 CXR-Report-Metric's scores depend on them.
 
@@ -39,8 +39,8 @@ GPU; the client is service green-client), in vLLM's batch-invariant mode and tor
 deterministic compile, so a study's score depends neither on what it is batched with nor
 on the job (see eval/compose.yaml); GREEN's image does all the text work
 with upstream's code (see eval/green/run.py). One container run scores every set of the
-job, in one request queue; the job's compose project, server included, is taken down
-at the end. ``green-native``, the reference: the same scores by upstream's own HF
+job, one set at a time, each with its own prefix cache; the job's compose project,
+server included, is taken down at the end. ``green-native``, the reference: the same scores by upstream's own HF
 generate (service green-native, ≈1.6 s per study on an H200). ``labrag evaluate
 --metric green[-native] --repro`` runs upstream's 5-case reproduction test through
 either judge path.
@@ -118,7 +118,7 @@ METRICS = {
         "upstream": "external/CXR-Report-Metric",
         "gpu": False,
         # Thinner containers score more studies per CPU: 24 threads as 3×8 / 4×6 / 6×4 /
-        # 8×3 gave 0.152 / 0.142 / 0.115 / 0.095 s per study (job 28836). The thread
+        # 8×3 gave 0.152 / 0.142 / 0.115 / 0.095 s per study. The thread
         # count changes a few studies' scores in the last float32 bit (1-2 per 200 at
         # 3-6 threads vs 8), the same at a given count, so it is in the config.
         "threads": 4,
@@ -127,7 +127,7 @@ METRICS = {
         # Each run loads the models (~15-20 s, ≈15% of a 250-study chunk). The chunk
         # size changes a few studies' scores too (chunks of 100 vs 200, 4 threads:
         # BERTScore in 6-8 studies per 200, ≤8e-7; RadCliQ ≤2.4e-6; the same at a given
-        # size; job 28851 vs 28849), so it is in the config, never sized per job.
+        # size), so it is in the config, never sized per job.
         "chunk": 250,
         "weights": [
             "chexbert",

@@ -135,8 +135,8 @@ services:
   # TORCHINDUCTOR_DETERMINISTIC=1: torch.compile never picks a reduction kernel's block
   # size by on-device benchmark. Without it, each fresh compile (every job) chose
   # R0_BLOCK 2048 or 4096 for one kernel by timing noise, so jobs landed on one of two
-  # outputs (591/600 identical judge texts between them; jobs 28835-28842). With it,
-  # 8 fresh compiles on 2 GPUs gave identical outputs, at the same speed (28844, 28845).
+  # outputs (591/600 identical judge texts between them). With it, 8 fresh compiles
+  # on 2 GPUs gave identical outputs, at the same speed.
   # The environment is part of the scores' config, with image and command.
   green-vllm:
     image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34

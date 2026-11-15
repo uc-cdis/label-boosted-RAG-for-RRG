@@ -4,7 +4,7 @@ Each artifact is one directory, e.g. ``labels/chexpertplus/findings/chexbert14/`
 holding a few output files plus ``manifest.json``: how it was made (commit, full config,
 inputs with their sha256, node, times, package versions) and the sha256 of each output.
 
-Publishing rules (docs/revision-plan.md §8):
+Publishing rules:
 - the directory is built on local disk, then copied to shared storage once and renamed
   into place, so readers never see a half-written artifact;
 - same path and same config: already done, skipped (even at a newer commit);

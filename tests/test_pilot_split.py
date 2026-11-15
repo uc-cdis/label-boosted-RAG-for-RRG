@@ -1,4 +1,4 @@
-"""The committed pilot split must be exactly reproducible from the CheXpert Plus release."""
+"""CheXpert Plus pilot eligibility (tests/test_splits.py checks the committed file)."""
 
 import pytest
 
@@ -9,14 +9,6 @@ needs_data = pytest.mark.skipif(
     not (paths.CXR_ROOT / chexpertplus.SOURCE_CSV).exists(),
     reason="CheXpert Plus source CSV not mounted",
 )
-
-
-@needs_data
-def test_pilot_split_reproduces_committed_file():
-    images = chexpertplus.load_images(paths.CXR_ROOT)
-    drawn = chexpertplus.draw_pilot_split(images)
-    committed = (paths.SPLITS_DIR / chexpertplus.PILOT_SPLIT_FILE).read_text()
-    assert drawn.to_csv(index=False) == committed
 
 
 @needs_data

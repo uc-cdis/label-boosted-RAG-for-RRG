@@ -1,7 +1,8 @@
 # Frozen split files
 
-Committed once and never redrawn. Each file is regenerated and checked by code in this
-repo, and `tests/` asserts the redraw is byte-identical to the committed file.
+Committed once and never redrawn. `labrag splits --dataset <name>` rewrites a dataset's
+files in place from the code in this repo (git diff shows any change), and
+`tests/test_splits.py` asserts the redraw is byte-identical to the committed files.
 
 ## `chexpertplus_pilot_split.csv`
 
@@ -14,8 +15,6 @@ repo, and `tests/` asserts the redraw is byte-identical to the committed file.
 - **Draw:** `numpy.random.default_rng(20261109).choice(sorted(eligible), 400, replace=False)`;
   the first 200 drawn are `pilot`.
 - **Code:** `src/labrag/data/chexpertplus.py::draw_pilot_split`.
-  `labrag splits pilot` redraws and checks against this file (it never overwrites
-  without `--overwrite`).
 - **History:** drawn 2026-11-09 by an earlier script that read locally derived files
   (`chexpertplus/split.csv`, `derived/chexpertplus-findings-ids.csv`). The current
   code reads only the source CSV and reproduces the same file byte for byte.
@@ -34,4 +33,3 @@ repo, and `tests/` asserts the redraw is byte-identical to the committed file.
 - **Draw:** `numpy.random.default_rng(20261111).choice(sorted(eligible), 6412, replace=False)`
   (10%, rounded), written sorted.
 - **Code:** `src/labrag/data/chexpertplus.py::draw_classifier_val_split`.
-  `tests/test_classifier_split.py` redraws it and checks it against this file.

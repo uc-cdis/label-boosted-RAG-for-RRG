@@ -6,11 +6,9 @@ parser is built by its own ``add_<command>`` function, listed in COMMANDS.
 """
 
 import argparse
-import sys
-from pathlib import Path
 
-from labrag import artifacts, paths, serving
-from labrag.data import DATASETS, chexpertplus
+from labrag import artifacts, data, serving
+from labrag.data import DATASETS
 from labrag.stages import (
     build_prompts,
     classify,
@@ -59,34 +57,10 @@ def stage(sub, module, *options: str) -> argparse.ArgumentParser:
     return p
 
 
-def splits_pilot(
-    cxr_root: Path = paths.CXR_ROOT,
-    out: Path = paths.SPLITS_DIR / chexpertplus.PILOT_SPLIT_FILE,
-    overwrite: bool = False,
-) -> None:
-    """Redraw the CheXpert Plus pilot split and check it against the committed file.
-
-    The committed file is frozen: it is never overwritten unless --overwrite is given.
-    """
-    drawn = chexpertplus.draw_pilot_split(chexpertplus.load_images(cxr_root))
-    text = drawn.to_csv(index=False)
-    if out.exists() and not overwrite:
-        if out.read_text() == text:
-            print(f"OK: redraw matches {out}")
-            return
-        sys.exit(f"MISMATCH: redraw differs from {out} (file left untouched)")
-    out.write_text(text)
-    print(f"Wrote {out} ({len(drawn)} patients)")
-
-
 def add_splits(sub) -> None:
-    splits = sub.add_parser("splits", help="frozen split files").add_subparsers(
-        dest="split", required=True
-    )
-    p = command(splits, "pilot", splits_pilot, splits_pilot.__doc__.splitlines()[0])
-    p.add_argument("--cxr-root", type=Path)
-    p.add_argument("--out", type=Path)
-    p.add_argument("--overwrite", action="store_true", help="replace the frozen file")
+    help = "redraw a dataset's frozen split files in place (git diff shows any change)"
+    p = command(sub, "splits", data.write_splits, help)
+    p.add_argument("--dataset", **OPTIONS["--dataset"])
 
 
 def add_labels(sub) -> None:
@@ -149,10 +123,7 @@ def add_build_prompts(sub) -> None:
 
 
 def add_generate(sub) -> None:
-    p = stage(
-        sub,
-        generate,
-    )
+    p = stage(sub, generate)
     p.add_argument(
         "--prompts",
         required=True,
@@ -218,20 +189,9 @@ def add_compare(sub) -> None:
     )
 
 
-def provenance() -> None:
-    """List every stale artifact under the shared root (read-only)."""
-    seen, stale = artifacts.stale_tree()
-    for path, reasons in sorted(stale.items()):
-        print(f"STALE {path.relative_to(paths.SHARED_ROOT)}")
-        for reason in reasons:
-            print(f"  - {reason}")
-    print(f"{seen} artifacts, {len(stale)} stale")
-    if stale:
-        sys.exit(1)
-
-
 def add_provenance(sub) -> None:
-    command(sub, "provenance", provenance, provenance.__doc__)
+    help = "list every stale artifact under the shared root (read-only)"
+    command(sub, "provenance", artifacts.provenance, help)
 
 
 # In pipeline order, as `labrag --help` lists them.
@@ -257,7 +217,6 @@ def main(argv: list[str] | None = None) -> None:
     kwargs = vars(ap.parse_args(argv))
     func = kwargs.pop("func")
     del kwargs["command"]
-    kwargs.pop("split", None)
     func(**kwargs)
 
 

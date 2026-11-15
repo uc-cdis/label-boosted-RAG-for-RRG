@@ -158,6 +158,18 @@ def stale_tree(root: Path | None = None) -> tuple[int, dict[Path, list[str]]]:
         stale |= new
 
 
+def provenance() -> None:
+    """Print every stale artifact under the shared root and why; exit 1 if any."""
+    seen, stale = stale_tree()
+    for path, reasons in sorted(stale.items()):
+        print(f"STALE {path.relative_to(paths.SHARED_ROOT)}")
+        for reason in reasons:
+            print(f"  - {reason}")
+    print(f"{seen} artifacts, {len(stale)} stale")
+    if stale:
+        raise SystemExit(1)
+
+
 def _bullets(lines: list[str]) -> str:
     return "\n".join(f"  - {line}" for line in lines)
 

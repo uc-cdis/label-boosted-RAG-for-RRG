@@ -132,6 +132,20 @@ def draw_classifier_val_split(
     return pd.DataFrame({"subject_id": sorted(picked)})
 
 
+def write_splits(cxr_root: Path, splits_dir: Path) -> None:
+    """Redraw every frozen split file in place (the validation draw excludes the pilot
+    patients, so the pilot comes first); git diff shows any change."""
+    images = load_images(cxr_root)
+    pilot = draw_pilot_split(images)
+    drawn = {
+        PILOT_SPLIT_FILE: pilot,
+        CLASSIFIER_VAL_SPLIT_FILE: draw_classifier_val_split(images, pilot),
+    }
+    for name, split in drawn.items():
+        split.to_csv(splits_dir / name, index=False)
+        print(f"Wrote {splits_dir / name} ({len(split)} rows)")
+
+
 def classifier_roles(studies: pd.DataFrame, splits_dir: Path) -> pd.Series:
     """Each study's role: train, val (thresholds), pilot / prompt_tuning (never trained
     on), official_valid (extra check only)."""

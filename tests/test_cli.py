@@ -89,3 +89,10 @@ def test_stage_options_reach_run(monkeypatch, module, argv, expected):
     monkeypatch.setattr(module, "run", record)
     cli.main(argv.split())
     assert calls == [expected]
+
+
+def test_splits_reach_write_splits(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli.data, "write_splits", lambda **kw: calls.append(kw))
+    cli.main("splits --dataset chexpertplus".split())
+    assert calls == [dict(dataset="chexpertplus")]

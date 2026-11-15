@@ -54,7 +54,10 @@ def image_record(name: str) -> dict:
 def gpu_devices() -> list[str]:
     devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     if not devices:
-        raise SystemExit("CUDA_VISIBLE_DEVICES is not set: request GPUs from Slurm")
+        raise SystemExit(
+            "CUDA_VISIBLE_DEVICES is not set: set it to the host GPU indices to use "
+            "(a Slurm job with --gres sets it)"
+        )
     return devices.split(",")
 
 

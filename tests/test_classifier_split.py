@@ -43,12 +43,10 @@ def test_classifier_roles(tmp_path):
 
 
 @needs_data
-def test_classifier_val_split_reproduces_committed_file():
+def test_classifier_val_split_patients():
     images = chexpertplus.load_images(paths.CXR_ROOT)
     pilot = pd.read_csv(paths.SPLITS_DIR / chexpertplus.PILOT_SPLIT_FILE)
-    drawn = chexpertplus.draw_classifier_val_split(images, pilot)
-    path = paths.SPLITS_DIR / chexpertplus.CLASSIFIER_VAL_SPLIT_FILE
-    assert drawn.to_csv(index=False) == path.read_text()
+    drawn = pd.read_csv(paths.SPLITS_DIR / chexpertplus.CLASSIFIER_VAL_SPLIT_FILE)
     assert len(drawn) == 6_412  # 10% of the 64,125 non-pilot train patients
     assert not drawn.subject_id.isin(pilot.subject_id).any()
     train = set(images.loc[images.split == "train", "subject_id"])

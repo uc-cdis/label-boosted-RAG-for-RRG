@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Prompt tuning: noprior-* (no references to prior studies) for retrieval-only, oracle
 # and attn labels; noprior-nocopy-simple (examples for style only) for oracle and attn.
-# Each next to its preprint prompt, both sampling seeds. Usage: pilot-prompts.sh <set>
-# (pilot or prompt_tuning). Artifacts already built (the preprint-prompt pilot runs) skip.
+# Each next to its preprint prompt, both sampling seeds, on the prompt-tuning set (so the
+# pilot set stays for choosing between settings).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-SET=${1:?usage: $0 pilot|prompt_tuning}
 
 s() { slurm/submit.sh --parsable --kill-on-invalid-dep=yes "$@"; }
 B="labrag build-prompts --experiment pilot --section findings"
 F=pilot/chexpertplus/findings
 MODEL=qwen3.5-27b
 CLF=attn-nvfp4-seed1
+SET=prompt_tuning
 RO=$F/retrieval-only
 OR=$F/labrag-oracle.chexbert14.u0
 AT=$F/labrag.$CLF.chexbert14.u0

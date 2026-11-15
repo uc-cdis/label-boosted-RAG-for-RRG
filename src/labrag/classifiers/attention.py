@@ -1,8 +1,10 @@
-"""Per-label attention pooling over frozen patch tokens (a Query2Label-style head).
+"""Per-label attention pooling over frozen patch tokens (one cross-attention layer).
 
 One learned query per label cross-attends over a study's tokens (CLS + patches), then a
 residual feed-forward block and one logit per label: each label pools its own image
-regions. Trained jointly on all labels with BCE, AdamW, early stopping on mean val
+regions. The queries don't attend to each other (unlike Query2Label's decoder); labels
+share only the projection and feed-forward weights. Given only the CLS token, the
+attention passes it through and the head is a jointly trained MLP on CLS. Trained jointly on all labels with BCE, AdamW, early stopping on mean val
 AUROC. Deterministic for a given seed and device: deterministic torch algorithms, the
 attention written out (no fused kernels), a seeded generator for the batch order.
 """

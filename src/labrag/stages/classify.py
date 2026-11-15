@@ -1,17 +1,25 @@
 """Stage ``classify``: per-label image classifiers for one report section's labels.
 
 Writes ``classifiers/<dataset>/<encoder>.<classifier>/<section>/<labeler>[.u0]/``:
-model.npz (coef, intercept, threshold per label), probs.csv (study_id, role, one column
-per label), predictions.csv (0/1, the layout of labels.csv), metrics.csv (per label, on
-val and official valid).
+model.npz (coef, intercept, threshold per label; C for lr-tuned), probs.csv (study_id,
+role, one column per label), predictions.csv (0/1, the layout of labels.csv),
+metrics.csv (per label, on val and official valid).
 
 Fit within each section, on the adapter's ``train`` role; max-F1 thresholds on ``val``;
-other roles predicted only. Classifiers: ``lr`` (per-label logistic regression on the
-CLS embedding; CPU) and ``attn`` (per-label attention pooling over the patch tokens of
-``embed --feature tokens``, trained jointly; 1 GPU), the latter written to
-``<encoder>.attn-<tokens>-seed<seed>`` (tokens = the storage format they are read in). Uncertain labels (Irvin et al. 2019): ``zeros`` (U-Zeros,
-default, ``.u0``) counts only positive as 1; ``ones`` (U-Ones, the preprint) also
-uncertain. No out-of-fold predictions yet: nothing trains on them so far.
+other roles predicted only. Classifiers:
+
+- ``lr``: per-label logistic regression on the CLS embedding (the preprint's; CPU).
+- ``lr-tuned``: ``lr`` on standardized features with C picked per label on val (CPU).
+- ``attn``: per-label attention pooling over the tokens of ``embed --feature tokens``
+  (CLS + patches), trained jointly (1 GPU).
+- ``attn-cls``: ``attn`` given only the CLS token, the control for the patch tokens.
+
+The ``attn`` ones are written to ``<encoder>.<classifier>-<tokens>-seed<seed>`` (tokens =
+the storage format they are read in) with model.pt instead of model.npz.
+
+Uncertain labels (Irvin et al. 2019): ``zeros`` (U-Zeros, default, ``.u0``) counts only
+positive as 1; ``ones`` (U-Ones, the preprint) also uncertain. No out-of-fold
+predictions yet: nothing trains on them so far.
 
 Pathologies win (``consistent``): No Finding is cleared wherever a label other than
 Support Devices is predicted, as CheXbert's reference labels do (all but 40 of 46,759).
@@ -28,7 +36,7 @@ from labrag import artifacts, paths
 from labrag.classifiers import attention, logistic, quant
 from labrag.data import DATASETS
 
-CLASSIFIERS = ("lr", "attn")
+CLASSIFIERS = ("lr", "lr-tuned", "attn", "attn-cls")
 TOKEN_CHUNK = 256  # studies packed at a time while loading tokens
 # CheXbert codes counted as positive, per uncertain-label policy.
 POSITIVE = {"ones": (1, -1), "zeros": (1,)}
@@ -37,6 +45,12 @@ BINARIZE = {
     "zeros": "positive = 1, uncertain or negative or blank = 0",
 }
 LABELER_SUFFIX = {"ones": "", "zeros": ".u0"}
+PARAMS = {
+    "lr": logistic.PARAMS,
+    "lr-tuned": logistic.TUNED_PARAMS,
+    "attn": attention.PARAMS,
+    "attn-cls": attention.PARAMS,
+}
 NO_FINDING = "No Finding"
 NOT_PATHOLOGY = ("No Finding", "Support Devices")
 CONSISTENCY = "No Finding = 0 when any label other than Support Devices is predicted"
@@ -54,9 +68,9 @@ def run(
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:
-    attn = classifier == "attn"
+    attn = classifier in ("attn", "attn-cls")
     if not attn and (tokens is not None or seed is not None):
-        raise SystemExit("classify: --tokens and --seed are for --classifier attn")
+        raise SystemExit("classify: --tokens and --seed are for the attn classifiers")
     tokens = tokens or "fp16"
     seed = 0 if seed is None else seed
     cxr_root = cxr_root or paths.CXR_ROOT
@@ -80,7 +94,7 @@ def run(
         "encoder": encoder,
         "labeler": labeler,
         "classifier": classifier,
-        "params": attention.PARAMS if attn else logistic.PARAMS,
+        "params": PARAMS[classifier],
         "binarize": BINARIZE[uncertain],
         "fit": "train",
         "threshold": "max F1 on val; predict prob >= threshold",
@@ -89,6 +103,8 @@ def run(
     name = f"{encoder}.{classifier}"
     if attn:
         config |= {"tokens": quant.DESCRIPTION[tokens], "seed": seed}
+        if classifier == "attn-cls":
+            config["input"] = "CLS token only (token 0 of the tokens)"
         name += f"-{tokens}-seed{seed}"
 
     def build(out: Path) -> dict:
@@ -111,10 +127,16 @@ def run(
         if attn:
             attention.deterministic()
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            X = _load_tokens(emb_dir / "tokens.npy", rows, tokens, device)
+            keep = 1 if classifier == "attn-cls" else None
+            X = _load_tokens(emb_dir / "tokens.npy", rows, tokens, device, keep)
             model, history = attention.fit(X, Y, train, val, seed)
             P = attention.predict_proba(model, X, torch.arange(len(X), device=device))
             extra = {}
+        elif classifier == "lr-tuned":
+            X = np.load(emb_dir / "embeddings.npy")[rows]
+            coef, intercept, C, n_iter = logistic.fit_tuned(X, Y, train, val)
+            P = logistic.predict_proba(X, coef, intercept)
+            extra = {"C": C, "n_iter": n_iter}
         else:
             X = np.load(emb_dir / "embeddings.npy")[rows]
             fits = [logistic.fit(X[train], Y[train, j]) for j in range(len(names))]
@@ -151,6 +173,7 @@ def run(
                 coef=coef,
                 intercept=intercept,
                 threshold=threshold,
+                **({"C": extra["C"]} if "C" in extra else {}),
             )
         probs = pd.DataFrame(P, columns=names)
         probs.insert(0, "role", role)
@@ -185,14 +208,20 @@ def run(
 
 
 def _load_tokens(
-    path: Path, rows: np.ndarray, fmt: str, device: torch.device
+    path: Path,
+    rows: np.ndarray,
+    fmt: str,
+    device: torch.device,
+    keep: int | None = None,
 ) -> quant.Packed:
-    """Rows ``rows`` of a float16 tokens.npy, packed in format ``fmt`` on ``device``."""
+    """Rows ``rows`` of a float16 tokens.npy (only its first ``keep`` tokens if given),
+    packed in format ``fmt`` on ``device``."""
     stored = np.load(path, mmap_mode="r")
-    packed = quant.empty(fmt, (len(rows), *stored.shape[1:]), device)
+    _, t, d = stored.shape
+    packed = quant.empty(fmt, (len(rows), keep or t, d), device)
     for start in range(0, len(rows), TOKEN_CHUNK):
         chunk = rows[start : start + TOKEN_CHUNK]
-        x = torch.from_numpy(np.ascontiguousarray(stored[chunk])).to(device)
+        x = torch.from_numpy(np.ascontiguousarray(stored[chunk, :keep])).to(device)
         for k, v in quant.pack(fmt, x).items():
             packed.parts[k][start : start + len(chunk)] = v
     return packed

@@ -7,7 +7,9 @@ without), reference (trimmed only).
 
 Conditions: ``retrieval-only`` (top K by image similarity) and ``labrag.<labeler>``
 (Jaccard on positive labels, ties by image similarity; the target's predicted labels in
-the prompt; corpus studies carry reference labels, binarized like the classifier).
+the prompt; corpus studies carry reference labels, binarized like the classifier). Its
+classifier is ``classifiers/<dataset>/<encoder>.<classifier>``: ``lr`` by default, any
+other written to ``labrag.<classifier>.<labeler>``.
 ``labrag-oracle.<labeler>`` is labrag with the target's reference labels instead of
 predicted ones: the ceiling for any classifier. Retrieval never returns a study of the
 target's patient.
@@ -40,7 +42,7 @@ DEFAULT_PROMPT = {
 }
 K = 5
 ENCODER = "raddino"
-CLASSIFIER = "lr"
+CLASSIFIER = "lr"  # default; the others name their condition directory
 LABELER = "chexbert14"
 
 
@@ -49,6 +51,7 @@ def run(
     section: str,
     condition: str,
     prompt: str | None = None,
+    classifier: str = CLASSIFIER,
     uncertain: str = "zeros",
     overwrite: bool = False,
     cxr_root: Path | None = None,
@@ -61,6 +64,8 @@ def run(
     version = prompts.load(prompt)
     with_labels = condition != "retrieval-only"
     oracle = condition == "labrag-oracle"
+    if classifier != CLASSIFIER and condition != "labrag":
+        raise SystemExit("build-prompts: --classifier is for --condition labrag")
     if prompts.uses_labels(version) != with_labels:
         raise SystemExit(f"prompt {prompt!r} does not fit condition {condition!r}")
 
@@ -71,7 +76,7 @@ def run(
         paths.SHARED_ROOT
         / "classifiers"
         / dataset
-        / f"{ENCODER}.{CLASSIFIER}"
+        / f"{ENCODER}.{classifier}"
         / section
         / labeler
     )
@@ -99,10 +104,14 @@ def run(
     }
     if with_labels and not oracle:
         inputs["classifier"] = artifacts.artifact_record(clf_dir)
+        clf_inputs = artifacts.read_manifest(clf_dir)["inputs"]
         for name in ("embeddings", "labels"):  # the classifier saw these same inputs
-            clf_input = artifacts.read_manifest(clf_dir)["inputs"][name]["outputs"]
-            assert clf_input == inputs[name]["outputs"], f"classifier {name} differ"
-        config["classifier"] = CLASSIFIER
+            if name == "embeddings" and clf_inputs[name]["path"] != str(emb_dir):
+                continue  # trained on tokens: its own image check is in classify
+            assert (
+                clf_inputs[name]["outputs"] == inputs[name]["outputs"]
+            ), f"classifier {name} differ"
+        config["classifier"] = classifier
     if with_labels:
         config |= {
             "labeler": labeler,
@@ -112,6 +121,8 @@ def run(
             "ranking": "jaccard of positive labels (empty vs empty = 1), then cosine",
         }
         condition_dir = f"{condition}.{labeler}"
+        if classifier != CLASSIFIER:
+            condition_dir = f"{condition}.{classifier}.{labeler}"
     else:
         config["ranking"] = "cosine"
         condition_dir = condition

@@ -45,6 +45,18 @@ CASES = [
     ),
     (
         classify,
+        "classify --dataset chexpertplus --section findings --classifier attn-cls "
+        "--tokens nvfp4 --seed 1",
+        dict(
+            dataset="chexpertplus",
+            section="findings",
+            classifier="attn-cls",
+            tokens="nvfp4",
+            seed=1,
+        ),
+    ),
+    (
+        classify,
         "classify --dataset chexpertplus --section findings --uncertain ones "
         "--classifier lr --labeler chexbert14",
         dict(
@@ -64,6 +76,17 @@ CASES = [
             section="findings",
             condition="labrag",
             prompt="preprint-simple",
+        ),
+    ),
+    (
+        build_prompts,
+        "build-prompts --experiment pilot --section findings --condition labrag "
+        "--classifier attn-nvfp4-seed1",
+        dict(
+            experiment="pilot",
+            section="findings",
+            condition="labrag",
+            classifier="attn-nvfp4-seed1",
         ),
     ),
     (

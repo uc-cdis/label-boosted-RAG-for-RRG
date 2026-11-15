@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
 
 from labrag.classifiers import logistic
 
@@ -49,3 +50,24 @@ def test_fit_refuses_to_stop_before_converging(monkeypatch):
     X = rng.normal(size=(300, 8))
     with pytest.raises(ConvergenceWarning):
         logistic.fit(X, (X[:, 0] > 0).astype(int))
+
+
+def test_fit_tuned_picks_c_by_val_auroc_and_folds_the_scaling(monkeypatch):
+    monkeypatch.setattr(logistic, "C_GRID", (1e-3, 1.0))
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(400, 6)) * [1, 10, 0.1, 1, 1, 1] + 3
+    Y = np.stack([X[:, 0] + rng.normal(size=400) > 3, X[:, 1] > 3], 1).astype(int)
+    train, val = np.arange(400) < 300, np.arange(400) >= 300
+    coef, intercept, C, _ = logistic.fit_tuned(X, Y, train, val)
+    Z = (X - X[train].mean(0)) / X[train].std(0)
+    for j in range(2):
+        aurocs = []
+        for c in logistic.C_GRID:
+            w, b, _ = logistic.fit(Z[train], Y[train, j], c)
+            aurocs.append(roc_auc_score(Y[val, j], Z[val] @ w + b))
+        assert C[j] == logistic.C_GRID[int(np.argmax(aurocs))]
+        w, b, _ = logistic.fit(Z[train], Y[train, j], C[j])
+        np.testing.assert_allclose(
+            logistic.predict_proba(X, coef, intercept)[:, j],
+            logistic.predict_proba(Z, w[None], np.array([b]))[:, 0],
+        )

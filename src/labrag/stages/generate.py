@@ -42,7 +42,7 @@ def run(
     sampling_cfg = serving.load_config("sampling")[sampling]
     container = serving.load_config("containers")[model_cfg["container"]]
 
-    jobs = []  # (prompt relpath, output relpath, config)
+    todo, built = [], []  # todo: (prompt relpath, output relpath, config)
     for rel in prompts:
         rel = rel.strip("/").removeprefix("prompts/")
         config = {
@@ -54,13 +54,12 @@ def run(
             "sampling": {"name": sampling, **sampling_cfg},
         }
         out = f"generations/{rel}/{model}.{sampling}/{target_set}"
-        jobs.append((f"prompts/{rel}", out, config))
-    todo = [j for j in jobs if not artifacts.is_built(j[1], j[2], overwrite)]
-    for _, out, _ in jobs:
-        if all(out != t[1] for t in todo):
-            print(f"SKIP: {paths.SHARED_ROOT / out} already built with this config")
+        if artifacts.is_built(out, config, overwrite):
+            built.append(paths.SHARED_ROOT / out)
+        else:
+            todo.append((f"prompts/{rel}", out, config))
     if not todo:
-        return [paths.SHARED_ROOT / out for _, out, _ in jobs]
+        return built
 
     # Check every input before taking the GPU.
     model_dir, weights_record = weights.resolve(model_cfg["weights"])
@@ -89,7 +88,7 @@ def run(
         seconds = time.monotonic() - t0
         metrics = serving.metrics_text(server["root_url"])  # job-level, for costs
 
-    built, i = [], 0
+    i = 0
     for out, config, record, rows in loaded:
         part, i = results[i : i + len(rows)], i + len(rows)
         inputs = {

@@ -174,8 +174,8 @@ def now() -> str:
 def is_built(
     relpath: str, config: dict, overwrite: bool = False, shared_root: Path | None = None
 ) -> bool:
-    """True if publish would skip the artifact; SystemExit where it would refuse.
-    Lets a stage skip setup (e.g. a model server) when everything is built."""
+    """True (and prints SKIP) if publish would skip the artifact; SystemExit where it
+    would refuse. Lets a stage skip setup (e.g. a model server) when all is built."""
     final = (shared_root or paths.SHARED_ROOT) / relpath
     config = _normalize(config)
     existing = read_manifest(final)
@@ -187,6 +187,7 @@ def is_built(
                     + _bullets(reasons)
                     + "\nUse --overwrite to rebuild it."
                 )
+            print(f"SKIP: {final} already built with this config")
             return True
         raise SystemExit(
             f"REFUSED: {final} exists with a different config.\n"
@@ -219,7 +220,6 @@ def publish(
     final = (shared_root or paths.SHARED_ROOT) / relpath
     config = _normalize(config)
     if is_built(relpath, config, overwrite, shared_root):
-        print(f"SKIP: {final} already built with this config")
         return final
 
     started = started or now()

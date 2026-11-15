@@ -196,7 +196,7 @@ def prepare(
     """What ``metric`` has to score: the sets not yet built with this config, their
     inputs checked and loaded (None if every set is built), and the built ones."""
     spec = METRICS[metric]
-    jobs = []  # (generations relpath, output relpath, config)
+    todo, built = [], []  # todo: (generations relpath, output relpath, config)
     for rel in generations:
         rel = rel.strip("/").removeprefix("generations/")
         config = {
@@ -212,13 +212,11 @@ def prepare(
         if "chunk" in spec:  # changes scores in the last bit
             config["chunk_studies"] = spec["chunk"]
             config["torch_threads"] = spec["threads"]
-        jobs.append((f"generations/{rel}", f"scores/{rel}/{metric}", config))
-    todo = [j for j in jobs if not artifacts.is_built(j[1], j[2], overwrite)]
-    built = []
-    for _, out, _ in jobs:
-        if all(out != t[1] for t in todo):
-            print(f"SKIP: {paths.SHARED_ROOT / out} already built with this config")
+        out = f"scores/{rel}/{metric}"
+        if artifacts.is_built(out, config, overwrite):
             built.append(paths.SHARED_ROOT / out)
+        else:
+            todo.append((f"generations/{rel}", out, config))
     if not todo:
         return None, built
 
@@ -560,9 +558,24 @@ def read_scores(spec: dict, out_csv: Path, pairs: pd.DataFrame) -> list[dict]:
     ]
 
 
+def compose_service(name: str) -> dict:
+    """A service's definition in eval/compose.yaml."""
+    return yaml.safe_load(COMPOSE_FILE.read_text())["services"][name]
+
+
+def image_id(ref: str) -> str | None:
+    """The local image id of ``ref`` (None if this node doesn't have it)."""
+    out = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", ref],
+        capture_output=True,
+        text=True,
+    )
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
 def judge_definition(spec: dict) -> dict:
     """The judge's image, environment and command: what determines its outputs."""
-    service = yaml.safe_load(COMPOSE_FILE.read_text())["services"][spec["judge"]]
+    service = compose_service(spec["judge"])
     keys = ("image", "environment", "command")
     return {"service": spec["judge"], **{k: service[k] for k in keys}}
 
@@ -570,17 +583,12 @@ def judge_definition(spec: dict) -> dict:
 def judge_image_record(spec: dict) -> dict:
     """The judge's pinned image, after checking this node has it (jobs never pull)."""
     ref = judge_definition(spec)["image"]
-    out = subprocess.run(
-        ["docker", "image", "inspect", "--format", "{{.Id}}", ref],
-        capture_output=True,
-        text=True,
-    )
-    if out.returncode != 0:
+    pulled = image_id(ref)
+    if pulled is None:
         raise SystemExit(
-            f"judge image {ref} not on this node; pre-pull it with\n"
-            f"  docker pull {ref}\n{out.stderr.strip()}"
+            f"judge image {ref} not on this node; pre-pull it with\n  docker pull {ref}"
         )
-    return {"ref": ref, "image_id": out.stdout.strip()}
+    return {"ref": ref, "image_id": pulled}
 
 
 def torch_threads() -> int:
@@ -604,7 +612,7 @@ def image_source(spec: dict) -> dict:
 def image_build(spec: dict) -> tuple[str, str, str]:
     """The service that builds the image, its build context and untagged image name."""
     service = spec.get("build", spec["service"])
-    definition = yaml.safe_load(COMPOSE_FILE.read_text())["services"][service]
+    definition = compose_service(service)
     context = (COMPOSE_FILE.parent / definition["build"]["context"]).resolve()
     name = definition["image"].split(":")[0]
     return service, str(context.relative_to(paths.REPO_ROOT)), name
@@ -618,16 +626,13 @@ def build_image(spec: dict) -> dict:
     service, _, name = image_build(spec)
     compose("build", service, tag=tag)
     ref = f"{name}:{tag}"
-    image_id = subprocess.run(
-        ["docker", "image", "inspect", "--format", "{{.Id}}", ref],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
+    built = image_id(ref)
+    if built is None:
+        raise SystemExit(f"{ref}: not found after the build")
     return {
         "ref": ref,
         "tag": tag,
-        "image_id": image_id,
+        "image_id": built,
         "compose_blob": _git("rev-parse", "HEAD:eval/compose.yaml"),
     }
 

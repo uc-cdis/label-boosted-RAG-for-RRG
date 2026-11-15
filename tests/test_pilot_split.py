@@ -3,7 +3,6 @@
 import pytest
 
 from labrag import paths
-from labrag.cli import PILOT_SPLIT_FILE
 from labrag.data import chexpertplus
 
 needs_data = pytest.mark.skipif(
@@ -16,7 +15,7 @@ needs_data = pytest.mark.skipif(
 def test_pilot_split_reproduces_committed_file():
     images = chexpertplus.load_images(paths.CXR_ROOT)
     drawn = chexpertplus.draw_pilot_split(images)
-    committed = (paths.SPLITS_DIR / PILOT_SPLIT_FILE).read_text()
+    committed = (paths.SPLITS_DIR / chexpertplus.PILOT_SPLIT_FILE).read_text()
     assert drawn.to_csv(index=False) == committed
 
 

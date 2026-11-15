@@ -1,4 +1,8 @@
-"""Command-line entry point: ``labrag <command> ...``."""
+"""Command-line entry point: ``labrag <command> ...``.
+
+Each command calls one function with the options given as keyword arguments; an
+omitted option is not passed, so the function's own default applies.
+"""
 
 import argparse
 import sys
@@ -16,18 +20,33 @@ from labrag.stages import (
     labels,
 )
 
-PILOT_SPLIT_FILE = chexpertplus.PILOT_SPLIT_FILE
+SUITE = ", ".join(evaluate.SUITE)
+
+# Options shared by several stages.
+OPTIONS = {
+    "--dataset": dict(required=True, choices=sorted(DATASETS)),
+    "--section": dict(required=True, choices=labels.SECTIONS),
+    "--encoder": dict(choices=sorted(embed.ENCODERS)),
+    "--labeler": dict(choices=labels.LABELERS),
+    "--uncertain": dict(
+        choices=sorted(classify.POSITIVE),
+        help="uncertain labels count as 0 (zeros, the default) or 1 (ones, the preprint)",
+    ),
+}
 
 
-def splits_pilot(args: argparse.Namespace) -> None:
+def splits_pilot(
+    cxr_root: Path = paths.CXR_ROOT,
+    out: Path = paths.SPLITS_DIR / chexpertplus.PILOT_SPLIT_FILE,
+    overwrite: bool = False,
+) -> None:
     """Redraw the CheXpert Plus pilot split and check it against the committed file.
 
     The committed file is frozen: it is never overwritten unless --overwrite is given.
     """
-    out = args.out
-    drawn = chexpertplus.draw_pilot_split(chexpertplus.load_images(args.cxr_root))
+    drawn = chexpertplus.draw_pilot_split(chexpertplus.load_images(cxr_root))
     text = drawn.to_csv(index=False)
-    if out.exists() and not args.overwrite:
+    if out.exists() and not overwrite:
         if out.read_text() == text:
             print(f"OK: redraw matches {out}")
             return
@@ -36,19 +55,23 @@ def splits_pilot(args: argparse.Namespace) -> None:
     print(f"Wrote {out} ({len(drawn)} patients)")
 
 
-def evaluate_command(args: argparse.Namespace) -> None:
-    if args.repro:
-        if args.generations or not args.metric:
+def evaluate_command(
+    generations: list[str] | None = None,
+    metric: str | None = None,
+    overwrite: bool = False,
+    repro: bool = False,
+) -> None:
+    if repro:
+        if generations or not metric:
             sys.exit("evaluate: --repro takes a --metric and no --generations")
-        evaluate.repro(args.metric)
-    elif not args.generations:
+        evaluate.repro(metric)
+    elif not generations:
         sys.exit("evaluate: --generations is required")
     else:
-        metrics = [args.metric] if args.metric else None
-        evaluate.run(args.generations, metrics, args.overwrite)
+        evaluate.run(generations, [metric] if metric else None, overwrite)
 
 
-def provenance_command(args: argparse.Namespace) -> None:
+def provenance() -> None:
     """List every stale artifact under the shared root (read-only)."""
     seen, stale = artifacts.stale_tree()
     for path, reasons in sorted(stale.items()):
@@ -60,6 +83,27 @@ def provenance_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def command(sub, name: str, func, help: str) -> argparse.ArgumentParser:
+    """Subcommand ``name`` calling ``func`` with the options given."""
+    p = sub.add_parser(name, help=help, argument_default=argparse.SUPPRESS)
+    p.set_defaults(func=func)
+    return p
+
+
+def stage(sub, module, *options: str, func=None) -> argparse.ArgumentParser:
+    """Subcommand for a stage module: its name, the first line of its docstring as
+    help, ``module.run`` (or ``func``), the given OPTIONS and --overwrite."""
+    name = module.__name__.rsplit(".", 1)[1].replace("_", "-")
+    help = module.__doc__.splitlines()[0].split(": ", 1)[1].rstrip(".")
+    p = command(sub, name, func or module.run, help.replace("%", "%%"))
+    for flag in options:
+        p.add_argument(flag, **OPTIONS[flag])
+    p.add_argument(
+        "--overwrite", action="store_true", help="replace existing artifacts"
+    )
+    return p
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="labrag")
     sub = ap.add_subparsers(dest="command", required=True)
@@ -67,113 +111,50 @@ def main(argv: list[str] | None = None) -> None:
     splits = sub.add_parser("splits", help="frozen split files").add_subparsers(
         dest="split", required=True
     )
-    p = splits.add_parser("pilot", help=splits_pilot.__doc__.splitlines()[0])
-    p.add_argument("--cxr-root", type=Path, default=paths.CXR_ROOT)
-    p.add_argument("--out", type=Path, default=paths.SPLITS_DIR / PILOT_SPLIT_FILE)
+    p = command(splits, "pilot", splits_pilot, splits_pilot.__doc__.splitlines()[0])
+    p.add_argument("--cxr-root", type=Path)
+    p.add_argument("--out", type=Path)
     p.add_argument("--overwrite", action="store_true", help="replace the frozen file")
-    p.set_defaults(func=splits_pilot)
 
-    p = sub.add_parser("labels", help="reference labels on report text (stage labels)")
-    p.add_argument("--dataset", required=True, choices=sorted(DATASETS))
-    p.add_argument("--section", required=True, choices=labels.SECTIONS)
-    p.add_argument("--labeler", default="chexbert14", choices=labels.LABELERS)
-    p.add_argument(
-        "--overwrite", action="store_true", help="replace an existing artifact"
+    stage(sub, labels, "--dataset", "--section", "--labeler")
+    stage(sub, embed, "--dataset", "--encoder")
+    p = stage(
+        sub, classify, "--dataset", "--section", "--encoder", "--labeler", "--uncertain"
     )
-    p.set_defaults(
-        func=lambda a: labels.run(a.dataset, a.section, a.labeler, a.overwrite)
-    )
+    p.add_argument("--classifier", choices=classify.CLASSIFIERS)
 
-    p = sub.add_parser("embed", help="one image embedding per study (stage embed)")
-    p.add_argument("--dataset", required=True, choices=sorted(DATASETS))
-    p.add_argument("--encoder", default="raddino", choices=sorted(embed.ENCODERS))
-    p.add_argument(
-        "--overwrite", action="store_true", help="replace an existing artifact"
-    )
-    p.set_defaults(func=lambda a: embed.run(a.dataset, a.encoder, a.overwrite))
-
-    p = sub.add_parser("classify", help="per-label image classifiers (stage classify)")
-    p.add_argument("--dataset", required=True, choices=sorted(DATASETS))
-    p.add_argument("--section", required=True, choices=labels.SECTIONS)
-    p.add_argument("--encoder", default="raddino", choices=sorted(embed.ENCODERS))
-    p.add_argument("--labeler", default="chexbert14", choices=labels.LABELERS)
-    p.add_argument("--classifier", default="lr", choices=classify.CLASSIFIERS)
-    p.add_argument(
-        "--uncertain",
-        default="zeros",
-        choices=sorted(classify.POSITIVE),
-        help="uncertain labels count as 0 (zeros, the default) or 1 (ones, the preprint)",
-    )
-    p.add_argument(
-        "--overwrite", action="store_true", help="replace an existing artifact"
-    )
-    p.set_defaults(
-        func=lambda a: classify.run(
-            a.dataset,
-            a.section,
-            a.encoder,
-            a.labeler,
-            a.classifier,
-            a.uncertain,
-            a.overwrite,
-        )
-    )
-
-    p = sub.add_parser(
-        "build-prompts", help="one chat prompt per target study (stage build-prompts)"
-    )
+    p = stage(sub, build_prompts, "--section", "--uncertain")
     p.add_argument(
         "--experiment", required=True, choices=sorted(build_prompts.EXPERIMENTS)
     )
-    p.add_argument("--section", required=True, choices=labels.SECTIONS)
     p.add_argument("--condition", required=True, choices=build_prompts.CONDITIONS)
+    defaults = ", ".join(f"{c} {v}" for c, v in build_prompts.DEFAULT_PROMPT.items())
     p.add_argument(
-        "--prompt",
-        help="version in configs/prompts.yaml (default: "
-        + ", ".join(f"{c} {v}" for c, v in build_prompts.DEFAULT_PROMPT.items())
-        + ")",
-    )
-    p.add_argument(
-        "--uncertain",
-        default="zeros",
-        choices=sorted(classify.POSITIVE),
-        help="labrag only: which classifier variant (as in classify)",
-    )
-    p.add_argument(
-        "--overwrite", action="store_true", help="replace an existing artifact"
-    )
-    p.set_defaults(
-        func=lambda a: build_prompts.run(
-            a.experiment, a.section, a.condition, a.prompt, a.uncertain, a.overwrite
-        )
+        "--prompt", help=f"version in configs/prompts.yaml (default: {defaults})"
     )
 
-    p = sub.add_parser(
-        "generate", help="generations from a vLLM-served model (stage generate)"
-    )
+    p = stage(sub, generate)
     p.add_argument(
         "--prompts",
         required=True,
         nargs="+",
         help="prompt artifacts, relative to prompts/ (one server serves them all)",
     )
-    p.add_argument("--set", required=True, help="target set, e.g. pilot")
+    p.add_argument(
+        "--set",
+        dest="target_set",
+        metavar="SET",
+        required=True,
+        help="target set, e.g. pilot",
+    )
     p.add_argument(
         "--model", required=True, choices=sorted(serving.load_config("models"))
     )
     p.add_argument(
         "--sampling", required=True, choices=sorted(serving.load_config("sampling"))
     )
-    p.add_argument(
-        "--overwrite", action="store_true", help="replace existing artifacts"
-    )
-    p.set_defaults(
-        func=lambda a: generate.run(a.prompts, a.set, a.model, a.sampling, a.overwrite)
-    )
 
-    p = sub.add_parser(
-        "evaluate", help="per-study scores by official metric code (stage evaluate)"
-    )
+    p = stage(sub, evaluate, func=evaluate_command)
     p.add_argument(
         "--generations",
         nargs="+",
@@ -182,22 +163,15 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument(
         "--metric",
         choices=sorted(evaluate.METRICS),
-        help=f"one metric (default: the suite, {', '.join(evaluate.SUITE)}, at once)",
-    )
-    p.add_argument(
-        "--overwrite", action="store_true", help="replace existing artifacts"
+        help=f"one metric (default: the suite, {SUITE}, at once)",
     )
     p.add_argument(
         "--repro",
         action="store_true",
         help="instead: run the metric's upstream reproduction test (green, green-native)",
     )
-    p.set_defaults(func=evaluate_command)
 
-    p = sub.add_parser(
-        "compare",
-        help="means and paired differences with bootstrap CIs (stage compare)",
-    )
+    p = stage(sub, compare)
     p.add_argument(
         "--generations",
         required=True,
@@ -210,22 +184,19 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument(
         "--metric",
+        dest="metrics",
         nargs="+",
         choices=sorted(evaluate.METRICS),
-        help=f"metrics (default: the suite, {', '.join(evaluate.SUITE)})",
-    )
-    p.add_argument(
-        "--overwrite", action="store_true", help="replace an existing artifact"
-    )
-    p.set_defaults(
-        func=lambda a: compare.run(a.generations, a.out, a.metric, a.overwrite)
+        help=f"metrics (default: the suite, {SUITE})",
     )
 
-    p = sub.add_parser("provenance", help=provenance_command.__doc__)
-    p.set_defaults(func=provenance_command)
+    command(sub, "provenance", provenance, provenance.__doc__)
 
-    args = ap.parse_args(argv)
-    args.func(args)
+    kwargs = vars(ap.parse_args(argv))
+    func = kwargs.pop("func")
+    del kwargs["command"]
+    kwargs.pop("split", None)
+    func(**kwargs)
 
 
 if __name__ == "__main__":

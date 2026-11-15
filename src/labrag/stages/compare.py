@@ -59,7 +59,6 @@ def run(
         "ci": CI,
     }
     if artifacts.is_built(relpath, config, overwrite):
-        print(f"SKIP: {paths.SHARED_ROOT / relpath} already built with this config")
         return paths.SHARED_ROOT / relpath
 
     inputs, tables = {}, []

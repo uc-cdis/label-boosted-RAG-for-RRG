@@ -1,25 +1,14 @@
 """Stage ``compare``: means with 95% CIs per condition, and paired differences.
 
-Reads the scores artifacts (stage evaluate) of two or more generations artifacts, the
-conditions, scored on the same studies, and writes ``comparisons/<out>/comparison.csv``:
-for every score column of every metric, each condition's mean and each pair's
-difference (a − b, in the order given), with a 95% percentile interval from a paired
-bootstrap over studies (docs/revision-plan.md §3, Statistics). Also, as metric
-``generations``, ``empty_report`` (the share of studies without a report), and for
-CXR-Report-Metric the leaderboard's ``1/RadCliQ-v1`` = 1 / mean(RadCliQ-v1).
+Reads the scores artifacts of two or more conditions scored on the same studies; writes
+``comparisons/<out>/comparison.csv``: per score column, each condition's mean and each
+pair's difference (a − b, in the order given), with a percentile interval from a paired
+bootstrap over studies (docs/revision-plan.md §3). Also ``generations/empty_report``
+and 1/RadCliQ-v1 = 1 / mean(RadCliQ-v1).
 
-Paired: each resample draws n studies with replacement, and a drawn study counts in
-every condition at once, so the noise the conditions share (hard studies) cancels in the
-differences. Every statistic is a function of column means, so one set of resampled
-means per condition and column gives them all. The same seed gives every metric the
-same resamples. No correction for multiple comparisons.
-
-Deterministic: a fixed seed, and means as numpy's single-threaded reductions (no BLAS),
-so the intervals don't depend on the machine or its thread count. CPU only; a second
-or so per pilot comparison.
-
-Scores are never missing (evaluate refuses a metric's missing scores); empty reports
-are scored by every metric as the text "EMPTY" and stay in every mean.
+Paired: a drawn study counts in every condition, so shared noise cancels in the
+differences. Fixed seed and single-threaded numpy means, so intervals don't depend on
+the machine. Scores are never missing; empty reports are scored as "EMPTY".
 """
 
 import csv

@@ -1,6 +1,6 @@
 # LaB-RAG Journal Revision Plan (v12)
 
-Status: **v12, 2026-11-10.** Data prep stage.
+Status: **v12, 2026-11-10**, edited since along with the implementation. Now: the CheXpert Plus pilot (Findings only).
 
 - **Target:** MDPI *Machine Learning and Knowledge Extraction* (MAKE), special issue "Multimodal Data Fusion for Complementary Feature Learning and Knowledge Discovery". Submit by April 2027.
 - **Title:** unchanged, so Google Scholar keeps merging it with the arXiv preprint.
@@ -53,7 +53,7 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
   - **PadChest-GR:** no validation or test images.
   - **ReXGradient:** not in its training data at all.
   - It does include MIMIC-CXR train, PadChest and CheXpert images, so the classifier and corpus images were seen without labels during pretraining (§5.2).
-- **Classifiers:** fit on train, thresholds set on validation. Wherever predicted labels are used as training inputs, they are K-fold out-of-fold predictions.
+- **Classifiers:** fit on train, thresholds set on validation. Uncertain reference labels count as negative (U-Zeros), for the classifiers and for the corpus labels. Wherever predicted labels are used as training inputs, they are K-fold out-of-fold predictions.
 - **Retrieval:** never returns the target study or another study from the same patient.
 - **Audit in the paper:**
   - the RAD-DINO `training_images.csv` check above
@@ -262,8 +262,8 @@ Settled:
 ---
 
 ## 7. Metrics
-- **Suite** (the metrics ReXrank reports, except CRIMSON): BLEU, BERTScore, SembScore, RadGraph F1, RaTEScore, 1/RadCliQ-v1 and **GREEN**.
-  - **Official implementations, one container per upstream:** CXR-Report-Metric (BLEU-2, BERTScore, SembScore, RadGraph F1, RadCliQ-v1), GREEN and RaTEScore. Each keeps its own pins (GREEN's transformers 4.40, for one). ReXrank's own pipeline also splits them across two envs. RadEval reimplements all of them in one package, but its parity with ReXrank is unverified, so it is not used.
+- **Suite** (the metrics ReXrank reports, except CRIMSON): BLEU-2, BERTScore, SembScore, RadGraph F1, RaTEScore, 1/RadCliQ-v1 and **GREEN**.
+  - **Official implementations, one container per upstream:** CXR-Report-Metric (BLEU-2, BERTScore, SembScore, RadGraph F1, RadCliQ-v1), GREEN and RaTEScore. Each keeps its own pins (GREEN's transformers 4.40, for one). ReXrank's own pipeline also splits them across two envs. RadEval reimplements all of them in one package, so it is not used.
   - Everything runs locally. GREEN uses a fixed open-weight model.
   - The LLM judge (GREEN) generates one output per scored report. That is evaluation cost, not part of the generation budget, which counts only the reports the experiments generate (Appendix, "not counted").
   - **F1-CheXbert is not in the suite** (ReXrank doesn't report it). It only appears in the error breakdown below.
@@ -304,13 +304,13 @@ Settled:
     - no envs, uv cache, model weights, containers, vLLM caches or training checkpoints on NFS: they stay on local disk (final LoRA adapters are small and can go to NFS)
     - no file locks or SQLite on NFS
 - **Stages:**
-  - `embed` → `classify` (including out-of-fold) → `build-prompts` (hashed JSONL)
-  - `generate`: an async client against `vllm serve`, resumable and cached
+  - `labels` (CheXbert-14 on the reference text) → `embed` → `classify` (out-of-fold predictions not built yet; §6 is the first to need them) → `build-prompts` (gzipped JSONL)
+  - `generate`: an async client against `vllm serve` in Docker; all prompt sets of a job share one request queue. No resume yet: a failed job is rerun whole.
   - `evaluate`: per-study scores, on content-only text (no section header), as ReXrank's Findings board. Each metric runs in its own container with its upstream's code. GREEN's judge is served by a pinned vLLM, while GREEN's own image does all the text work; upstream's HF generate is kept as the reference. One job (one GPU) runs the whole suite at once: GREEN and RaTEScore share the GPU, while CXR-Report-Metric scores fixed-size chunks in parallel CPU containers, so `--cpus-per-task` sets the balance.
   - `compare`: each condition's mean and every pair's difference, with paired-bootstrap 95% CIs (§3, Statistics), from the conditions' scores artifacts. CPU only, about a second.
 - **Provenance:** each artifact's manifest records the output checksums of the artifacts it read and the checksums of the model files it loaded. If an upstream artifact now has other outputs, or a model's pins in `configs/weights.yaml` changed, the artifact is stale: it is refused (rebuilt only with `--overwrite`), and no stage reads it. `labrag provenance` lists every stale artifact on shared storage, through the whole chain.
 - **Hard cap: never more than 8 GPUs in use at once** across all our jobs. Of the cluster's 16 H200s, at most 8 are ours at any time. Steven enforces it when scheduling; the runner doesn't.
-- **GPU wrapper (sbatch):**
+- **GPU wrapper** (`src/labrag/serving.py`; multi-node serving not built yet):
   - tensor-parallel size taken from `CUDA_VISIBLE_DEVICES`
   - free port, health check, teardown
   - multi-node serving on **one rail** (tensor-parallel across nodes on the same rail is faster than crossing sockets within a node):
@@ -350,6 +350,7 @@ Assumptions:
 Steven's preliminary runs show that Qwen's highest thinking modes are slow. The v5 estimate assumed 2.5k output tokens per generation, which is probably too low for the top budget.
 
 - **Pilot (before C), on CheXpert Plus only (§2):**
+  - **Findings only.** Not in the pilot: Impression and Findings+Impression, the literature baselines, the error breakdown.
   - **Why CheXpert Plus:** every generation setting is chosen on a dataset we never evaluate on, so the MIMIC and ReXGradient results are not tuned to them. To state in the paper.
   - The 200-study CheXpert Plus pilot set, per Qwen3.5 size × candidate budget, plus gpt-oss at each effort level. Labels come from the CheXpert Plus classifiers (J), and the corpus is CheXpert Plus train minus the pilot patients.
   - The pilot uses public RAD-DINO, like every other experiment (see the encoder caveat in §2).

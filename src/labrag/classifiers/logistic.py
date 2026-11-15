@@ -1,13 +1,9 @@
 """Per-label logistic regression on image embeddings (the preprint's classifier).
 
-One independent binary model per label. The objective is the preprint's (L2, C=1, no
-feature scaling, no class weights). The preprint used ``solver="saga", max_iter=500``,
-which stops at the iteration cap before converging on RAD-DINO embeddings (checked
-2026-11-11 on CheXpert Plus Findings). Here the same objective is solved to
-convergence: lbfgs on float64 inputs with a tight tolerance. sklearn's default tol=1e-4
-stops about 30% (relative coefficient difference) short of the optimum. On float32
-inputs lbfgs stalls at about 2% whatever the tolerance; in float64, tol=1e-8 is within
-2.5e-5 of tol=1e-12. Not converging is an error, not a warning.
+The preprint's objective (L2, C=1, no scaling, no class weights), but solved to
+convergence: the preprint's saga at 500 iterations never converged, sklearn's default
+tol stops ~30% short, and lbfgs stalls on float32. So lbfgs, float64, tol=1e-8; not
+converging is an error.
 """
 
 import warnings

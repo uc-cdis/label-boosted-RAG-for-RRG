@@ -1,32 +1,15 @@
 """Stage ``generate``: one generation per prompt, from a model served by vLLM.
 
-Reads prompt artifacts ``prompts/<path>/`` (stage build-prompts) and writes, per prompt
-artifact, ``generations/<path>/<model>.<sampling>/<set>/generations.jsonl.gz``, one JSON
-record per target study of that set, in prompt order:
-- ``study_id``, ``set``;
-- ``report``: the response text (the reasoning parser has removed the thinking); null
-  if the output cap was hit before the model finished thinking;
-- ``reasoning``: the thinking text (null without thinking);
-- ``finish_reason``: ``stop`` or ``length`` (hit the output cap);
-- ``prompt_tokens``, ``completion_tokens`` (from vLLM; completion includes thinking),
-  ``reasoning_tokens`` (the thinking text re-tokenized; approximate);
-- ``start_s`` (seconds after the job's first request) and ``latency_s``: when the
-  request was sent and how long it took. Latency depends on the batch it shared, so it
-  is not a cost; cost is the job's GPU time over its requests (manifest
-  ``generation.gpu_seconds_per_request``, with the GPU model under ``server.gpus``).
+Writes ``generations/<prompt path>/<model>.<sampling>/<set>/generations.jsonl.gz``, one
+record per target study, in prompt order: study_id, set, report (null if the output cap
+hit during thinking), reasoning, finish_reason, prompt/completion tokens,
+reasoning_tokens (re-tokenized, approximate), start_s and latency_s (batch-dependent,
+not a cost; the manifest's gpu_seconds_per_request is). ``server_metrics.prom``: vLLM's
+metrics at job end, shared by the job's artifacts.
 
-Each artifact also holds ``server_metrics.prom``: vLLM's Prometheus metrics at the end
-of the job (token totals, prefix-cache hits, preemptions, latency histograms). It is
-job-level, the same file in every artifact of the job; its ``vllm:*_total`` counters
-are summed into the manifest.
-
-One server serves every prompt artifact of the job, and all their requests share one
-queue, so a long-thinking tail is paid once, not once per artifact. Artifacts already
-built with the same config are skipped; if all are, no server is started. No resume
-yet: a failed job publishes nothing and is rerun whole.
-
-Models: configs/models.yaml; sampling: configs/sampling.yaml; images:
-configs/containers.yaml; weights: configs/weights.yaml.
+One server and one request queue serve every prompt artifact of the job, so a long
+thinking tail is paid once. Built artifacts are skipped (no server if all are). No
+resume: a failed job publishes nothing. Configs: models, sampling, containers, weights.
 """
 
 import asyncio

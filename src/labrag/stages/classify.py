@@ -1,31 +1,17 @@
 """Stage ``classify``: per-label image classifiers for one report section's labels.
 
-Reads ``embeddings/<dataset>/<encoder>/`` and ``labels/<dataset>/<section>/<labeler>/``
-and writes ``classifiers/<dataset>/<encoder>.<classifier>/<section>/<labeler>[.u0]/``:
-- ``model.npz``: labels, coef (n_labels, dim), intercept, threshold; with
-  ``consistent``, enough to predict on any embeddings from the same encoder (e.g.
-  other datasets, J and §4.3);
-- ``probs.csv``: study_id, role, one probability column per label;
-- ``predictions.csv``: study_id, one 0/1 column per label (prob >= threshold, then
-  ``consistent``), the same layout as the reference labels.csv;
-- ``metrics.csv``: per label, counts, threshold, and AUROC/F1/precision/recall of the
-  predictions on val and on the official valid split.
+Writes ``classifiers/<dataset>/<encoder>.<classifier>/<section>/<labeler>[.u0]/``:
+model.npz (coef, intercept, threshold per label), probs.csv (study_id, role, one column
+per label), predictions.csv (0/1, the layout of labels.csv), metrics.csv (per label, on
+val and official valid).
 
-Rows are the studies that have reference labels for this section: classifiers are fit
-within each section, never on another section's labels. Roles come from the adapter
-(``classifier_roles``): fit on ``train``, thresholds on ``val``; every other role is
-predicted only. Uncertain labels follow the CheXpert policies (Irvin et al. 2019):
-``zeros`` (U-Zeros, the default) maps only positive to 1 and adds ``.u0`` to the
-labeler directory; ``ones`` (U-Ones, the preprint's) maps positive or uncertain to 1.
-Negative and not mentioned are always 0. No out-of-fold predictions yet (§2 "Leakage
-controls"): nothing trains on these predictions so far.
+Fit within each section, on the adapter's ``train`` role; max-F1 thresholds on ``val``;
+other roles predicted only. Uncertain labels (Irvin et al. 2019): ``zeros`` (U-Zeros,
+default, ``.u0``) counts only positive as 1; ``ones`` (U-Ones, the preprint) also
+uncertain. No out-of-fold predictions yet: nothing trains on them so far.
 
-Pathologies win over No Finding (``consistent``): after thresholding, No Finding is
-cleared wherever any label other than Support Devices is predicted. No Finding then
-means "normal" only when its own classifier and every pathology classifier agree.
-CheXbert's reference labels follow the same rule in all but 40 of the 46,759 CheXpert
-Plus Findings studies. The No Finding threshold is still max-F1 on its own
-probabilities.
+Pathologies win (``consistent``): No Finding is cleared wherever a label other than
+Support Devices is predicted, as CheXbert's reference labels do (all but 40 of 46,759).
 """
 
 from pathlib import Path

@@ -1,12 +1,9 @@
 """CheXbert-14 labels (Smit et al. 2020) with the authors' code in external/CheXbert.
 
-The model class and condition list are imported unmodified from the submodule. The
-inference loop mirrors upstream ``src/label.py`` (``label`` + ``save_preds``), which
-can't be called directly: it loads BERT by hub name, wraps the model in DataParallel,
-and its tokenizer helper uses ``encode_plus``, removed in transformers 5. Our normalize()
-and encode() were checked token for token against upstream's helpers run under
-transformers 4.46 on all 46,759 CheXpert Plus Findings (2026-11-11: no differences);
-tests/test_chexbert.py reproduces upstream's own labeled_reports.csv.
+Model class and conditions are imported unmodified. The loop mirrors upstream
+``src/label.py``, which can't be called (hub-name BERT, DataParallel, ``encode_plus``
+gone in transformers 5); our normalize()/encode() match upstream's token for token, and
+tests/test_chexbert.py reproduces upstream's labeled_reports.csv.
 """
 
 import importlib.util

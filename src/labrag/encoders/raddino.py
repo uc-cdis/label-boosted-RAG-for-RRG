@@ -1,36 +1,16 @@
 """Public RAD-DINO (Pérez-García et al. 2025, microsoft/rad-dino): the CLS embedding.
 
-Reference: the authors' inference code, the ``rad_dino`` package in the HF repo
-(src/rad_dino/__init__.py) at the revision whose weights we pin (110cbc18, see
-configs/weights.yaml). The model card's usage section is just a call into it:
-``RadDino().extract_features(image)``. Its steps, which this module repeats:
-- the repo's image processor in its PIL backend (``use_fast=False``; transformers 5
-  calls it ``backend="pil"``): convert to RGB, resize the shorter side to 518
-  (bicubic), center-crop 518 x 518, normalize with the repo's mean/std;
-- ``Dinov2Model`` in float32, keeping ``last_hidden_state[:, 0]`` (the CLS token).
-Verified 2026-11-11 on CheXpert Plus images: bit-identical to the package run under our
-transformers 5 (30 images) and to the same path under transformers 4.46 (100 images).
-tests/test_raddino.py pins two images' reference values, so drift fails the tests.
+Repeats the authors' ``rad_dino`` package at the pinned revision (110cbc18): the repo's
+image processor in its PIL backend (resize shorter side to 518, bicubic, center-crop,
+normalize), then ``Dinov2Model`` float32 ``last_hidden_state[:, 0]``. Bit-identical to
+the package (tests/test_raddino.py pins two images). Not called directly: it loads by
+hub name and preprocesses in-process (here DataLoader workers do it). The backend is
+explicit because transformers 5 defaults to torchvision, which differs slightly. Later
+card/package revisions would be a new encoder setting, not a silent update.
 
-Why not call the package: it loads weights by hub name, whereas jobs use pre-pulled
-files checked by sha256 and never download; and it preprocesses in the calling process,
-whereas here DataLoader workers do it (decoding and resizing ~3000 px PNGs is the
-bottleneck). Why the backend is explicit: with torchvision installed, transformers 5
-defaults to the torchvision backend, which differs slightly (CLS max |diff| 0.003 on the
-same 30 images). The model card's older usage section (before Aug 2025) called the
-processor that way, with ``pooler_output`` (identical to ``last_hidden_state[:, 0]``).
-
-Later revisions of the model card or package are deliberately not followed: the
-weights, the reference code and its outputs are pinned together, and a change of
-preprocessing would be a new encoder setting, not a silent update.
-
-One step added before the reference path: every image is first min-max scaled to 8-bit
-grayscale (encoders/images.py), as RAD-DINO's training images were (model card,
-"Preprocessing"). The reference path expects 8-bit input and silently clips 16-bit
-PNGs (PadChest, ReXGradient). On 8-bit images that already span 0-255 (every sampled
-CheXpert Plus and MIMIC-CXR image) the step is an exact no-op, so the parity above
-holds there. Still different from training, as for anyone using the reference: training
-resized to 518 with B-spline interpolation, the reference processor uses bicubic.
+Added first: min-max to 8-bit (encoders/images.py), as RAD-DINO's training images were;
+a no-op on full-range 8-bit images. Training resized with B-spline, the processor uses
+bicubic (as for anyone using the reference).
 """
 
 from collections.abc import Sequence

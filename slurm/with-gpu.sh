@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Run a command in the dev container on the GPUs held by a slurm/dev-gpu.sh job, and on
-# no others. The container sees every GPU of the node, and the cluster's GPU monitor
-# only checks that a GPU is allocated to *some* job, so this is the one place that keeps
-# container work on its own allocation.
+# Run a command in the dev container on the GPUs of a slurm/dev-gpu.sh lease, and no
+# others (the container sees every GPU; the GPU monitor only checks some job holds it).
 #
 #   slurm/with-gpu.sh [--job <id>] <command> [args...]
 #   slurm/with-gpu.sh --status

@@ -4,10 +4,8 @@
 #
 #   sbatch slurm/dev-gpu.sh     (1 GPU for 8 hours; override with --gres / --time)
 #
-# While the job runs, ~/labrag-run/dev-gpu/<job-id> (mounted read-only in the container)
-# names the allocated GPUs by UUID; slurm/with-gpu.sh reads it there and runs commands on
-# exactly those GPUs. The job touches the file every minute and removes it on exit, so a
-# lease left behind by a job that died without cleaning up goes stale and is refused.
+# The lease ~/labrag-run/dev-gpu/<job-id> names the GPUs by UUID for slurm/with-gpu.sh;
+# touched every minute and removed on exit, so a dead job's lease goes stale.
 #SBATCH --job-name=dev-gpu
 #SBATCH --nodelist=kg35-nvl01
 #SBATCH --gres=gpu:1
@@ -23,8 +21,7 @@ dir=${LABRAG_RUN_ROOT:-$HOME/labrag-run}/dev-gpu
 lease=$dir/$SLURM_JOB_ID
 mkdir -p "$dir"
 
-# nvidia-smi -i takes NVML (PCI bus order) indices, the same numbering Slurm's
-# CUDA_VISIBLE_DEVICES uses here. UUIDs make the container side independent of numbering.
+# nvidia-smi -i and Slurm's CUDA_VISIBLE_DEVICES share PCI bus order here.
 uuids=$(nvidia-smi --query-gpu=uuid --format=csv,noheader -i "$CUDA_VISIBLE_DEVICES" | paste -sd,)
 # 0 = no time limit.
 end=${SLURM_JOB_END_TIME:-$(date -d "$(squeue -h -j "$SLURM_JOB_ID" -o %e)" +%s 2>/dev/null || echo 0)}

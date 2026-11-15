@@ -1,21 +1,15 @@
-# Model weights. Each repo is pre-pulled on every node as a full clone of its latest head:
-#   hf download <repo> --local-dir $LABRAG_MODELS_ROOT/<repo>
-# Jobs never download. They check the sha256 of every file they load (listed here) and
-# record the revision that `hf download` wrote next to each file.
+# Model weights, pre-pulled on every node as full clones of the latest head
+# (hf download <repo> --local-dir $LABRAG_MODELS_ROOT/<repo>). Jobs never download;
+# they check the sha256 of every file they load (listed here) and record the revision.
 
-# CheXbert (Smit et al. 2020). The authors' original Stanford Box link is gone
-# (stanfordmlgroup/CheXbert#10); this is the copy the Stanford AIMI group hosts with its
-# report scorers. chexbert.pth was uploaded once (commit 4ccc069b, 2022-05-13) and has
-# not changed since.
+# CheXbert (Smit et al. 2020): the Stanford AIMI copy (the original Box link is gone,
+# stanfordmlgroup/CheXbert#10); chexbert.pth unchanged since its 2022-05-13 upload.
 chexbert:
   repo: StanfordAIMI/RRG_scorers
   files:
     chexbert.pth: 6550703c92d640e1e04d8105a7a185d76ece0f25fcbf033d292785bf22c0fde1
 
-# BERT base, for CheXbert's tokenizer and architecture. The files transformers reads:
-# config.json (architecture), model.safetensors (CheXbert's model class loads it, then
-# its checkpoint overwrites every weight), tokenizer.json and tokenizer_config.json
-# (lowercasing). vocab.txt is not read when tokenizer.json is present.
+# BERT base: CheXbert's architecture and tokenizer; its checkpoint replaces the weights.
 bert-base-uncased:
   repo: google-bert/bert-base-uncased
   files:
@@ -24,10 +18,7 @@ bert-base-uncased:
     tokenizer.json: ce64fce797c24f68df90b40a3f74f579b336a493db14bd583fd520ea0d8c9a98
     tokenizer_config.json: a025160ef0431f1a392f6f050c1310f4c5d9fb6f275932dbccba73c4d214bf10
 
-# Public RAD-DINO (Pérez-García et al. 2025), MIT. The files transformers reads for
-# AutoModel + AutoImageProcessor. model.safetensors is the second upload (2024-05-24,
-# replacing a 2024-05-17 file); the two configs date from 2024-05-17. None has changed
-# since.
+# Public RAD-DINO (Pérez-García et al. 2025), MIT; model.safetensors of 2024-05-24.
 rad-dino:
   repo: microsoft/rad-dino
   files:
@@ -35,12 +26,8 @@ rad-dino:
     model.safetensors: dbfb9f54459c38773505de64a6ab7807bdcb392610fe1e697166342e43fb91ae
     preprocessor_config.json: c537fc995c30e2353f07253899618d60e9eae3d5f82473778602c007c6523b56
 
-# Qwen3.5-27B (Qwen 2026), Apache-2.0, BF16. The multimodal checkpoint
-# (Qwen3_5ForConditionalGeneration); text-only runs serve it with --language-model-only
-# (configs/models.yaml). Every file vLLM may read: config, generation config, tokenizer,
-# chat template, processor configs and the 11 safetensors shards (55.6 GB). Revision
-# fc05daec18b0a78c049392ed2e771dde82bdf654 (2026-04-24); the shard hashes equal the
-# sha256 Hugging Face lists for that revision.
+# Qwen3.5-27B, Apache-2.0, BF16, multimodal checkpoint (text-only runs use
+# --language-model-only). Every file vLLM may read; revision fc05daec (2026-04-24).
 qwen3.5-27b:
   repo: Qwen/Qwen3.5-27B
   files:
@@ -67,15 +54,11 @@ qwen3.5-27b:
     vocab.json: ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003
 
 # --- Evaluation (eval/compose.yaml) ---
-# Each entry lists exactly the files the metric's container opens under /models (traced
-# with strace over a full run, upstream's subprocesses included, 2026-11-13); the
-# evaluate stage checks them before building anything. CXR-Report-Metric also reads
-# chexbert.pth (the chexbert entry above).
+# Exactly the files each metric's container opens under /models (traced, 2026-11-13);
+# CXR-Report-Metric also reads chexbert.pth (above).
 
-# BERT base for CheXbert inside CXR-Report-Metric. transformers 3.0.1 reads
-# pytorch_model.bin and vocab.txt (it predates safetensors and fast-tokenizer files), so
-# this is a different file set from bert-base-uncased above. pytorch_model.bin equals
-# the legacy S3 file upstream's shortcut name used to download. Revision 86b5e093.
+# BERT base for CheXbert in CXR-Report-Metric: transformers 3.0.1 reads
+# pytorch_model.bin + vocab.txt (== the legacy S3 files). Revision 86b5e093.
 cxr-report-metric.bert-base-uncased:
   repo: google-bert/bert-base-uncased
   files:
@@ -84,8 +67,7 @@ cxr-report-metric.bert-base-uncased:
     tokenizer_config.json: a025160ef0431f1a392f6f050c1310f4c5d9fb6f275932dbccba73c4d214bf10
     vocab.txt: 07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3
 
-# DistilRoBERTa base, BERTScore's model in CXR-Report-Metric (layer 5, rescaled with the
-# baseline bert-score ships). Revision fb53ab88.
+# DistilRoBERTa base: BERTScore's model in CXR-Report-Metric. Revision fb53ab88.
 cxr-report-metric.distilroberta-base:
   repo: distilbert/distilroberta-base
   files:
@@ -95,10 +77,8 @@ cxr-report-metric.distilroberta-base:
     tokenizer_config.json: 994f46754c5bf4014f1aa92d34b1374319c3a6b3f702105cd5b742beaecd18ce
     vocab.json: 9e7f63c2d15d666b52e21d250d2e513b87c9b713cfa6987a82ed89e5e6e50655
 
-# BiomedBERT (formerly PubMedBERT) abstract+fulltext: RadGraph's encoder architecture and
-# tokenizer (allennlp builds the model from it; the RadGraph checkpoint then overwrites
-# its weights). Head vocab == the 2020 S3 files; weights differ only by the 2021 LM-head
-# fix, which RadGraph doesn't use. Revision e1354b7a.
+# BiomedBERT abstract+fulltext: RadGraph's architecture and tokenizer (the checkpoint
+# overwrites the weights; == 2020 S3 but an unused LM-head fix). Revision e1354b7a.
 cxr-report-metric.biomedbert:
   repo: microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext
   files:
@@ -107,20 +87,15 @@ cxr-report-metric.biomedbert:
     tokenizer_config.json: 53b6f42b8b8daddbdc6d3532c324187a92b46c1602bd6e8d4ad5a413b4fc90e1
     vocab.txt: 79489a52be45e6fa033521e8ce8e4f62aedc0a742ee2aa6fc04667e5b0b1454d
 
-# RadGraph DyGIE++ checkpoint (Jain et al. 2021), PhysioNet radgraph/1.0.0
-# (credentialed): models/model_checkpoint/model.tar.gz. Not from Hugging Face, so no
-# revision is recorded; copy it by hand to <models root>/radgraph/model_checkpoint/.
+# RadGraph DyGIE++ (Jain et al. 2021), PhysioNet radgraph/1.0.0 (credentialed), copied
+# by hand to <models root>/radgraph/model_checkpoint/; no revision.
 cxr-report-metric.radgraph:
   repo: radgraph/model_checkpoint
   files:
     model.tar.gz: f7310cc53dd6d2ea3c6426c076504bc1677027d52f3106ac29866f8cfd79a901
 
-# RaTEScore's two models (the Hub names its RaTEScore() defaults load), as full clones of
-# the latest head; both heads predate RaTEScore 0.6.0 (2025-05-18), so they are what
-# ReXrank's unpinned download got. Files: what transformers opens for them (traced with
-# strace over a run, 2026-11-13; the same in transformers 4.36.0 and 4.40.0).
-# RaTE-NER-Deberta: the entity tagger (DeBERTa-v3 fine-tuned on RaTE-NER), revision
-# 66d4b818; tokenizer.json makes spm.model unread.
+# RaTEScore's two models; both heads predate RaTEScore 0.6.0, so they are what ReXrank
+# downloaded. RaTE-NER-Deberta (entity tagger), revision 66d4b818.
 ratescore.rate-ner-deberta:
   repo: Angelakeke/RaTE-NER-Deberta
   files:
@@ -129,8 +104,7 @@ ratescore.rate-ner-deberta:
     tokenizer.json: 05402ffae6dd382a8491b1d29bfc139bec5d332662e86a026f433ce54c25c202
     tokenizer_config.json: 557b3d33d3f41b81ad769244e506549e98a1857d41dd58160aacd4d98d710b5a
 
-# BioLORD-2023-C: the entity encoder (synonym matching), revision 4bb5abd1. transformers
-# prefers model.safetensors over the repo's pytorch_model.bin.
+# BioLORD-2023-C (entity encoder), revision 4bb5abd1.
 ratescore.biolord-2023-c:
   repo: FremyCompany/BioLORD-2023-C
   files:
@@ -140,16 +114,9 @@ ratescore.biolord-2023-c:
     tokenizer_config.json: 99d291450cad8c10d9b172409d64d3fad2721e5da2bec09202d4841a896222b0
     vocab.txt: dbd90cb94e2247bd4d4ccaecbf616d2290e66691d7d5e5bb81f063c2d0649ada
 
-# GREEN's judge, GREEN-RadLlama2-7b (Ostmeier et al. 2024), revision 832389d5: unchanged
-# since 2024-05-16, so it is also what ReXrank's 2026 download got.
-# The Hub id is StanfordAIMI/GREEN-RadLlama2-7b; GREEN's default spelling
-# (GREEN-radllama2-7b) redirects to it. Files: what transformers 4.40.0 opens for GREEN's
-# tokenizer load (the repo's slow CheXagentTokenizer, trust_remote_code: its
-# tokenization_chexagent.py) and the model's two configs, traced with a Python audit hook
-# (2026-11-13); plus the safetensors index and the shards it lists, which safetensors
-# opens outside Python's audit hooks. Never opened: added_tokens.json and
-# special_tokens_map.json (tokenizer_config.json has both), README.md, trainer_state.json,
-# training_args.bin.
+# GREEN's judge, GREEN-RadLlama2-7b (Ostmeier et al. 2024), revision 832389d5,
+# unchanged since 2024-05-16. Tokenizer files traced; shards listed from the index
+# (safetensors opens them outside Python's audit hooks).
 green.radllama2-7b:
   repo: StanfordAIMI/GREEN-RadLlama2-7b
   files:

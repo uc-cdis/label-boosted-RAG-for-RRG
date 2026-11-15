@@ -1,60 +1,33 @@
 """Score reports with GREEN, inside its image.
 
-  docker compose -f eval/compose.yaml run --rm green-native <gt.csv> <pred.csv> <out.csv>
-  docker compose -f eval/compose.yaml run --rm green-native --repro
-  docker compose -f eval/compose.yaml run --rm green-client <gt.csv> <pred.csv> <out.csv>
+  docker compose -f eval/compose.yaml run --rm <service> <gt.csv> <pred.csv> <out.csv>
   docker compose -f eval/compose.yaml run --rm green-client score <dir>...
-  docker compose -f eval/compose.yaml run --rm green-client --repro
+  docker compose -f eval/compose.yaml run --rm <service> --repro
 
-(the image's entry point; the paths are inside the container, so mount their directory).
+(service: green-native or green-client; paths inside the container: mount their dir)
 
-Same inputs as the other services: CSVs with columns study_id (integers) and report, one
-row per study, the same ids in both. out.csv gets per study, in input order:
-- study_id, green_score (GREEN's per-study score);
-- GREEN's counts, renamed (keys without spaces): its six clinically significant error
-  counts (a)-(f) as green_sig_{false_finding, missing_finding, location, severity,
-  false_comparison, missing_comparison}, and green_matched_findings;
-- green_unparsed: 1 if the judge's text lacks a section GREEN parses a score from (GREEN
-  then counts that section as 0, so the study scores 0 or near it, silently), else 0;
-- green_analysis: the judge's text, which every count is parsed from.
-<out>.json gets the timing.
+Inputs: CSVs (study_id as integers, report), the same ids in both. out.csv per study:
+green_score; GREEN's six significant-error counts as green_sig_{false_finding,
+missing_finding, location, severity, false_comparison, missing_comparison} and
+green_matched_findings; green_unparsed (1 if the judge's text lacks a section GREEN
+parses, which then counts as 0); green_analysis (the judge's text). <out>.json: timing.
 
-Two ways to run the judge (eval/compose.yaml):
+Two judge paths:
+1. green-native: upstream's HF generate, called as ReXrank does (GREEN(model,
+   output_dir, cpu=False, compute_summary_stats=False), references first; greedy, fp16,
+   batch 8). The judge loads from /models via the constructor; upstream is unpatched.
+2. green-client (GREEN_JUDGE_URL set): the judge served by vLLM (service green-vllm);
+   everything else runs here with upstream's code. Per study: GREEN's prompt, tokenized
+   as get_response does (one per batch, so no padding); a request with those ids, the
+   cap max_length=2048 minus the prompt, and eos as the stop token; the output decoded
+   with the prompt and parsed by GREEN's results code. ``score`` judges each directory's
+   set (gt.csv, pred.csv → out.csv) alone on the server, with its own cache_salt, so no
+   set changes another's outputs; <out>.start/end.prom hold the server's metrics around
+   it. One difference: HF counts max_length on the left-padded batch, so its cap depends
+   on batch neighbours; here it doesn't (matters only at finish_reason "length").
 
-1. service green-native: upstream's own HF generate, as ReXrank calls it
-   (rajpurkarlab/ReXrank-metric, scripts/run_green.py): GREEN(model, output_dir,
-   cpu=False, compute_summary_stats=False) on the reports as strings, references first;
-   everything else at upstream's defaults (greedy, fp16, batch 8, max_length 2048). The
-   one change: the judge is loaded from its local copy under /models (mounted read-only;
-   jobs run with no network), passed as the constructor's own argument, so upstream's
-   code is unpatched. One GPU.
-
-2. service green-client (GREEN_JUDGE_URL set): the judge served by vLLM (service
-   green-vllm, greedy, fp16); this container has no GPU and does everything but the
-   forward passes, with upstream's code. Per study: the prompt (GREEN's make_prompt and
-   chat template), tokenized as GREEN's get_response does, one study per batch (no
-   padding: the same ids as the unpadded part of upstream's batch); a request with
-   those token ids, the output cap (generate's max_length=2048 minus the prompt) and
-   the stop token (the tokenizer's eos, which generate stops on); the returned token ids
-   decoded with the prompt, as get_response does (the prompt is part of the decoded
-   text there; clean_responses cuts it off); then GREEN's own results code. `score`
-   takes directories that each hold one set's gt.csv and pred.csv (out.csv is written
-   next to them) and judges them one set at a time, on one server: every request of a
-   set is answered before the next set's are sent, so the server's batches only ever
-   hold one set's studies and the set's time is its own; each set's requests carry
-   their own cache_salt, so no set reuses another's prefix cache either (no other set
-   can change its outputs). <out>.json also gets the finish reasons and token counts; <out>.start.prom
-   and <out>.end.prom the server's Prometheus metrics just before and after the set.
-   One difference from upstream: HF counts max_length on the left-padded batch, so there
-   a study's cap also depends on its batch neighbours' prompt lengths; here it is its
-   own. It only matters if the judge reaches the cap (see finish_reason "length").
-
---repro: upstream's reproduction test (tests/test_repro.py: 5 report pairs and the judge
-texts its authors got) through the service's judge path, with the test's own two checks
-(texts equal after its normalization; scores equal to the score of the expected text).
-The test file can't run as is: at import it also computes GREEN's summary statistics,
-which load a second Hub model (sentence-transformers/paraphrase-mpnet-base-v2) no score
-needs. So its inputs are read from the file, not executed.
+--repro: upstream's tests/test_repro.py cases and checks, read from the file (importing
+it would load a second Hub model for summary statistics no score needs).
 
 OMP_NUM_THREADS must be set (unset, torch would use every core of the host).
 """
@@ -254,7 +227,6 @@ async def request_all(sets, eos):
                 "n": 1,
                 "stop_token_ids": [eos],
                 "return_token_ids": True,
-                # the server reuses cached prompt blocks only within one salt
                 "cache_salt": salt,
             }
             async with gate, session.post("/v1/completions", json=body) as r:
@@ -270,10 +242,8 @@ async def request_all(sets, eos):
             async with session.get("/metrics") as r:
                 return await r.text()
 
-        # One cache salt per set: a set never reuses prompt blocks an earlier set left
-        # in the server's prefix cache, so each starts as on a fresh server (its own
-        # requests still share their common prefix). vLLM salts a prompt's first block,
-        # and every later block's hash chains from it (v0.32.0 kv_cache_utils.py).
+        # One cache salt per set: no set reuses another's prefix-cache blocks (vLLM
+        # salts the first block; later block hashes chain from it).
         done = []
         for k, prompts in enumerate(sets):
             before = await metrics()
@@ -314,8 +284,7 @@ def judge_served(scorer, sets):
         info = {
             "reports": len(ps),
             "judge": {"server": "vllm", "version": version},
-            # this set's own time: its first request to its last answer, alone on
-            # the server (its last batch's tail included)
+            # first request to last answer, alone on the server
             "seconds": round(seconds, 1),
             "seconds_per_request": seconds / len(ps),
             "finish_reason": dict(sorted(finish.items())),

@@ -1,15 +1,9 @@
-"""Reading a released CXR image file into the 8-bit grayscale image encoders take.
+"""Reading a released CXR image into the 8-bit grayscale image encoders take.
 
-Every image is min-max scaled to the full 8-bit range [0, 255], whatever its stored bit
-depth. This is RAD-DINO's own training preprocessing ("min-max scaled to [0, 255]",
-model card), and it is needed: the released files differ in bit depth (sampled
-2026-11-11, 150-500 images each):
-- CheXpert Plus PNGs and MIMIC-CXR-JPG JPEGs: 8-bit grayscale, every sampled image
-  already spanning exactly 0-255, so scaling changes nothing for them;
-- PadChest (so also PadChest-GR) and ReXGradient PNGs: 16-bit grayscale. PIL's RGB
-  conversion inside the encoders' processors clips these at 255, which turned 70-90% of
-  each sampled image pure white. Scaling first avoids that.
-Unknown image modes are refused, so a new dataset's format gets looked at, not guessed.
+Every image is min-max scaled to [0, 255] (RAD-DINO's training preprocessing). Needed:
+PadChest(-GR) and ReXGradient PNGs are 16-bit, which the processors' RGB conversion
+clips to mostly white; CheXpert Plus and MIMIC are full-range 8-bit (a no-op). Unknown
+image modes are refused.
 """
 
 from pathlib import Path

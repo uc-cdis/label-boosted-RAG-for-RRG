@@ -1,73 +1,27 @@
 """Stage ``evaluate``: per-study scores of generated reports, by official metric code.
 
-Reads a generations artifact (stage generate) and the prompt artifact it was generated
-from (for the reference text), and writes
-``scores/<generations path>/<metric>/scores.jsonl.gz``: one JSON record per study of
-the set, in generation order, with ``study_id``, ``set`` and the metric's per-study
-scores. The manifest's ``summary`` has the means and, for CXR-Report-Metric, the
-leaderboard's ``1/RadCliQ-v1`` = 1 / mean(RadCliQ-v1) (corpus-level, as ReXrank).
+Writes ``scores/<generations path>/<metric>/scores.jsonl.gz``: one record per study, in
+generation order (references come from the prompt artifact). The manifest summary has
+the means and, for CXR-Report-Metric, 1/RadCliQ-v1 = 1 / mean(RadCliQ-v1), as ReXrank.
 
-Metrics: ``cxr-report-metric`` (BLEU-2, BERTScore, SembScore, RadGraph F1, RadCliQ;
-CPU only), ``ratescore`` and ``green`` (GREEN score, its clinically significant error
-counts and matched findings, plus the judge's text). The GPU metrics run on one GPU:
-submit with --gres=gpu:1; the container gets the job's GPU from CUDA_VISIBLE_DEVICES.
-``--metric`` runs one metric alone (e.g. to rerun the one that failed; the suite also
-skips every metric already built with its config).
+Each metric is a service of eval/compose.yaml: the upstream's code and pins in its own
+image, built from this checkout and tagged with the commit. ``cxr-report-metric`` runs
+on CPU; ``ratescore`` and ``green`` (judge served by vLLM) share the job's GPU;
+``green-native`` (upstream's HF generate) is the reference and runs alone. ``--repro``
+runs GREEN's upstream reproduction test. Weights are checked (sha256) before any build.
 
-Submit the suite with --gres=gpu:1, at slurm/job.sh's default --cpus-per-task=72 (a
-GPU's even share of a node). Half the job's CPUs are torch threads (torch_threads; one
-per physical core on our nodes): 8 for RaTEScore, 4 for GREEN's client, and 4 per
-CXR-Report-Metric container, so --cpus-per-task = 2 × (12 + 4 × W) runs W containers at
-a time (plan_threads). The thread counts were chosen so that 72 gives W = 6, which keeps
-about pace with GREEN, the slowest on the GPU; CXR-Report-Metric also runs during the
-judge's startup (≈90 s), and the 6 containers don't slow the GPU metrics. A
-job too small for every metric's threads is refused: threads are never lowered, since
-CXR-Report-Metric's scores depend on them.
+One job runs the whole suite (``--metric`` runs one): --gres=gpu:1 at slurm/job.sh's
+default 72 CPUs. The judge starts first, sizing its KV cache on the empty GPU; meanwhile
+CXR-Report-Metric scores fixed chunks of studies in parallel CPU containers. Torch
+threads are half the job's CPUs: 8 RaTEScore + 4 GREEN client + 4 per CXR container, so
+--cpus-per-task = 2 × (12 + 4W) runs W containers; 72 gives W = 6, which keeps pace with
+the GPU. Chunk size and threads change CXR scores in the last bit, so both are in its
+config, and a job too small for them is refused. A failed metric doesn't stop others.
 
-One job runs the whole suite (``SUITE``, the default) at once, so the metrics share its
-GPU and CPUs and finish at about the same time: cxr-report-metric starts first, on CPU;
-then GREEN's judge starts and sizes its KV cache on the empty GPU; then GREEN and
-RaTEScore share the GPU. cxr-report-metric, the slowest per study, scores each set in
-chunks of ``chunk`` studies (fixed, so a study's scores never depend on the job's CPU
-count), one container per chunk, as many at a time as the job's CPUs allow
-(``plan_threads``): --cpus-per-task is what balances it against the GPU metrics. Each
-metric publishes its artifacts when its own scores are in; a failed metric doesn't
-stop the others (the job then fails at the end).
-
-``green`` serves GREEN's judge with vLLM (compose service green-vllm, on the job's
-GPU; the client is service green-client), in vLLM's batch-invariant mode and torch's
-deterministic compile, so a study's score depends neither on what it is batched with nor
-on the job (see eval/compose.yaml); GREEN's image does all the text work
-with upstream's code (see eval/green/run.py). One container run scores every set of the
-job, one set at a time, each with its own prefix cache; the job's compose project,
-server included, is taken down at the end. ``green-native``, the reference: the same scores by upstream's own HF
-generate (service green-native, ≈1.6 s per study on an H200). ``labrag evaluate
---metric green[-native] --repro`` runs upstream's 5-case reproduction test through
-either judge path.
-
-Each metric is one service of eval/compose.yaml: the upstream's own code and pins in its
-own image (docs/revision-plan.md §7). The stage builds the image from this checkout
-before running it (BuildKit's cache makes that near-instant when nothing changed); the
-image is tagged with the commit, so jobs at different commits never share an image.
-
-Inputs (Findings only, for now; other sections are refused until their format is
-decided):
-- content only, as ReXrank's Findings board scores every metric since 2026-08-06
-  (rajpurkarlab/ReXrank gh-pages 1db77de): no section header on either text; a
-  leading "Findings:" on a generated report is removed (our references have none);
-- whitespace runs (CheXpert Plus keeps its line wraps) are collapsed to one space. Our
-  correction, not ReXrank's (its json_to_csv.py passes texts as they are): upstream's
-  BLEU splits on " " only, so a line break would join two words into one token;
-- study ids are integers 0..n-1 in generation order, as ReXrank-metric's json_to_csv.py
-  (upstream casts them with int()).
-
-Model weights: each metric lists the configs/weights.yaml entries its container reads
-under /models (the host weights root, mounted read-only); they are checked (present,
-sha256) before anything is built and recorded in the manifest's inputs.
-
-Studies without a report (the output cap was hit while thinking, or an empty answer)
-are scored as the text "EMPTY" and stay in every mean; each record has ``empty_report``
-and the summary counts them. Empty references are refused.
+Input format (Findings only so far; deviations from ReXrank: docs/revision-plan.md §7):
+no section header (a leading "Findings:" is removed), whitespace collapsed, study ids
+0..n-1; an empty report is scored as "EMPTY" and stays in every mean. Empty references
+are refused.
 """
 
 import concurrent.futures
@@ -92,9 +46,7 @@ from labrag import artifacts, paths, serving, weights
 COMPOSE_FILE = paths.REPO_ROOT / "eval" / "compose.yaml"
 SECTIONS = ["findings"]  # the sections whose scoring format is decided
 FINDINGS_HEADER = re.compile(r"^findings\s*:\s*", re.IGNORECASE)
-# An empty generated report (thinking hit the output cap, or an empty answer) is scored
-# as this text by every metric, so each metric gives its own verdict on a report that
-# says nothing (the preprint's rrg/eval.py did the same, spelled "EMTPY").
+# Every metric scores an empty report as this text (the preprint did too, as "EMTPY").
 EMPTY_REPORT = "EMPTY"
 FORMAT = {
     "whitespace": "runs collapsed to one space",
@@ -103,31 +55,18 @@ FORMAT = {
     "empty_report": f"scored as the text {EMPTY_REPORT!r}",
 }
 
-# metric -> compose service, the upstream submodule its image is built from, whether it
-# runs on the job's GPU, torch threads per container, the configs/weights.yaml entries
-# it reads under /models, its per-study score columns (numbers, averaged in the summary)
-# and optional text columns (kept per study, e.g. an LLM judge's output). Optional:
-# ``build``, the service that builds the image (default: the service itself); ``judge``,
-# the compose service that serves the metric's LLM judge (the stage starts it before
-# the GPU metrics and takes it down at the end); ``chunk``, studies per container run
-# (containers run in parallel, see plan_threads; chunk and threads are then part of the
-# scores' config).
+# Optional keys: ``build`` (the service that builds the image, default the service),
+# ``judge`` (the service serving the LLM judge), ``chunk`` (studies per container run;
+# chunks run in parallel), ``texts`` (text columns kept per study).
 METRICS = {
     "cxr-report-metric": {
         "service": "cxr-report-metric",
         "upstream": "external/CXR-Report-Metric",
         "gpu": False,
-        # Thinner containers score more studies per CPU: 24 threads as 3×8 / 4×6 / 6×4 /
-        # 8×3 gave 0.152 / 0.142 / 0.115 / 0.095 s per study. The thread
-        # count changes a few studies' scores in the last float32 bit (1-2 per 200 at
-        # 3-6 threads vs 8), the same at a given count, so it is in the config.
+        # Thinner containers score more studies per CPU (24 threads: 6×4 is 1.3× 3×8).
         "threads": 4,
-        # Evals run after each trial, on one set, so a set must split across the
-        # containers: 250 gives PadChest-GR (915 studies) 4 chunks and MIMIC (2,347) 10.
-        # Each run loads the models (~15-20 s, ≈15% of a 250-study chunk). The chunk
-        # size changes a few studies' scores too (chunks of 100 vs 200, 4 threads:
-        # BERTScore in 6-8 studies per 200, ≤8e-7; RadCliQ ≤2.4e-6; the same at a given
-        # size), so it is in the config, never sized per job.
+        # A job scores one trial's set, which must split: PadChest-GR (915) → 4 chunks,
+        # MIMIC (2,347) → 10. Model loads take ~15% of a 250-study run.
         "chunk": 250,
         "weights": [
             "chexbert",
@@ -264,16 +203,13 @@ def prepare(
             "stage": "evaluate",
             "generations": f"generations/{rel}",
             "metric": metric,
-            # What determines the scores: the service that runs, the upstream commit
-            # and this repo's image definition (Dockerfile, patch, wrapper), by git
-            # tree hash. Not eval/compose.yaml: it also holds the other services and
-            # run settings (recorded in the manifest's image record instead).
+            # Not all of eval/compose.yaml: it also holds the other services.
             "image": image_source(spec),
             "format": FORMAT,
         }
         if "judge" in spec:
             config["judge"] = judge_definition(spec)
-        if "chunk" in spec:  # the container layout, which changes scores (last bit)
+        if "chunk" in spec:  # changes scores in the last bit
             config["chunk_studies"] = spec["chunk"]
             config["torch_threads"] = spec["threads"]
         jobs.append((f"generations/{rel}", f"scores/{rel}/{metric}", config))
@@ -286,8 +222,7 @@ def prepare(
     if not todo:
         return None, built
 
-    # Check every input before building the image: the weights the container reads
-    # (present, with the sha256 in configs/weights.yaml), then the artifacts.
+    # Check every input before building the image.
     weight_records = {name: weights.resolve(name)[1] for name in spec["weights"]}
     judge_image = judge_image_record(spec) if "judge" in spec else None
     sets = []
@@ -318,14 +253,9 @@ def prepare(
 
 
 def plan_threads(plans: list[dict]) -> None:
-    """Torch threads per container, and how many chunk containers run at a time.
-
-    Half the job's CPUs in all, as torch_threads: the other metrics' containers first,
-    the rest to the chunked metric, at its threads per container (never more
-    containers than it has chunks). Every metric runs at its own threads, never fewer
-    (CXR-Report-Metric's scores depend on them), so a job too small for one container of
-    each is refused. Our Slurm doesn't confine jobs, so the job's share is
-    --cpus-per-task, not the node."""
+    """How many chunk containers run at a time: torch_threads minus the other metrics'
+    threads, at the chunked metric's threads each. Threads are never lowered (CXR
+    scores depend on them), so a job too small for one container of each is refused."""
     budget = torch_threads()
     for plan in plans:
         plan["threads"] = plan["spec"]["threads"]
@@ -350,8 +280,7 @@ def plan_threads(plans: list[dict]) -> None:
 
 
 def score_metric(plan: dict, overwrite: bool) -> list[Path]:
-    """Score every set of the plan, publishing each set's artifact as its scores are
-    in (each manifest's ``started``: when the metric began, shared by its sets)."""
+    """Score every set, publishing each as its scores are in."""
     spec, image, sets = plan["spec"], plan["image"], plan["sets"]
     started = artifacts.now()
     start = time.monotonic()
@@ -373,9 +302,7 @@ def score_metric(plan: dict, overwrite: bool) -> list[Path]:
 
 
 def score_chunks(spec: dict, image: dict, sets: list[dict], plan: dict):
-    """Scores of each set (in order, as each set's chunks are in), from containers of
-    ``spec["chunk"]`` studies each, ``plan["workers"]`` at a time. A set's timing: its
-    containers' summed seconds and its chunk count."""
+    """Each set's scores, from ``plan["workers"]`` containers of ``chunk`` studies."""
     size = spec["chunk"]
     pool = concurrent.futures.ThreadPoolExecutor(plan["workers"])
     try:
@@ -490,16 +417,12 @@ def score(
 def score_sets(
     spec: dict, image: dict, sets: dict[str, pd.DataFrame], plan: dict | None = None
 ) -> list[tuple[list[dict], dict]]:
-    """Run a judged metric on several sets of pairs (artifact name -> pairs) in one run
-    of its ``score`` command, which judges them one set at a time on the judge server
-    (started by judge_session).
+    """Judge several sets (artifact name -> pairs) in one client run, one set at a time.
 
-    Per set, in order: the per-study scores in pair order and the timing. Everything at
-    the timing's top level is the set's own: its time on the server, finish reasons,
-    token counts and server counters (the counters' change over the set), and the job's
-    GPU. ``run`` is shared by every set of the run, so count it once per run: the sets,
-    ``overhead_seconds`` (the client run's wall time minus the sets' own times), the
-    judge's startup time and the metrics that shared the job's GPU and CPUs."""
+    Per set: scores in pair order and timing. Timing's top level is the set's own
+    (server time, finish reasons, tokens, counter deltas); ``run`` is shared by the
+    run's sets (count it once): overhead beyond the sets' own and the judge's startup.
+    """
     plan = plan or {}
     devices = check_gpu(spec)
     with tempfile.TemporaryDirectory(prefix="labrag-eval-") as work:
@@ -538,10 +461,8 @@ def score_sets(
 
 @contextlib.contextmanager
 def judge_session(spec: dict, image: dict, plan: dict | None = None):
-    """Start the metric's judge service and wait until it answers; on exit, always
-    copy its log into the job log and take the job's compose project down (the server
-    included), also when the job is cancelled (Slurm's SIGTERM). Records the startup
-    time in ``plan``."""
+    """Start the judge and wait until it answers; on exit (SIGTERM included) copy its
+    log into the job log and take the compose project down."""
     serving.raise_on_sigterm()
     start = time.monotonic()
     try:
@@ -599,9 +520,7 @@ def run_service(
     threads: int | None = None,
     prefix: str | None = None,
 ) -> None:
-    """One run of the metric's container, with ``work`` mounted at the same path, at
-    ``threads`` torch threads (default: torch_threads); its output lines get
-    ``[prefix] `` (metrics running at once share the job log)."""
+    """One run of the metric's container, ``work`` mounted at the same path."""
     compose(
         "run",
         "--rm",
@@ -642,9 +561,7 @@ def read_scores(spec: dict, out_csv: Path, pairs: pd.DataFrame) -> list[dict]:
 
 
 def judge_definition(spec: dict) -> dict:
-    """The judge service's image, environment and command (what determines its
-    outputs, e.g. VLLM_BATCH_INVARIANT and TORCHINDUCTOR_DETERMINISTIC), for the
-    artifact config; the rest of eval/compose.yaml is not part of it."""
+    """The judge's image, environment and command: what determines its outputs."""
     service = yaml.safe_load(COMPOSE_FILE.read_text())["services"][spec["judge"]]
     keys = ("image", "environment", "command")
     return {"service": spec["judge"], **{k: service[k] for k in keys}}
@@ -667,22 +584,15 @@ def judge_image_record(spec: dict) -> dict:
 
 
 def torch_threads() -> int:
-    """Threads for torch in the container: half the job's CPUs.
-
-    torch 1.6 parallelizes even tiny ops, so one preempted thread stalls each op;
-    threads == CPUs on a shared node ran RadGraph ~7x slower (2026-11-13). Our Slurm
-    doesn't confine jobs, so the job's share is --cpus-per-task, not the node
-    (slurm/job.sh's default: 72); the CPU affinity is for runs outside Slurm.
-    """
+    """Half the job's CPUs (--cpus-per-task; Slurm doesn't confine jobs). torch 1.6
+    stalls on preempted threads: threads == CPUs ran RadGraph ~7x slower."""
     ncpu = int(os.environ.get("SLURM_CPUS_PER_TASK") or len(os.sched_getaffinity(0)))
     return max(1, ncpu // 2)
 
 
 def image_source(spec: dict) -> dict:
-    """The compose service the metric runs (green-client and green-native share one
-    image, so this is what tells them apart) and the git ids of what its image is built
-    from (committed state of this checkout).
-    """
+    """The service that runs (green-client and green-native share an image) and the
+    git ids its image is built from."""
     _, context, _ = image_build(spec)
     return {
         "service": spec["service"],
@@ -692,9 +602,7 @@ def image_source(spec: dict) -> dict:
 
 
 def image_build(spec: dict) -> tuple[str, str, str]:
-    """The compose service that builds the metric's image, its build context (relative
-    to the repo) and its image name without the tag, as eval/compose.yaml defines them.
-    """
+    """The service that builds the image, its build context and untagged image name."""
     service = spec.get("build", spec["service"])
     definition = yaml.safe_load(COMPOSE_FILE.read_text())["services"][service]
     context = (COMPOSE_FILE.parent / definition["build"]["context"]).resolve()
@@ -727,10 +635,7 @@ def build_image(spec: dict) -> dict:
 def compose(
     *args: str, tag: str, check: bool = True, prefix: str | None = None
 ) -> None:
-    """docker compose on eval/compose.yaml, as this job's own project (jobs sharing a
-    node never share a container or network); with ``prefix``, each output line starts
-    with ``[prefix] ``."""
-    # The container mounts the weights root the stage checked.
+    """docker compose as this job's own project; output lines get ``[prefix] ``."""
     env = {
         **os.environ,
         "LABRAG_COMMIT": tag,

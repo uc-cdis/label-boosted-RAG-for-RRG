@@ -2,24 +2,14 @@
 
   docker compose -f eval/compose.yaml run --rm cxr-report-metric <gt.csv> <pred.csv> <out.csv>
 
-(the image's entry point; the paths are inside the container, so mount their directory).
+Inputs: CSVs (study_id as integers, report), the same ids in both. out.csv per study:
+bleu_score, bertscore, semb_score, radgraph_combined, RadCliQ-v0, RadCliQ-v1;
+<out>.json: timing. Upstream runs CheXbert and RadGraph via os.system without checking
+them, so their old outputs are deleted first and every study must come back with every
+score.
 
-The CSVs have upstream's columns, study_id (integers: upstream casts them with int())
-and report, one row per study, the same ids in both. Upstream writes its intermediate
-files next to the inputs and into its working directory; out.csv gets one row per study
-with bleu_score, bertscore, semb_score, radgraph_combined, RadCliQ-v0 and RadCliQ-v1, and
-<out>.json the timing.
-
-Upstream runs CheXbert and RadGraph as subprocesses (os.system) and doesn't check that
-they succeeded, so stale outputs of an earlier call could be read silently: they are
-deleted first, and every study must come back with every score.
-
-Threads: torch (here and in upstream's subprocesses) follows OMP_NUM_THREADS, which must
-be set (unset, torch uses every core of the host). Set it below the CPUs the job has: torch 1.6 parallelizes even tiny ops, so one preempted
-thread stalls each op (measured 2026-11-13: 32 threads on 32 pinned CPUs of a loaded
-host ran RadGraph ~7x slower than 16).
-
-Python 3.7 (the official image). CPU only (see the Dockerfile).
+OMP_NUM_THREADS must be set, below the job's CPUs: torch 1.6 parallelizes even tiny ops,
+so a preempted thread stalls each one (threads == CPUs ran RadGraph ~7x slower).
 """
 
 import json

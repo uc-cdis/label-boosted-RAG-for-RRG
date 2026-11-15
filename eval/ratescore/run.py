@@ -2,23 +2,13 @@
 
   docker compose -f eval/compose.yaml run --rm ratescore <gt.csv> <pred.csv> <out.csv>
 
-(the image's entry point; the paths are inside the container, so mount their directory).
+Inputs: CSVs (study_id as integers, report), the same ids in both. out.csv: study_id,
+ratescore; <out>.json: timing.
 
-Same inputs as the cxr-report-metric service: CSVs with columns study_id (integers) and
-report, one row per study, the same ids in both. out.csv gets study_id and ratescore,
-<out>.json the timing.
-
-Called as ReXrank calls it (rajpurkarlab/ReXrank-metric, scripts/run_ratescore.py):
-RaTEScore() with its defaults (the "long" affinity matrix, GPU) on the reports as
-strings, predictions first. Two changes, both through the constructor's own arguments,
-so upstream's code is unpatched: the two Hub models its defaults name are loaded from
-their local copies under /models (mounted read-only; jobs run with no network), and
-batch_size is 64, not 1 (it batches only the NER forward passes). Batch 64 gave the same
-scores as batch 1, bit for bit, on the pilot (600/600 studies on an H200, 2026-11-14),
-in ~10 s instead of 27.5 s per 200 studies.
-
-GPU required (use_gpu=True, ReXrank's setting): the stage passes the job's one GPU.
-OMP_NUM_THREADS must be set (unset, torch would use every core of the host).
+Called as ReXrank does (RaTEScore() defaults: "long" affinity matrix, GPU; predictions
+first), with two constructor arguments, so upstream is unpatched: model paths under
+/models, and batch_size 64 instead of 1 (only the NER passes; identical scores, ~3x
+faster). OMP_NUM_THREADS must be set.
 """
 
 import json

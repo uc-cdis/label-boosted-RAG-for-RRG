@@ -1,14 +1,9 @@
-"""Serving a generator with `vllm serve` in Docker, for the length of one job.
+"""`vllm serve` in Docker for the length of one job.
 
-``vllm_server`` starts the pinned image (configs/containers.yaml) on the job's GPUs
-(CUDA_VISIBLE_DEVICES, which Slurm sets to host GPU indices), waits until it answers,
-and always stops it on exit, including when the job is cancelled. The container:
-- sees only the job's GPUs, tensor-parallel across all of them;
-- runs as the job's user (so its cache files are ours), with HOME on a node-local
-  cache dir (vLLM's torch.compile and Triton caches survive between jobs);
-- mounts the weights read-only and never downloads (HF_HUB_OFFLINE), with usage stats
-  off;
-- uses the host network on a free localhost port; its log is streamed into the job log.
+``vllm_server`` runs the pinned image (configs/containers.yaml) on the job's GPUs
+(CUDA_VISIBLE_DEVICES), tensor-parallel across them, as the job's user with HOME on a
+node-local cache dir (compile caches survive jobs), weights read-only, offline, on a
+free localhost port, its log streamed into the job log. Always stopped on exit.
 """
 
 import contextlib

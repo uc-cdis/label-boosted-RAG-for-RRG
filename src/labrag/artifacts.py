@@ -67,11 +67,8 @@ def read_manifest(artifact_dir: Path) -> dict | None:
 
 
 def artifact_record(artifact_dir: Path) -> dict:
-    """Provenance record of an input artifact, after checking its files' sha256.
-
-    Downstream stages call this on every artifact they read, so a missing, partial or
-    modified input stops the job before anything is built from it.
-    """
+    """Provenance record of an input artifact, after checking its files' sha256 and
+    that it isn't stale. Stages call this on every artifact they read."""
     manifest = read_manifest(artifact_dir)
     if manifest is None:
         raise SystemExit(f"MISSING: {artifact_dir} has no {MANIFEST}; build it first")
@@ -92,17 +89,9 @@ def artifact_record(artifact_dir: Path) -> dict:
 
 
 def stale_inputs(manifest: dict) -> list[str]:
-    """What no longer holds of an artifact's recorded inputs (empty if all still hold).
-
-    - each upstream artifact must still have the outputs (sha256) it had when this one
-      was built. Content, not runs: an upstream rebuilt to the same bytes changes
-      nothing;
-    - each model's files must still be pinned to the same sha256 in configs/weights.yaml.
-
-    Reads only the upstream manifests and the config (no hashing; artifact_record checks
-    an artifact's files when a stage reads it). Source files, splits, images and code
-    commits are not checked here.
-    """
+    """Why an artifact's recorded inputs no longer hold (empty: they all do): an
+    upstream artifact's outputs (sha256) changed, or a model's files are no longer
+    pinned in configs/weights.yaml. Reads manifests and config only, no hashing."""
     from labrag import weights  # imported here: weights imports this module
 
     pins = None
@@ -128,11 +117,8 @@ def stale_inputs(manifest: dict) -> list[str]:
 
 
 def _input_records(inputs):
-    """The (kind, record) of every upstream artifact and model in a manifest's inputs.
-
-    kind "artifact": an artifact_record (path, commit, outputs); kind "weights": a
-    weights.resolve record (repo, dir, files). Other records are skipped.
-    """
+    """(kind, record) of every upstream artifact ("artifact") and model ("weights")
+    in a manifest's inputs."""
     if isinstance(inputs, dict):
         if "path" in inputs and "outputs" in inputs:
             yield "artifact", inputs
@@ -147,12 +133,8 @@ def _input_records(inputs):
 
 
 def stale_tree(root: Path | None = None) -> tuple[int, dict[Path, list[str]]]:
-    """Every artifact under ``root`` (default: the shared root) that is stale.
-
-    Stale: its own inputs changed (stale_inputs), or an upstream artifact is stale,
-    through the whole chain. Reads every manifest once. Returns (artifacts seen,
-    {stale artifact dir: reasons}).
-    """
+    """(artifacts seen, {stale dir: reasons}) under ``root``: stale by its own inputs
+    or through any upstream artifact."""
     manifests = {}
     for dirpath, dirnames, filenames in os.walk(root or paths.SHARED_ROOT):
         # hidden: publish's .incoming-/.old- dirs; an artifact holds no artifacts
@@ -192,13 +174,8 @@ def now() -> str:
 def is_built(
     relpath: str, config: dict, overwrite: bool = False, shared_root: Path | None = None
 ) -> bool:
-    """True if the artifact exists with this config (publish would skip it).
-
-    Raises SystemExit where publish would refuse: a different config, or inputs that
-    changed since it was built (stale_inputs), without ``overwrite``; or a directory
-    without a manifest. Lets a stage skip expensive setup
-    (e.g. starting a model server) when everything it would build already exists.
-    """
+    """True if publish would skip the artifact; SystemExit where it would refuse.
+    Lets a stage skip setup (e.g. a model server) when everything is built."""
     final = (shared_root or paths.SHARED_ROOT) / relpath
     config = _normalize(config)
     existing = read_manifest(final)
@@ -235,11 +212,9 @@ def publish(
 ) -> Path:
     """Build the artifact at <shared_root>/<relpath>, unless an identical one exists.
 
-    ``build(out_dir)`` writes the output files into a local staging directory and may
-    return extra manifest fields (e.g. counts). ``inputs`` maps names to provenance
-    records (file_record, weights.resolve, ...). Returns the artifact directory.
-    ``started`` (from ``now()``): when the work began, for stages that compute before
-    publishing (a model run shared by several artifacts); default: when build starts.
+    ``build(out_dir)`` writes the outputs into a local staging dir and may return extra
+    manifest fields. ``inputs``: name -> provenance record. ``started`` (``now()``):
+    when the work began, if before build. Returns the artifact directory.
     """
     final = (shared_root or paths.SHARED_ROOT) / relpath
     config = _normalize(config)
@@ -272,8 +247,7 @@ def publish(
         tag = uuid.uuid4().hex[:8]
         incoming = final.parent / f".{final.name}.incoming-{tag}"
         shutil.copytree(stage, incoming)
-        # The staging dir is created 0700 and copytree copies that mode; give the
-        # artifact dir the normal mode for a new directory under the current umask.
+        # mkdtemp's 0700 survives copytree; use the umask's default instead.
         umask = os.umask(0)
         os.umask(umask)
         os.chmod(incoming, 0o777 & ~umask)

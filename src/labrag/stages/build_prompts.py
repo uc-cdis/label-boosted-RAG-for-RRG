@@ -1,25 +1,14 @@
 """Stage ``build-prompts``: one chat prompt per target study, for one condition.
 
-Writes ``prompts/<experiment>/<dataset>/<section>/<condition>/<prompt>/prompts.jsonl.gz``,
-one JSON record per target study:
-- ``study_id``, ``set`` (the target's role, e.g. pilot or prompt_tuning);
-- ``messages``: the chat messages (a single user message; generate adds any
-  model-specific system prompt);
-- ``retrieved``: the corpus study_ids in the prompt, best first, with their
-  ``retrieved_similarity`` (image cosine) and, for label ranking, ``retrieved_jaccard``;
-- ``labels``: the target's positive labels in the prompt (null without labels);
-- ``reference``: the target's reference section text (whitespace-trimmed only).
+Writes ``prompts/<experiment>/<dataset>/<section>/<condition>/<prompt>/``
+``prompts.jsonl.gz``: study_id, set, messages (one user message), retrieved (corpus ids,
+best first, with image similarity and, for label ranking, Jaccard), labels (null
+without), reference (trimmed only).
 
-Conditions (docs/revision-plan.md §3), so far:
-- ``retrieval-only``: the K corpus studies most similar by image; no labels.
-- ``labrag.<labeler>``: corpus ranked by Jaccard overlap of positive labels, then by
-  image similarity; the labels in the prompt. The target's labels are the classifier's
-  predictions (``classifiers/<dataset>/<encoder>.lr/<section>/<labeler>/``); corpus
-  studies carry their reference labels, binarized with the same uncertain policy
-  (``<labeler>`` ends in ``.u0`` for U-Zeros).
-
-Corpus and targets come from the experiment's roles (the adapter's
-``classifier_roles``). Retrieval never returns a study of the target's patient.
+Conditions: ``retrieval-only`` (top K by image similarity) and ``labrag.<labeler>``
+(Jaccard on positive labels, ties by image similarity; the target's predicted labels in
+the prompt; corpus studies carry reference labels, binarized like the classifier).
+Retrieval never returns a study of the target's patient.
 """
 
 import gzip

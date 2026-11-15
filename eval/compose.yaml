@@ -1,27 +1,18 @@
-# The evaluation metrics, one service per official upstream, each in its own image with
-# that upstream's own pins (docs/revision-plan.md §7). Paths are relative to this file.
+# The evaluation metrics: one service per official upstream, in its own image with that
+# upstream's pins (docs/revision-plan.md §7). The evaluate stage builds and runs them:
 #
 #   docker compose -f eval/compose.yaml build [service]
 #   docker compose -f eval/compose.yaml run --rm -v <dir>:<dir> --user <uid>:<gid> \
 #     -e OMP_NUM_THREADS=<n> <service> <args...>
 #
-# Images are tagged with the repo commit they were built from (LABRAG_COMMIT, set by the
-# evaluate stage; "dev" by hand), so jobs at different commits on one node never run each
-# other's image. The stage builds before it runs; BuildKit's layer cache makes that
-# near-instant when nothing changed. vLLM generation is not here (src/labrag/serving.py).
-#
-# Every service: no outside network (all model files come from /models, the host weights
-# root, read-only) and no GPU unless it says so. The served GREEN judge and its client
-# talk over an internal network (no outside access), the only network here.
-#
-# The stage runs each job as its own compose project (-p labrag-eval-<job id>), so jobs
-# sharing a node never share a container or network, and takes it down at the end.
+# Images are tagged with the commit (LABRAG_COMMIT; "dev" by hand); each job is its own
+# compose project. No service has outside network: model files come from /models (the
+# host weights root, read-only); only the GREEN judge and its client share a network.
 
 name: labrag-eval
 
 x-models: &models
-  # long syntax: a node without the weights root fails here, instead of Docker creating
-  # an empty directory in its place
+  # long syntax: a missing weights root fails instead of becoming an empty dir
   - type: bind
     source: ${LABRAG_MODELS_ROOT:-/opt/gpudata/models}
     target: /models
@@ -48,13 +39,11 @@ services:
         upstream: ../external/CXR-Report-Metric
     environment:
       - OMP_NUM_THREADS  # required by run.py
-      # Jobs run as their own uid, which has no home in the image (HOME=/): give
-      # matplotlib its config dir and fontconfig its cache somewhere writable.
+      # the job's uid has no home in the image (HOME=/)
       - MPLCONFIGDIR=/tmp/matplotlib
       - XDG_CACHE_HOME=/tmp/.cache
 
-  # RaTEScore. One GPU: the job's, from Slurm's CUDA_VISIBLE_DEVICES (a host index; by
-  # hand, set it yourself). It is not passed into the container, which sees that GPU as 0.
+  # RaTEScore, on the job's GPU (CUDA_VISIBLE_DEVICES, a host index).
   ratescore:
     <<: *offline
     image: labrag/ratescore:${LABRAG_COMMIT:-dev}
@@ -67,13 +56,12 @@ services:
         device_ids: ["${CUDA_VISIBLE_DEVICES:-unset}"]
     environment:
       - OMP_NUM_THREADS  # required by run.py
-      # no home for the job's uid in the image (HOME=/), and no network
+      # no home for the job's uid (HOME=/), no network
       - HF_HOME=/tmp/huggingface
       - HF_HUB_OFFLINE=1
       - XDG_CACHE_HOME=/tmp/.cache
 
-  # GREEN with upstream's own judge path: HF generate of its 7B judge, in this
-  # container, on one GPU (as ratescore).
+  # GREEN with upstream's judge path (HF generate), on the job's GPU: the reference.
   green-native:
     <<: *offline
     image: labrag/green:${LABRAG_COMMIT:-dev}
@@ -86,20 +74,15 @@ services:
         device_ids: ["${CUDA_VISIBLE_DEVICES:-unset}"]
     environment:
       - OMP_NUM_THREADS  # required by run.py
-      # no home for the job's uid in the image (HOME=/), and no network; HF_HOME also
-      # receives the judge's tokenizer code (trust_remote_code)
+      # no home for the job's uid (HOME=/), no network; HF_HOME also gets the judge's
+      # tokenizer code (trust_remote_code)
       - HF_HOME=/tmp/huggingface
       - HF_HUB_OFFLINE=1
       - MPLCONFIGDIR=/tmp/matplotlib
       - XDG_CACHE_HOME=/tmp/.cache
 
-  # GREEN with its judge served by vLLM (green-vllm): the same image as green-native
-  # (built by that service), no GPU. Everything but the forward passes runs here, with
-  # upstream's code (eval/green/run.py): prompts, tokenizer, the requests, decoding,
-  # parsing.
-  # `run` starts green-vllm first and waits until it answers. The evaluate stage starts
-  # it itself (`up --wait`) before the other GPU metrics, so the judge sizes its KV
-  # cache (vLLM's default 92% of the GPU) on an empty GPU; RaTEScore fits in the rest.
+  # GREEN with its judge served by green-vllm: green-native's image, no GPU; everything
+  # but the forward passes, with upstream's code (eval/green/run.py).
   green-client:
     image: labrag/green:${LABRAG_COMMIT:-dev}
     pull_policy: never
@@ -116,28 +99,14 @@ services:
       - XDG_CACHE_HOME=/tmp/.cache
       - GREEN_JUDGE_URL=http://green-vllm:8000
 
-  # GREEN's judge served by vLLM, on the job's one GPU. Its own pin, independent of the
-  # generators' (configs/containers.yaml): the latest stable release when pinned
-  # (v0.32.0, 2026-11-12; the multi-arch index digest; pre-pulled, jobs never pull).
-  # Arguments: --dtype float16 is upstream's torch_dtype (the checkpoint is bf16);
-  # --max-model-len is the max_length upstream generates to; --generation-config vllm
-  # ignores the checkpoint's generation_config.json, which samples (temperature 0.6,
-  # top_p 0.9) where upstream decodes greedily (the client sends temperature 0);
-  # --skip-tokenizer-init: requests and responses are token ids, so vLLM never loads the
-  # judge's custom tokenizer code (green-client tokenizes, in upstream's env);
-  # --disable-uvicorn-access-log: no log line per request (≈1.9M at full scale).
-  # Runs as an unprivileged uid with nothing writable from the host; its compile caches
-  # stay in the container (HOME), so each job compiles once at startup. USER: torch's
-  # compile cache asks getpass for a user name, and this uid has no passwd entry.
-  # VLLM_BATCH_INVARIANT=1: a study's judge output no longer depends on what it is
-  # batched with (pilot, 2026-11-14: 600/600 identical tokens at concurrency 1 vs 256,
-  # and with sets shuffled or mixed; off: 593/600 run to run). Costs ≈16% judge time.
-  # TORCHINDUCTOR_DETERMINISTIC=1: torch.compile never picks a reduction kernel's block
-  # size by on-device benchmark. Without it, each fresh compile (every job) chose
-  # R0_BLOCK 2048 or 4096 for one kernel by timing noise, so jobs landed on one of two
-  # outputs (591/600 identical judge texts between them). With it, 8 fresh compiles
-  # on 2 GPUs gave identical outputs, at the same speed.
-  # The environment is part of the scores' config, with image and command.
+  # GREEN's judge, on the job's GPU; its own vLLM pin (pre-pulled). Image, environment
+  # and command are part of the scores' config. Arguments match upstream's generate:
+  # fp16, max_length 2048, greedy (--generation-config vllm ignores the checkpoint's
+  # sampling defaults); token ids in and out, so vLLM never loads the judge's custom
+  # tokenizer. Compile caches stay in the container (each job compiles once); USER for
+  # getpass (the uid has no passwd entry). VLLM_BATCH_INVARIANT and
+  # TORCHINDUCTOR_DETERMINISTIC make outputs independent of batch and job
+  # (docs/revision-plan.md §7, GREEN).
   green-vllm:
     image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
     pull_policy: never

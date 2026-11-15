@@ -1,20 +1,12 @@
 #!/usr/bin/env bash
-# Remove labrag's Docker leftovers from one node. Docker is per node and the dev container
-# has none, so run it as a job, once per node (kg35-nvl02 included):
+# Remove labrag's Docker leftovers from one node, as a job per node:
 #
 #   slurm/submit.sh -w <node> --with-nvl02 --cpus-per-task=1 -- slurm/clean-docker.sh [--apply]
 #
-# Without --apply it only lists what it would remove. With --apply it removes:
-#   - containers and networks left by jobs that died without cleaning up: evaluate's
-#     compose projects (labrag-eval-<job>) and generation's vLLM servers
-#     (labrag-<job>-<port>, serving.py)
-#   - every labrag/* image (evaluate builds them; the next evaluate job rebuilds)
-#   - dangling images and all build cache not used by a running build. Both are
-#     node-wide, not only ours: Docker can't tell whose they are.
-# Pulled images (configs/containers.yaml, eval/compose.yaml's judge) are never touched.
-#
-# Refuses while another labrag job runs on the node: that job could be between building
-# its images and starting them, or be using the containers above.
+# Lists by default; --apply removes containers/networks of dead jobs (labrag-eval-<job>,
+# labrag-<job>-<port>), every labrag/* image, dangling images and unused build cache
+# (the last two node-wide: Docker can't tell whose). Pulled images are never touched.
+# Refuses while another labrag job runs on the node (it may be between build and run).
 set -euo pipefail
 
 apply=false

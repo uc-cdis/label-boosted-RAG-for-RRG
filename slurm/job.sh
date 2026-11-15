@@ -3,27 +3,17 @@
 #
 #   job.sh <commit-sha> <repo-url> <command> [args...]
 #
-# sbatch ships only this file to the node, so it brings its own code: on every node of the
-# job it makes sure ~/labrag-run/commits/<sha>/ holds a shallow clone of exactly that
-# commit with its uv env (.venv, from that commit's uv.lock), then runs <command> once,
-# from that directory, with the env on PATH. Nothing that exists is ever modified: a later
-# commit gets its own directory, so jobs at different commits on one node can't interfere.
+# On every node of the job, makes sure ~/labrag-run/commits/<sha>/ holds a shallow clone
+# of that commit with its uv env (never modified once built, so commits can't
+# interfere), then runs <command> there once. Without Slurm, the same steps run on the
+# local host.
 #
-#   ~/labrag-run/            (LABRAG_RUN_ROOT)
-#     commits/<sha>/         one complete, independent clone per commit, plus .venv/
-#     uv-cache/ python/ bin/ uv's package cache, Python builds and binary, kept on the
-#                            same filesystem as commits/ so venvs hard-link from the cache
-#     bin/hf, tools/         the Hugging Face CLI, for pre-pulling weights by hand
-#                            (envs/install-hf.sh; at the versions in the latest job's lock)
-#     logs/<job-id>.out      this job's log
-#     setup.lock             held while a commit dir is being built
+#   ~/labrag-run/ (LABRAG_RUN_ROOT): commits/<sha>/, uv-cache/ python/ bin/ (same
+#   filesystem, so venvs hard-link), bin/hf (for pre-pulling weights by hand),
+#   logs/<job-id>.out, setup.lock
 #
-# Without Slurm (SLURM_JOB_ID unset) it runs the same steps on the local host.
-#
-# Our Slurm doesn't confine jobs, so the job's CPU share is only what --cpus-per-task
-# says (without it Slurm counts 1 CPU while the job could use the whole node). Default:
-# 72, a GPU's even share of a node, which labrag evaluate's container layout is sized
-# for; a job's own --cpus-per-task overrides it.
+# Slurm doesn't confine jobs, so --cpus-per-task is the job's CPU share only by
+# agreement. Default 72: a GPU's even share of a node (labrag evaluate is sized for it).
 #SBATCH --output=/tmp/labrag-%j.out
 #SBATCH --cpus-per-task=72
 set -euo pipefail
@@ -37,12 +27,10 @@ shift 2
 
 root=${LABRAG_RUN_ROOT:-$HOME/labrag-run}
 mkdir -p "$root/logs"
-# Slurm's own log is node-local /tmp (the only dir sure to exist before this runs);
-# from here on everything also goes to the run root.
+# Slurm's log is node-local /tmp; from here on everything also goes to the run root.
 exec > >(tee -a "$root/logs/${SLURM_JOB_ID:-local-$$}.out") 2>&1
 
-# Build (once per node and commit) the commit dir and its env. Defined as a function so
-# srun can run it on every node of the job: the other nodes don't have this file.
+# A function so srun can run it on every node (the others don't have this file).
 setup_commit() {
   local sha=$1 url=$2 root=$3
   local dir=$root/commits/$sha
@@ -81,11 +69,8 @@ fi
 dir=$root/commits/$sha
 cd "$dir"
 export VIRTUAL_ENV=$dir/.venv PATH=$dir/.venv/bin:$PATH LABRAG_COMMIT=$sha
-# Our Slurm doesn't confine jobs with cgroups, so a process can use every core of the
-# node. OpenBLAS (numpy/scipy/sklearn) and OpenMP (torch) size their thread pools to the
-# whole machine by default, and joblib (sklearn n_jobs=-1) its worker count; cap all three
-# at the job's --cpus-per-task (default 72, above). These are per pool: joblib workers
-# inherit the BLAS cap, so any n_jobs > 1 call must also pass
+# Cap BLAS/OpenMP thread pools and joblib workers at --cpus-per-task (they default to
+# the whole node). Per pool: an n_jobs > 1 call must also pass
 # joblib.parallel_config(backend="loky", inner_max_num_threads=1).
 if [[ -n ${SLURM_JOB_ID:-} ]]; then
   ncpu=$SLURM_CPUS_PER_TASK

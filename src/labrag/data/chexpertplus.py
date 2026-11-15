@@ -1,9 +1,5 @@
-"""CheXpert Plus adapter.
-
-Reads only the author release file ``chexpertplus/df_chexpert_plus_240401.csv``
-(one row per image, with the report already split into sections and the official
-``train``/``valid`` split), and the released PNGs under ``chexpertplus/PNG/``.
-"""
+"""CheXpert Plus adapter: the author release CSV (one row per image, sections and the
+official split) and the released PNGs."""
 
 from pathlib import Path
 
@@ -13,26 +9,17 @@ import pandas as pd
 SOURCE_CSV = "chexpertplus/df_chexpert_plus_240401.csv"
 IMAGE_ROOT = "chexpertplus"  # image_path is relative to this
 
-# Corrupt in the release; renamed to .BAK locally so we don't open it. It is
-# the only image of its study (which has no Findings), so that study drops out.
+# Corrupt (renamed .BAK locally); its study's only image, so the study drops out.
 CORRUPT_IMAGES = frozenset({"PNG/train/patient32368/study1/view1_frontal.png"})
 
-# Preference rank of a study's image (lower first; ties broken by image_path), and so
-# of its canonical report text. ``view`` is ap_pa on frontals and "Lateral" otherwise.
-# ap_pa is undocumented in the release (probably the DICOM ViewPosition tag, where LL/RL
-# mean left/right lateral) and unreliable. Its 17 LL/RL images are all labelled Frontal;
-# viewed by hand (2026-11-11): 13 are a mix of frontals and lateral decubitus,
-# 2 are laterals (patient09010/study1/view2, patient28939/study1/view3) and 2 are near-blank
-# images (patient25114/study3/view1, patient25979/study8/view1). Mostly frontal, so
-# LL/RL rank as "other frontal", after PA/AP and before laterals. Every LL/RL study also
-# has a PA or AP image, so this tier never decides a study here. Mislabelled and blank
-# images are left as noise; only undecodable files are excluded (CORRUPT_IMAGES).
+# Preference rank of a study's image (ties by image_path), which also picks its report
+# text. ``view`` is ap_pa on frontals, else "Lateral". ap_pa is undocumented; its 17
+# LL/RL images are labelled Frontal and mostly are (by eye), so they rank as "other
+# frontal". Every LL/RL study also has PA or AP, so the tier never decides here.
 VIEW_RANK = {"PA": 0, "AP": 1, "LL": 2, "RL": 2, "Lateral": 3}
 
-# Non-blank section values that are section-parser debris, not report text (compared
-# after stripping whitespace, case-insensitive). On 2026-11-09 these were the only
-# such values in section_findings: "/" (1,145 studies), "AND"/"and" (229), "." (13),
-# "," (1), ";" (1). Checked for Findings only.
+# Section-parser debris, not report text (stripped, case-insensitive; the only such
+# values in section_findings, 2026-11-09).
 JUNK_SECTION_VALUES = frozenset({",", ".", "/", ";", "and"})
 
 N_PILOT = 200
@@ -95,15 +82,9 @@ def load_studies(cxr_root: Path) -> pd.DataFrame:
 
 
 def canonical_studies(images: pd.DataFrame) -> pd.DataFrame:
-    """One row per study: its preferred image and that image's report text.
-
-    Images of one study can carry slightly different anonymized report text
-    (Stanford-AIMI/chexpert-plus#13). The study keeps the row of its preferred image:
-    lowest VIEW_RANK, then by image_path. Corrupt images are skipped. Sections
-    without report text (blank or parser debris, see has_text) become NaN; kept text
-    is whitespace-stripped.
-    Columns: subject_id, study_id, split, view, image_path, findings, impression.
-    """
+    """One row per study: its preferred image (VIEW_RANK, then path) and that image's
+    report text, since a study's images can carry different anonymized text
+    (Stanford-AIMI/chexpert-plus#13). Text is stripped; no text (has_text) is NaN."""
     images = images[~images.image_path.isin(CORRUPT_IMAGES)]
     rank = images.view.map(VIEW_RANK)
     order = np.lexsort((images.image_path.to_numpy(), rank.to_numpy()))
@@ -141,14 +122,9 @@ def draw_pilot_split(images: pd.DataFrame, seed: int = PILOT_SEED) -> pd.DataFra
 def draw_classifier_val_split(
     images: pd.DataFrame, pilot: pd.DataFrame, seed: int = CLASSIFIER_VAL_SEED
 ) -> pd.DataFrame:
-    """Draw the patients whose studies set the CheXpert Plus classifier thresholds.
-
-    The official valid split has only 61 studies with Findings (one positive or none
-    for some labels), too few to set per-label thresholds, so validation is carved out
-    of official train instead. Eligible: official-train patients not in the pilot split.
-    The draw is per patient and ignores report sections, so the same patients are the
-    validation set for every section's classifiers. Returns column subject_id, sorted.
-    """
+    """The classifier-threshold patients: a fraction of non-pilot official-train
+    patients (official valid has only 61 Findings studies). Per patient, so the same for
+    every section. Returns column subject_id, sorted."""
     train = images.loc[images.split == "train", "subject_id"]
     eligible = np.array(sorted(set(train) - set(pilot.subject_id)))
     n = round(CLASSIFIER_VAL_FRACTION * len(eligible))
@@ -157,12 +133,8 @@ def draw_classifier_val_split(
 
 
 def classifier_roles(studies: pd.DataFrame, splits_dir: Path) -> pd.Series:
-    """Role of each study for the classifiers, aligned with ``studies``.
-
-    ``train`` (fit), ``val`` (thresholds), ``pilot`` / ``prompt_tuning`` (the pilot
-    split, never trained on) and ``official_valid`` (the 200-study official valid
-    split, a small extra check only).
-    """
+    """Each study's role: train, val (thresholds), pilot / prompt_tuning (never trained
+    on), official_valid (extra check only)."""
     pilot = pd.read_csv(splits_dir / PILOT_SPLIT_FILE)
     val = pd.read_csv(splits_dir / CLASSIFIER_VAL_SPLIT_FILE)
     pilot_set = studies.subject_id.map(pilot.set_index("subject_id").set)

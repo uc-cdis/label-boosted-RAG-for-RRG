@@ -57,7 +57,8 @@ Each root is set by an environment variable (`src/labrag/paths.py`):
 - `LABRAG_MODELS_ROOT` (default `/opt/gpudata/models`): model weights, pre-pulled on
   every node and checked against `configs/weights.yaml`.
 - `LABRAG_SHARED_ROOT` (default `/opt/gpu_working/steven/labrag-shared`): shared storage
-  for every artifact. Jobs build on local disk and publish here once.
+  for every artifact. Jobs build on local disk and publish here once; each job's log
+  is copied to `logs/<job-id>.out` when it ends.
 - `LABRAG_RUN_ROOT` (default `~/labrag-run`): node-local commit checkouts, caches and
   job logs.
 

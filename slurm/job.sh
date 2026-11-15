@@ -11,6 +11,7 @@
 #   ~/labrag-run/ (LABRAG_RUN_ROOT): commits/<sha>/, uv-cache/ python/ bin/ (same
 #   filesystem, so venvs hard-link), bin/hf (for pre-pulling weights by hand),
 #   logs/<job-id>.out, setup.lock
+#   LABRAG_SHARED_ROOT/logs/<job-id>.out: the log, copied once when the job ends
 #
 # Slurm doesn't confine jobs, so --cpus-per-task is the job's CPU share only by
 # agreement. Default 72: a GPU's even share of a node (labrag evaluate is sized for it).
@@ -26,9 +27,30 @@ shift 2
 [[ $sha =~ ^[0-9a-f]{40}$ ]] || { echo "not a full commit sha: $sha" >&2; exit 1; }
 
 root=${LABRAG_RUN_ROOT:-$HOME/labrag-run}
+log=$root/logs/${SLURM_JOB_ID:-local-$$}.out
 mkdir -p "$root/logs"
 # Slurm's log is node-local /tmp; from here on everything also goes to the run root.
-exec > >(tee -a "$root/logs/${SLURM_JOB_ID:-local-$$}.out") 2>&1
+exec 3>&1 4>&2
+exec > >(tee -a "$log") 2>&1
+tee_pid=$!
+
+# Copy the finished log to shared storage, once per job (node-local logs vanish with
+# their node's run root). Atomic rename, so a partial copy is never visible.
+publish_log() {
+  local rc=$?
+  exec 1>&3 2>&4 # back to Slurm's log; tee sees EOF and drains
+  wait "$tee_pid" || true
+  if [[ -n ${SLURM_JOB_ID:-} ]]; then
+    local dest=${LABRAG_SHARED_ROOT:-/opt/gpu_working/steven/labrag-shared}/logs
+    mkdir -p "$dest" && cp "$log" "$dest/.$SLURM_JOB_ID.out.tmp" &&
+      mv "$dest/.$SLURM_JOB_ID.out.tmp" "$dest/$SLURM_JOB_ID.out" ||
+      echo "could not copy $log to $dest" >&2
+  fi
+  exit "$rc"
+}
+trap publish_log EXIT
+# scancel and time limits send SIGTERM; without a trap bash would exit without EXIT's.
+trap 'exit 143' TERM
 
 # A function so srun can run it on every node (the others don't have this file).
 setup_commit() {

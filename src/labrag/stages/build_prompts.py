@@ -54,7 +54,7 @@ def run(
     section: str,
     condition: str,
     prompt: str | None = None,
-    uncertain: str = "ones",
+    uncertain: str = "zeros",
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:

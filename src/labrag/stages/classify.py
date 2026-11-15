@@ -15,9 +15,9 @@ Rows are the studies that have reference labels for this section: classifiers ar
 within each section, never on another section's labels. Roles come from the adapter
 (``classifier_roles``): fit on ``train``, thresholds on ``val``; every other role is
 predicted only. Uncertain labels follow the CheXpert policies (Irvin et al. 2019):
-``ones`` (U-Ones, the preprint's default) maps positive or uncertain to 1; ``zeros``
-(U-Zeros) maps only positive to 1 and adds ``.u0`` to the labeler directory. Negative
-and not mentioned are always 0. No out-of-fold predictions yet (§2 "Leakage
+``zeros`` (U-Zeros, the default) maps only positive to 1 and adds ``.u0`` to the
+labeler directory; ``ones`` (U-Ones, the preprint's) maps positive or uncertain to 1.
+Negative and not mentioned are always 0. No out-of-fold predictions yet (§2 "Leakage
 controls"): nothing trains on these predictions so far.
 
 Pathologies win over No Finding (``consistent``): after thresholding, No Finding is
@@ -57,7 +57,7 @@ def run(
     encoder: str = "raddino",
     labeler: str = "chexbert14",
     classifier: str = "lr",
-    uncertain: str = "ones",
+    uncertain: str = "zeros",
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:

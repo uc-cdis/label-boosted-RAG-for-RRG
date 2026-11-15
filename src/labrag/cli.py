@@ -100,9 +100,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--classifier", default="lr", choices=classify.CLASSIFIERS)
     p.add_argument(
         "--uncertain",
-        default="ones",
+        default="zeros",
         choices=sorted(classify.POSITIVE),
-        help="uncertain labels count as 1 (ones, the preprint) or 0 (zeros)",
+        help="uncertain labels count as 0 (zeros, the default) or 1 (ones, the preprint)",
     )
     p.add_argument(
         "--overwrite", action="store_true", help="replace an existing artifact"
@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument(
         "--uncertain",
-        default="ones",
+        default="zeros",
         choices=sorted(classify.POSITIVE),
         help="labrag only: which classifier variant (as in classify)",
     )

@@ -27,6 +27,23 @@ CASES = [
         dict(dataset="chexpertplus", encoder="raddino", overwrite=True),
     ),
     (
+        embed,
+        "embed --dataset chexpertplus --feature tokens --section findings",
+        dict(dataset="chexpertplus", feature="tokens", section="findings"),
+    ),
+    (
+        classify,
+        "classify --dataset chexpertplus --section findings --classifier attn "
+        "--tokens nvfp4 --seed 2",
+        dict(
+            dataset="chexpertplus",
+            section="findings",
+            classifier="attn",
+            tokens="nvfp4",
+            seed=2,
+        ),
+    ),
+    (
         classify,
         "classify --dataset chexpertplus --section findings --uncertain ones "
         "--classifier lr --labeler chexbert14",

@@ -8,6 +8,7 @@ parser is built by its own ``add_<command>`` function, listed in COMMANDS.
 import argparse
 
 from labrag import artifacts, data, serving
+from labrag.classifiers import quant
 from labrag.data import DATASETS
 from labrag.stages import (
     build_prompts,
@@ -74,11 +75,21 @@ def add_labels(sub) -> None:
 
 
 def add_embed(sub) -> None:
-    stage(
+    p = stage(
         sub,
         embed,
         "--dataset",
         "--encoder",
+    )
+    p.add_argument(
+        "--feature",
+        choices=embed.FEATURES,
+        help="cls (default) or tokens: CLS + patch tokens, float16; needs --section",
+    )
+    p.add_argument(
+        "--section",
+        choices=labels.SECTIONS,
+        help="tokens only for the studies with this section's text",
     )
 
 
@@ -95,6 +106,16 @@ def add_classify(sub) -> None:
     p.add_argument(
         "--classifier",
         choices=classify.CLASSIFIERS,
+    )
+    p.add_argument(
+        "--tokens",
+        choices=quant.FORMATS,
+        help="attn: storage format the tokens are read in (default fp16)",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        help="attn: training seed (default 0)",
     )
 
 

@@ -57,3 +57,15 @@ def test_batching_and_order(model_and_processor):
     single = raddino.embed(paths_, model, processor, torch.device("cpu"), batch_size=1)
     np.testing.assert_allclose(batched, single, atol=1e-5)
     np.testing.assert_array_equal(batched[0], batched[2])
+
+
+@needs_weights_and_images
+def test_tokens_hold_the_cls_embedding(model_and_processor):
+    model, processor = model_and_processor
+    tokens = np.zeros((2, raddino.TOKENS, raddino.DIM), dtype=np.float16)
+    cpu = torch.device("cpu")
+    emb = raddino.embed([FRONTAL, LATERAL], model, processor, cpu, tokens=tokens)
+    plain = raddino.embed([FRONTAL, LATERAL], model, processor, cpu)
+    np.testing.assert_array_equal(emb, plain)  # tokens leave the CLS path unchanged
+    np.testing.assert_array_equal(tokens[:, 0], emb.astype(np.float16))
+    assert np.abs(tokens[:, 1:]).sum(axis=-1).min() > 0  # every patch written

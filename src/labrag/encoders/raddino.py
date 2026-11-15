@@ -23,6 +23,7 @@ from torch.utils.data import DataLoader, Dataset
 from labrag.encoders.images import load_8bit
 
 DIM = 768
+TOKENS = 1 + (518 // 14) ** 2  # CLS + the 37 x 37 patch grid
 # Batching changes nothing here (checked on CPU: batch 1 vs 8, and vs 32, identical).
 BATCH_SIZE = 32
 
@@ -60,8 +61,14 @@ def embed(
     batch_size: int = BATCH_SIZE,
     num_workers: int = 0,
     progress: bool = False,
+    tokens: np.ndarray | None = None,
 ) -> np.ndarray:
-    """CLS embedding of each image, float32, shape (len(paths), 768), in input order."""
+    """CLS embedding of each image, float32, shape (len(paths), 768), in input order.
+
+    If ``tokens`` is given (shape (len(paths), TOKENS, 768), e.g. a float16 memmap),
+    the full ``last_hidden_state`` (CLS + patches) is also written into it, cast to its
+    dtype; a non-finite value after the cast is an error.
+    """
     loader = DataLoader(
         _Images(paths, processor),
         batch_size=batch_size,
@@ -76,8 +83,13 @@ def embed(
     out = np.empty((len(paths), DIM), dtype=np.float32)
     start = 0
     for pixels in loader:
-        cls = model(pixel_values=pixels.to(device)).last_hidden_state[:, 0]
+        hidden = model(pixel_values=pixels.to(device)).last_hidden_state
+        cls = hidden[:, 0]
         out[start : start + len(cls)] = cls.float().cpu().numpy()
+        if tokens is not None:
+            batch = hidden.cpu().numpy().astype(tokens.dtype)
+            assert np.isfinite(batch).all(), "non-finite tokens"
+            tokens[start : start + len(cls)] = batch
         start += len(cls)
     assert start == len(paths)
     return out

@@ -31,7 +31,7 @@ and `labrag splits --dataset <name>` redraws a dataset's frozen split files.
 - `configs/`: models, sampling, prompt versions, container images (by digest) and
   model weights (by sha256)
 - `eval/`: one container per evaluation metric, each with its upstream's own pins
-  (`eval/compose.yaml`); `evaluate` builds and runs them
+  ([eval/README.md](eval/README.md)); `evaluate` builds and runs them
 - `external/`: upstream code as git submodules (MIT-LCP's `mimic-cxr` report section
   parser, `CheXbert`, and the metrics `CXR-Report-Metric`, `RaTEScore`, `GREEN`)
 - `uv.lock`, `.python-version`: the env, managed by [uv](https://docs.astral.sh/uv/).

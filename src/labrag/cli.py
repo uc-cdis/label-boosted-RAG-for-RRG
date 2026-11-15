@@ -6,7 +6,15 @@ from pathlib import Path
 
 from labrag import paths, serving
 from labrag.data import DATASETS, chexpertplus
-from labrag.stages import build_prompts, classify, embed, evaluate, generate, labels
+from labrag.stages import (
+    build_prompts,
+    classify,
+    compare,
+    embed,
+    evaluate,
+    generate,
+    labels,
+)
 
 PILOT_SPLIT_FILE = chexpertplus.PILOT_SPLIT_FILE
 
@@ -173,6 +181,33 @@ def main(argv: list[str] | None = None) -> None:
         help="instead: run the metric's upstream reproduction test (green, green-native)",
     )
     p.set_defaults(func=evaluate_command)
+
+    p = sub.add_parser(
+        "compare",
+        help="means and paired differences with bootstrap CIs (stage compare)",
+    )
+    p.add_argument(
+        "--generations",
+        required=True,
+        nargs="+",
+        help="two or more generations artifacts (the conditions), scored on the same "
+        "studies, relative to generations/",
+    )
+    p.add_argument(
+        "--out", required=True, help="output artifact, relative to comparisons/"
+    )
+    p.add_argument(
+        "--metric",
+        nargs="+",
+        choices=sorted(evaluate.METRICS),
+        help=f"metrics (default: the suite, {', '.join(evaluate.SUITE)})",
+    )
+    p.add_argument(
+        "--overwrite", action="store_true", help="replace an existing artifact"
+    )
+    p.set_defaults(
+        func=lambda a: compare.run(a.generations, a.out, a.metric, a.overwrite)
+    )
 
     args = ap.parse_args(argv)
     args.func(args)

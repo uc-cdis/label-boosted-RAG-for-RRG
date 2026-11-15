@@ -1,0 +1,89 @@
+"""Compare: paired bootstrap statistics on synthetic per-study scores."""
+
+import numpy as np
+import pytest
+
+from labrag.stages import compare
+
+
+def records(scores, study_ids=None, column="x"):
+    ids = study_ids or [f"patient{i}_study1" for i in range(len(scores))]
+    return [
+        {"study_id": s, "set": "pilot", column: v, "empty_report": False}
+        for s, v in zip(ids, scores)
+    ]
+
+
+def table(values, column="x", metric="m"):
+    rows = compare.compare(values, [column], metric)
+    return {(r["statistic"], r["kind"], r["a"], r["b"]): r for r in rows}
+
+
+def test_align_pairs_studies_by_id_not_order():
+    a = records([1.0, 2.0, 3.0])
+    b = list(reversed(records([10.0, 20.0, 30.0])))
+    values = compare.align({"a": a, "b": b}, ["x"])
+    assert values["a"][:, 0].tolist() == [1.0, 2.0, 3.0]
+    assert values["b"][:, 0].tolist() == [10.0, 20.0, 30.0]
+
+
+def test_align_refuses_different_studies():
+    a = records([1.0, 2.0])
+    b = records([1.0, 2.0], ["patient0_study1", "patient9_study1"])
+    with pytest.raises(SystemExit, match="different studies"):
+        compare.align({"a": a, "b": b}, ["x"])
+
+
+def test_align_refuses_missing_scores():
+    with pytest.raises(SystemExit, match="missing scores"):
+        compare.align({"a": records([1.0, float("nan")]), "b": records([1, 2])}, ["x"])
+
+
+def test_paired_difference_cancels_shared_noise():
+    # b = a + 0.1 exactly: study-level noise is shared, so every resample's
+    # difference is -0.1 although each condition's own interval is wide
+    x = np.random.default_rng(0).normal(size=(200, 1))
+    t = table({"a": x, "b": x + 0.1})
+    d = t[("x", "difference", "a", "b")]
+    assert d["estimate"] == pytest.approx(-0.1)
+    assert d["ci_low"] == pytest.approx(-0.1) and d["ci_high"] == pytest.approx(-0.1)
+    c = t[("x", "condition", "a", "")]
+    assert c["ci_high"] - c["ci_low"] > 0.2
+    assert c["ci_low"] < c["estimate"] < c["ci_high"]
+    assert c["n"] == 200
+
+
+def test_identical_conditions_give_zero_difference():
+    x = np.random.default_rng(1).uniform(size=(50, 1))
+    d = table({"a": x, "b": x.copy()})[("x", "difference", "a", "b")]
+    assert (d["estimate"], d["ci_low"], d["ci_high"]) == (0.0, 0.0, 0.0)
+
+
+def test_every_pair_in_the_given_order():
+    x = np.zeros((10, 1))
+    t = table({"a": x, "b": x + 1, "c": x + 3})
+    diffs = {(r[2], r[3]): t[r]["estimate"] for r in t if r[1] == "difference"}
+    assert diffs == {("a", "b"): -1.0, ("a", "c"): -3.0, ("b", "c"): -2.0}
+
+
+def test_derived_statistic_from_the_mean():
+    x = np.full((20, 1), 4.0)
+    t = table({"a": x, "b": x / 2}, column="RadCliQ-v1")
+    assert t[("1/RadCliQ-v1", "condition", "a", "")]["estimate"] == 0.25
+    assert t[("1/RadCliQ-v1", "difference", "a", "b")]["estimate"] == -0.25
+
+
+def test_deterministic():
+    x = np.random.default_rng(2).normal(size=(100, 2))
+    values = {"a": x, "b": x[::-1].copy()}
+    first = compare.compare(values, ["x", "y"], "m")
+    assert compare.compare(values, ["x", "y"], "m") == first
+
+
+def test_blocks_do_not_change_the_resamples(monkeypatch):
+    x = np.random.default_rng(3).normal(size=(30, 1))
+    values = {"a": x, "b": 2 * x}
+    whole = compare.resampled_means(values)
+    monkeypatch.setattr(compare, "BLOCK", 7)
+    blocked = compare.resampled_means(values)
+    assert all(np.array_equal(whole[g], blocked[g]) for g in values)

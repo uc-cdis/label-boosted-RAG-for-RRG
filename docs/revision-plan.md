@@ -90,7 +90,7 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
     - **Decision rule:** the pilot compares three settings on the CheXpert Plus pilot set: native thinking on, thinking off (direct answer), and our engineered CoT prompt. Each checkpoint uses its best setting in every D and E cell. The choice and the pilot numbers are reported.
     - **Note for E:** if MedGemma ends up with native thinking while Gemma 3 uses the CoT prompt, the difference in reasoning training counts as part of what "medical training" means for MedGemma. That's the same argument F uses for model generations.
     - **Implementation:** vLLM has no reasoning parser for this format, so split on `<unused95>` ourselves. The `<unused9x>` tokens must be kept when decoding.
-- **Statistics:** 1 seed. Paired bootstrap over studies, with 95% CIs on the difference between conditions.
+- **Statistics:** 1 seed. Paired bootstrap over studies, with 95% CIs on the difference between conditions (`labrag compare`: 10,000 resamples, percentile intervals, a fixed seed, no correction for multiple comparisons).
 - **Rule:** no claim varies two factors unless the full cross of those factors is run.
 
 ---
@@ -307,6 +307,7 @@ Settled:
   - `embed` → `classify` (including out-of-fold) → `build-prompts` (hashed JSONL)
   - `generate`: an async client against `vllm serve`, resumable and cached
   - `evaluate`: per-study scores, on content-only text (no section header), as ReXrank's Findings board. Each metric runs in its own container with its upstream's code. GREEN's judge is served by a pinned vLLM, while GREEN's own image does all the text work; upstream's HF generate is kept as the reference. One job (one GPU) runs the whole suite at once: GREEN and RaTEScore share the GPU, while CXR-Report-Metric scores fixed-size chunks in parallel CPU containers, so `--cpus-per-task` sets the balance.
+  - `compare`: each condition's mean and every pair's difference, with paired-bootstrap 95% CIs (§3, Statistics), from the conditions' scores artifacts. CPU only, about a second.
 - **Hard cap: never more than 8 GPUs in use at once** across all our jobs. Of the cluster's 16 H200s, at most 8 are ours at any time. Steven enforces it when scheduling; the runner doesn't.
 - **GPU wrapper (sbatch):**
   - tensor-parallel size taken from `CUDA_VISIBLE_DEVICES`

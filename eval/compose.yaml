@@ -130,9 +130,14 @@ services:
   # stay in the container (HOME), so each job compiles once at startup. USER: torch's
   # compile cache asks getpass for a user name, and this uid has no passwd entry.
   # VLLM_BATCH_INVARIANT=1: a study's judge output no longer depends on what it is
-  # batched with (pilot, 2026-11-14: 600/600 identical tokens run to run, concurrency 1
-  # vs 256, and shuffled or mixed sets; off: 593/600). Costs ≈16% judge time. Its
-  # environment is part of the scores' config, with image and command.
+  # batched with (pilot, 2026-11-14: 600/600 identical tokens at concurrency 1 vs 256,
+  # and with sets shuffled or mixed; off: 593/600 run to run). Costs ≈16% judge time.
+  # TORCHINDUCTOR_DETERMINISTIC=1: torch.compile never picks a reduction kernel's block
+  # size by on-device benchmark. Without it, each fresh compile (every job) chose
+  # R0_BLOCK 2048 or 4096 for one kernel by timing noise, so jobs landed on one of two
+  # outputs (591/600 identical judge texts between them; jobs 28835-28842). With it,
+  # 8 fresh compiles on 2 GPUs gave identical outputs, at the same speed (28844, 28845).
+  # The environment is part of the scores' config, with image and command.
   green-vllm:
     image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
     pull_policy: never
@@ -150,6 +155,7 @@ services:
       - VLLM_NO_USAGE_STATS=1
       - DO_NOT_TRACK=1
       - VLLM_BATCH_INVARIANT=1
+      - TORCHINDUCTOR_DETERMINISTIC=1
     command:
       - /models/StanfordAIMI/GREEN-RadLlama2-7b
       - --host=0.0.0.0

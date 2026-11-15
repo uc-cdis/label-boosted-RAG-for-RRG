@@ -35,8 +35,9 @@ metric publishes its artifacts when its own scores are in; a failed metric doesn
 stop the others (the job then fails at the end).
 
 ``green`` serves GREEN's judge with vLLM (compose service green-vllm, on the job's
-GPU; the client is service green-client), in vLLM's batch-invariant mode, so a study's
-score doesn't depend on what it is batched with; GREEN's image does all the text work
+GPU; the client is service green-client), in vLLM's batch-invariant mode and torch's
+deterministic compile, so a study's score depends neither on what it is batched with nor
+on the job (see eval/compose.yaml); GREEN's image does all the text work
 with upstream's code (see eval/green/run.py). One container run scores every set of the
 job, in one request queue; the job's compose project, server included, is taken down
 at the end. ``green-native``, the reference: the same scores by upstream's own HF
@@ -639,8 +640,8 @@ def read_scores(spec: dict, out_csv: Path, pairs: pd.DataFrame) -> list[dict]:
 
 def judge_definition(spec: dict) -> dict:
     """The judge service's image, environment and command (what determines its
-    outputs, e.g. VLLM_BATCH_INVARIANT), for the artifact config; the rest of
-    eval/compose.yaml is not part of it."""
+    outputs, e.g. VLLM_BATCH_INVARIANT and TORCHINDUCTOR_DETERMINISTIC), for the
+    artifact config; the rest of eval/compose.yaml is not part of it."""
     service = yaml.safe_load(COMPOSE_FILE.read_text())["services"][spec["judge"]]
     keys = ("image", "environment", "command")
     return {"service": spec["judge"], **{k: service[k] for k in keys}}

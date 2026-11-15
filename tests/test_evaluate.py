@@ -415,6 +415,7 @@ def test_judged_metric_records_the_judge_and_native_shares_its_image():
     assert "--generation-config=vllm" in judge["command"]
     assert "--skip-tokenizer-init" in judge["command"]
     assert "VLLM_BATCH_INVARIANT=1" in judge["environment"]
+    assert "TORCHINDUCTOR_DETERMINISTIC=1" in judge["environment"]
 
 
 def test_chunked_metric_config_records_its_container_layout(monkeypatch):

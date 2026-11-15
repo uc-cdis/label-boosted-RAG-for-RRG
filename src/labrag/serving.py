@@ -31,10 +31,9 @@ def load_config(kind: str) -> dict:
     return yaml.safe_load((paths.CONFIGS_DIR / f"{kind}.yaml").read_text())
 
 
-def image_record(name: str) -> dict:
-    """The pinned image, after checking this node has it (jobs never pull)."""
-    entry = load_config("containers")[name]
-    ref = f"{entry['image']}@{entry['digest']}"
+def image_id(ref: str) -> str | None:
+    """The local image id of ``ref``, None if this node doesn't have it. Any other
+    docker failure (e.g. no access to the daemon socket) exits with docker's error."""
     if shutil.which("docker") is None:
         raise SystemExit(f"docker not found on {socket.gethostname()}")
     out = subprocess.run(
@@ -42,13 +41,28 @@ def image_record(name: str) -> dict:
         capture_output=True,
         text=True,
     )
-    if out.returncode != 0:
+    if out.returncode == 0:
+        return out.stdout.strip()
+    # Only this error means a missing image; others aren't fixed by pulling.
+    if "No such image" in out.stderr:
+        return None
+    raise SystemExit(
+        f"docker image inspect {ref} failed on {socket.gethostname()}:\n"
+        f"{out.stderr.strip()}"
+    )
+
+
+def image_record(name: str) -> dict:
+    """The pinned image, after checking this node has it (jobs never pull)."""
+    entry = load_config("containers")[name]
+    ref = f"{entry['image']}@{entry['digest']}"
+    pulled = image_id(ref)
+    if pulled is None:
         raise SystemExit(
             f"container {name}: {ref} not on {socket.gethostname()}; pre-pull it with\n"
-            f"  docker pull {entry['image']}:{entry['tag']}@{entry['digest']}\n"
-            f"{out.stderr.strip()}"
+            f"  docker pull {entry['image']}:{entry['tag']}@{entry['digest']}"
         )
-    return {**entry, "ref": ref, "image_id": out.stdout.strip()}
+    return {**entry, "ref": ref, "image_id": pulled}
 
 
 def gpu_devices() -> list[str]:

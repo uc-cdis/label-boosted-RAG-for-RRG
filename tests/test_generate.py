@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import subprocess
 
 import httpx
 import pytest
@@ -118,3 +119,27 @@ python_gc_objects_collected_total{generation="0"} 9.0
         "vllm:generation_tokens_total": 5000.0,
         "vllm:prompt_tokens_total": 1500.0,
     }
+
+
+@pytest.mark.parametrize(
+    "returncode, stderr, expected",
+    [
+        (0, "", "sha256:abc"),
+        (1, "Error response from daemon: No such image: x@sha256:1", None),
+        (1, "permission denied while trying to connect to the docker API", SystemExit),
+    ],
+)
+def test_image_id_only_missing_image_is_none(monkeypatch, returncode, stderr, expected):
+    monkeypatch.setattr(serving.shutil, "which", lambda _: "/usr/bin/docker")
+    monkeypatch.setattr(
+        serving.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(
+            a, returncode, "sha256:abc\n", stderr
+        ),
+    )
+    if expected is SystemExit:
+        with pytest.raises(SystemExit, match="permission denied"):
+            serving.image_id("x@sha256:1")
+    else:
+        assert serving.image_id("x@sha256:1") == expected

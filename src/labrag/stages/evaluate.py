@@ -562,16 +562,6 @@ def compose_service(name: str) -> dict:
     return yaml.safe_load(COMPOSE_FILE.read_text())["services"][name]
 
 
-def image_id(ref: str) -> str | None:
-    """The local image id of ``ref`` (None if this node doesn't have it)."""
-    out = subprocess.run(
-        ["docker", "image", "inspect", "--format", "{{.Id}}", ref],
-        capture_output=True,
-        text=True,
-    )
-    return out.stdout.strip() if out.returncode == 0 else None
-
-
 def judge_definition(spec: dict) -> dict:
     """The judge's image, environment and command: what determines its outputs."""
     service = compose_service(spec["judge"])
@@ -582,7 +572,7 @@ def judge_definition(spec: dict) -> dict:
 def judge_image_record(spec: dict) -> dict:
     """The judge's pinned image, after checking this node has it (jobs never pull)."""
     ref = judge_definition(spec)["image"]
-    pulled = image_id(ref)
+    pulled = serving.image_id(ref)
     if pulled is None:
         raise SystemExit(
             f"judge image {ref} not on this node; pre-pull it with\n  docker pull {ref}"
@@ -625,7 +615,7 @@ def build_image(spec: dict) -> dict:
     service, _, name = image_build(spec)
     compose("build", service, tag=tag)
     ref = f"{name}:{tag}"
-    built = image_id(ref)
+    built = serving.image_id(ref)
     if built is None:
         raise SystemExit(f"{ref}: not found after the build")
     return {

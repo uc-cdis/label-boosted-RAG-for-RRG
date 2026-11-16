@@ -45,6 +45,11 @@ MAX_LENGTH = 2048  # GREEN.get_response: model.generate(..., max_length=2048)
 JUDGE_URL = os.environ.get("GREEN_JUDGE_URL")  # set by compose for green-client
 CONCURRENCY = 256  # requests in flight; vLLM batches them
 REQUEST_TIMEOUT_S = 3600
+# vLLM drops idle connections after 5 s (VLLM_HTTP_TIMEOUT_KEEP_ALIVE); the client lets
+# them go sooner, and retries a request whose reused connection was closed anyway
+# (safe: greedy and batch-invariant, so the retry gets the same output).
+KEEPALIVE_S = 2
+DISCONNECT_RETRIES = 3
 
 SIG_ERRORS = [  # GREEN's sub_categories, in its order -> our column names
     "green_sig_false_finding",
@@ -216,8 +221,24 @@ async def request_all(sets, eos):
     async with aiohttp.ClientSession(
         JUDGE_URL,
         timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_S),
-        connector=aiohttp.TCPConnector(limit=CONCURRENCY),
+        connector=aiohttp.TCPConnector(
+            limit=CONCURRENCY, keepalive_timeout=KEEPALIVE_S
+        ),
     ) as session:
+
+        async def post(body):
+            for attempt in range(DISCONNECT_RETRIES + 1):
+                try:
+                    async with session.post("/v1/completions", json=body) as r:
+                        if r.status != 200:
+                            raise RuntimeError(
+                                f"judge: HTTP {r.status}: {await r.text()}"
+                            )
+                        return (await r.json())["choices"][0]
+                except aiohttp.ServerDisconnectedError:
+                    if attempt == DISCONNECT_RETRIES:
+                        raise
+                    print("judge: server disconnected, retrying", file=sys.stderr)
 
         async def one(tokens, salt):
             body = {
@@ -229,10 +250,8 @@ async def request_all(sets, eos):
                 "return_token_ids": True,
                 "cache_salt": salt,
             }
-            async with gate, session.post("/v1/completions", json=body) as r:
-                if r.status != 200:
-                    raise RuntimeError(f"judge: HTTP {r.status}: {await r.text()}")
-                choice = (await r.json())["choices"][0]
+            async with gate:
+                choice = await post(body)
             if choice.get("prompt_token_ids") != tokens:
                 raise RuntimeError("judge: the server saw a different prompt")
             bar.update()

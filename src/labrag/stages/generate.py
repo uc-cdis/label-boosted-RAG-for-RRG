@@ -10,10 +10,17 @@ metrics at job end, shared by the job's artifacts.
 One server and one request queue serve every prompt artifact of the job, so a long
 thinking tail is paid once. Built artifacts are skipped (no server if all are). No
 resume: a failed job publishes nothing. Configs: models, sampling, containers, weights.
+
+Prompts with an image (a record's ``image``, relative to the CXR root) need a model
+entry with ``vision``. Generate prepares the image (8-bit as for the encoder, shorter
+side to the entry's ``short_edge``, none = native) and sends it inline as a PNG, so
+every model and dataset gets the same pixels whatever the model's own processor does.
 """
 
 import asyncio
+import base64
 import gzip
+import io
 import json
 import time
 from pathlib import Path
@@ -24,11 +31,18 @@ from tokenizers import Tokenizer
 from tqdm import tqdm
 
 from labrag import artifacts, paths, serving, weights
+from labrag.encoders.images import load_8bit, resize_short_edge
+from labrag.prompts import IMAGE_PART
 
 CONCURRENCY = 256  # requests in flight; vLLM batches them
 REQUEST_TIMEOUT_S = 3 * 3600
 # vLLM is served without authentication, but the OpenAI client requires some value.
 NO_AUTH = "none"
+IMAGE = {
+    "pixels": "min-max to 8-bit grayscale",
+    "resize": "shorter side to short_edge, bicubic, no crop; null = native",
+    "sent_as": "PNG data URL",
+}
 
 
 def run(
@@ -37,7 +51,9 @@ def run(
     model: str,
     sampling: str,
     overwrite: bool = False,
+    cxr_root: Path | None = None,
 ) -> list[Path]:
+    cxr_root = cxr_root or paths.CXR_ROOT
     model_cfg = serving.load_config("models")[model]
     sampling_cfg = serving.load_config("sampling")[sampling]
     container = serving.load_config("containers")[model_cfg["container"]]
@@ -53,6 +69,11 @@ def run(
             "container": {k: container[k] for k in ("image", "tag", "digest")},
             "sampling": {"name": sampling, **sampling_cfg},
         }
+        prompt_manifest = artifacts.read_manifest(paths.SHARED_ROOT / "prompts" / rel)
+        if prompt_manifest and "image" in prompt_manifest["config"]:
+            if "vision" not in model_cfg:
+                raise SystemExit(f"prompts/{rel} shows images; {model!r} has no vision")
+            config["image"] = {**IMAGE, "short_edge": model_cfg["vision"]["short_edge"]}
         out = f"generations/{rel}/{model}.{sampling}/{target_set}"
         if artifacts.is_built(out, config, overwrite):
             built.append(paths.SHARED_ROOT / out)
@@ -75,15 +96,31 @@ def run(
             raise SystemExit(f"{prompt_rel}: no targets in set {target_set!r}")
         loaded.append((out, config, record, rows))
 
+    everything = [row for _, _, _, rows in loaded for row in rows]
+    missing = [r["image"] for r in everything if "image" in r]
+    missing = [p for p in missing if not (cxr_root / p).is_file()]
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} images missing under {cxr_root}: {missing[:3]}"
+        )
+
     tokenizer = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
+    short_edge = model_cfg.get("vision", {}).get("short_edge")
     with serving.vllm_server(
         model, model_dir, image, model_cfg["serve_args"]
     ) as server:
         started = artifacts.now()
         t0 = time.monotonic()
-        everything = [row for _, _, _, rows in loaded for row in rows]
         results = asyncio.run(
-            _generate(server["base_url"], model, sampling_cfg, everything, tokenizer)
+            _generate(
+                server["base_url"],
+                model,
+                sampling_cfg,
+                everything,
+                tokenizer,
+                cxr_root,
+                short_edge,
+            )
         )
         seconds = time.monotonic() - t0
         metrics = serving.metrics_text(server["root_url"])  # job-level, for costs
@@ -96,6 +133,8 @@ def run(
             "weights": weights_record,
             "container": {k: image[k] for k in ("ref", "image_id")},
         }
+        if any("image" in r for r in rows):
+            inputs["images"] = {"root": str(cxr_root)}  # paths in the prompts
         extra = {
             "server": {
                 "vllm_version": server["version"],
@@ -133,8 +172,47 @@ def run(
     return built
 
 
+def image_url(path: Path, short_edge: int | None) -> str:
+    """The image as sent: 8-bit, resized (unless native), a PNG data URL."""
+    image = load_8bit(path)
+    if short_edge is not None:
+        image = resize_short_edge(image, short_edge)
+    buf = io.BytesIO()
+    image.save(buf, format="PNG", compress_level=1)  # lossless; level only sets speed
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def request_messages(
+    row: dict, cxr_root: Path, short_edge: int | None = None
+) -> list[dict]:
+    """The prompt's messages, with its image placeholder as the prepared image."""
+    if "image" not in row:
+        return row["messages"]
+    url = {"url": image_url(cxr_root / row["image"], short_edge)}
+    return [
+        (
+            {
+                **m,
+                "content": [
+                    {"type": "image_url", "image_url": url} if p == IMAGE_PART else p
+                    for p in m["content"]
+                ],
+            }
+            if isinstance(m["content"], list)
+            else m
+        )
+        for m in row["messages"]
+    ]
+
+
 async def _generate(
-    base_url: str, model: str, sampling: dict, rows: list[dict], tokenizer: Tokenizer
+    base_url: str,
+    model: str,
+    sampling: dict,
+    rows: list[dict],
+    tokenizer: Tokenizer,
+    cxr_root: Path = paths.CXR_ROOT,
+    short_edge: int | None = None,
 ) -> list[dict]:
     client = AsyncOpenAI(
         base_url=base_url,
@@ -156,10 +234,13 @@ async def _generate(
 
     async def one(row: dict) -> dict:
         async with gate:
+            messages = await asyncio.to_thread(
+                request_messages, row, cxr_root, short_edge
+            )
             sent = time.monotonic()
             resp = await client.chat.completions.create(
                 model=model,
-                messages=row["messages"],
+                messages=messages,
                 n=1,
                 seed=sampling["seed"],
                 extra_body=body,

@@ -62,3 +62,9 @@ def test_padchest_16bit_image_spans_8bit_range():
     out = np.asarray(images.load_8bit(path))
     assert out.dtype == np.uint8 and out.min() == 0 and out.max() == 255
     assert (out == 255).mean() < 0.1  # not clipped white
+
+
+def test_resize_short_edge_keeps_aspect():
+    out = images.resize_short_edge(Image.new("L", (2828, 2320)), 518)
+    assert out.size == (631, 518) and out.mode == "L"
+    assert images.resize_short_edge(Image.new("L", (300, 600)), 518).size == (518, 1036)

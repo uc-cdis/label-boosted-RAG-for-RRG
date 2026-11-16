@@ -4,6 +4,9 @@ Every image is min-max scaled to [0, 255] (RAD-DINO's training preprocessing). N
 PadChest(-GR) and ReXGradient PNGs are 16-bit, which the processors' RGB conversion
 clips to mostly white; CheXpert Plus and MIMIC are full-range 8-bit (a no-op). Unknown
 image modes are refused.
+
+``resize_short_edge`` is the resize of RAD-DINO's processor (shorter side to a size,
+bicubic) without its center crop.
 """
 
 from pathlib import Path
@@ -32,3 +35,10 @@ def min_max_8bit(pixels: np.ndarray) -> np.ndarray:
         return np.zeros(pixels.shape, dtype=np.uint8)
     scaled = (pixels.astype(np.float64) - lo) * (255.0 / (hi - lo))
     return np.rint(scaled).astype(np.uint8)
+
+
+def resize_short_edge(image: Image.Image, size: int) -> Image.Image:
+    """``image`` scaled so its shorter side is ``size`` (aspect kept), bicubic."""
+    w, h = image.size
+    scale = size / min(w, h)
+    return image.resize((round(w * scale), round(h * scale)), Image.Resampling.BICUBIC)

@@ -5,7 +5,8 @@
   "features": {
     "ghcr.io/devcontainers/features/node:2.1.2": {},
     "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
-    "ghcr.io/rocker-org/devcontainer-features/miniforge:2": {}
+    "ghcr.io/rocker-org/devcontainer-features/miniforge:2": {},
+    "ghcr.io/devcontainers-extra/features/tmux-apt-get:1": {}
   },
   "mounts": [
     "source=claude-code-config-${localEnv:USER}-${localWorkspaceFolderBasename},target=/home/vscode/.claude,type=volume",
@@ -20,6 +21,7 @@
     "source=/opt/gpudata/cxr,target=/opt/gpudata/cxr,type=bind,consistency=cached,readonly"
   ],
   "runArgs": ["--gpus", "all"],
+  "shutdownAction": "none",
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
     "CONDA_ENVS_PATH": "${localEnv:HOME}/miniforge3/envs",

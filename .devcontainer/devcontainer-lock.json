@@ -5,6 +5,11 @@
       "resolved": "ghcr.io/anthropics/devcontainer-features/claude-code@sha256:cfc2e7d3e9fd3b9b01f8d5cb158508a884c8c0ede2e23ed10f32dea5d4ffe69a",
       "integrity": "sha256:cfc2e7d3e9fd3b9b01f8d5cb158508a884c8c0ede2e23ed10f32dea5d4ffe69a"
     },
+    "ghcr.io/devcontainers-extra/features/tmux-apt-get:1": {
+      "version": "1.0.17",
+      "resolved": "ghcr.io/devcontainers-extra/features/tmux-apt-get@sha256:7d15e519840976e86642bba9180e11cba88dd07a00209c7f589d6112d9876c89",
+      "integrity": "sha256:7d15e519840976e86642bba9180e11cba88dd07a00209c7f589d6112d9876c89"
+    },
     "ghcr.io/devcontainers/features/node:2.1.2": {
       "version": "2.1.2",
       "resolved": "ghcr.io/devcontainers/features/node@sha256:20ac718cc67e7999a9d3fbb8387f1a3a5d53ecbd41fe7c075ebadb8e9b431b17",

@@ -117,3 +117,122 @@ noprior-nocopy-simple:
 
     Now generate the report for the current case using its label below.
     Label: {labels}
+
+# section-*: noprior-* plus one instruction naming the section generated ({section},
+# filled per target section). *-image add the frontal image ({image}, under "CURRENT
+# CASE:") and one line saying it is the current case. section-image (no-context) is the
+# image alone: no examples and no labels, so its instructions keep only what applies.
+
+section-naive:
+  example: "Example: {index}\n{report}"
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given context information.
+    The context information contains examples of reports written for similar cases.
+    Use the examples to generate a report for the current case.
+    Strictly follow the instructions below to generate the reports.
+
+    **Instructions**
+
+    1. The report must be based on the information in the context.
+    2. The report must mimic the style of the reports shown in the context.
+    3. Do not generate blank reports.
+    4. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
+    5. Write only the {section} section of the report, without its header.
+
+    CONTEXT:
+    {examples}
+
+    Now generate the report for the current case. Always generate reports based on the examples shown.
+
+section-simple:
+  example: "Example: {index}\nLabel: {labels}\n{report}"
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given context information.
+    The context information contains examples of reports written for similar cases and their associated labels.
+    Use the examples and their associated labels to generate a report for the current case based on the current label.
+    Strictly follow the instructions below to generate the reports.
+
+    **Instructions**
+
+    1. The report must be based on the information in the context and the current label.
+    2. The report must mimic the style of the reports shown in the context.
+    3. Do not generate blank reports.
+    4. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
+    5. Write only the {section} section of the report, without its header.
+
+    CONTEXT:
+    {examples}
+
+    Now generate the report for the current case using its label below. Always generate reports based on the examples shown.
+    Label: {labels}
+
+section-image:
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report for the chest X-ray of the current case, shown below.
+    Strictly follow the instructions below to generate the report.
+
+    **Instructions**
+
+    1. The report must be based on the image of the current case.
+    2. Do not generate blank reports.
+    3. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
+    4. Write only the {section} section of the report, without its header.
+
+    CURRENT CASE:
+    {image}
+
+    Now generate the report for the current case.
+
+section-naive-image:
+  example: "Example: {index}\n{report}"
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given context information and the chest X-ray of the current case.
+    The context information contains examples of reports written for similar cases.
+    Use the examples to generate a report for the current case.
+    Strictly follow the instructions below to generate the reports.
+
+    **Instructions**
+
+    1. The report must be based on the image of the current case and the information in the context.
+    2. The report must mimic the style of the reports shown in the context.
+    3. Do not generate blank reports.
+    4. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
+    5. Write only the {section} section of the report, without its header.
+
+    CONTEXT:
+    {examples}
+
+    CURRENT CASE:
+    {image}
+
+    Now generate the report for the current case. Always generate reports based on the examples shown.
+
+section-simple-image:
+  example: "Example: {index}\nLabel: {labels}\n{report}"
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given context information and the chest X-ray of the current case.
+    The context information contains examples of reports written for similar cases and their associated labels.
+    Use the examples and their associated labels to generate a report for the current case based on the current label.
+    Strictly follow the instructions below to generate the reports.
+
+    **Instructions**
+
+    1. The report must be based on the image of the current case, the information in the context and the current label.
+    2. The report must mimic the style of the reports shown in the context.
+    3. Do not generate blank reports.
+    4. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
+    5. Write only the {section} section of the report, without its header.
+
+    CONTEXT:
+    {examples}
+
+    CURRENT CASE:
+    {image}
+
+    Now generate the report for the current case using its label below. Always generate reports based on the examples shown.
+    Label: {labels}

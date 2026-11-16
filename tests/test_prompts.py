@@ -32,3 +32,37 @@ def test_render_naive_has_no_labels():
     assert "Label" not in message["content"]
     with pytest.raises(AssertionError):
         prompts.render(version, [("a", [])], ["Edema"])
+
+
+def test_every_version_loads():
+    for name in prompts.yaml.safe_load(prompts.PROMPTS_YAML.read_text()):
+        prompts.load(name)
+
+
+def test_render_image_parts():
+    version = prompts.load("section-simple-image")
+    [message] = prompts.render(version, [("a", ["Edema"])], ["Edema"], "findings")
+    before, image, after = message["content"]
+    assert image == prompts.IMAGE_PART
+    assert before["text"].endswith("Label: Edema\na\n\nCURRENT CASE:\n")
+    assert after["text"].startswith("\n\nNow generate") and "\x00" not in after["text"]
+    assert prompts.text_chars([message]) == len(before["text"]) + len(after["text"])
+
+
+def test_render_image_only_takes_no_examples():
+    version = prompts.load("section-image")
+    assert not prompts.uses_examples(version) and "example" not in version
+    [message] = prompts.render(version, [], None, "findings")
+    assert message["content"][1] == prompts.IMAGE_PART
+    with pytest.raises(AssertionError):
+        prompts.render(version, [("a", [])], None, "findings")
+
+
+@pytest.mark.parametrize("section", ["findings", "impression"])
+def test_render_names_the_section(section):
+    version = prompts.load("section-naive")
+    [message] = prompts.render(version, [("a", [])], None, section)
+    name = prompts.SECTION_NAMES[section]
+    assert f"5. Write only the {name} section of the report" in message["content"]
+    with pytest.raises(SystemExit):
+        prompts.render(version, [("a", [])], None, "findings_impression")

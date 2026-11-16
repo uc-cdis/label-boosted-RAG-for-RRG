@@ -9,9 +9,9 @@ Status: **v12, 2026-11-10**, edited since along with the implementation. Now: th
 
 ## 1. Story
 
-**Small models** predict structured labels from the image. By default these are classifiers over frozen image embeddings. The labels boost **frozen, text-only LLMs** for radiology report generation. The story is unchanged from the preprint. The old numbers do not need to be reproduced exactly.
+**Small models** predict structured labels from the image. By default these are classifiers over frozen image embeddings. The labels boost **frozen LLMs, with or without vision**, for radiology report generation. The preprint used text-only LLMs. The revision widens this: models with vision get the **frontal image in the prompt by default**, and models without vision (gpt-oss, the older models in F, text-only MedGemma) stay text-only. For a vision model, the **image alone** (no context) is the baseline to beat. The old numbers do not need to be reproduced exactly.
 
-The revision tests the obvious objection: *"LLMs keep getting better. Won't labels from small models become unnecessary?"* Each experiment measures **how much labels add as a function of X**, where X is something that makes the LLM stronger: scale, thinking, access to the image, medical training, or model age. The framing is **not** "labels always win".
+The revision tests the obvious objection: *"LLMs keep getting better, and modern ones can see the image. Won't labels from small models become unnecessary?"* Each experiment measures **how much labels add as a function of X**, where X is something that makes the LLM stronger: scale, thinking, access to the image, medical training, or model age. For image access the default is with the image, and text only is the ablation (D). The framing is **not** "labels always win".
 
 - If the gain from labels shrinks as X grows, that is still a result.
 - **Cost argument:** the label classifiers are orders of magnitude smaller than every LLM in the plan, including the 4B student in §6. They help LLMs at every size we test, from 0.8B to ≈400B.

@@ -1,11 +1,15 @@
 """Generate: request building and record parsing against a fake vLLM server."""
 
 import asyncio
+import base64
+import io
 import json
 import subprocess
 
 import httpx
+import numpy as np
 import pytest
+from PIL import Image
 
 from labrag import serving
 from labrag.stages import generate
@@ -92,6 +96,27 @@ def test_requests_and_records(monkeypatch):
     assert all(r["latency_s"] >= 0 and r["start_s"] >= 0 for r in out)
     s = generate.summarize(out)
     assert s["finish_reason"] == {"length": 1, "stop": 1} and s["n_no_report"] == 1
+
+
+def test_request_messages_swap_in_the_prepared_image(tmp_path):
+    text = {"role": "user", "content": "x"}
+    assert generate.request_messages({"messages": [text]}, tmp_path) == [text]
+    (tmp_path / "d").mkdir()
+    pixels = np.arange(400 * 300, dtype=np.uint16).reshape(300, 400)  # 16-bit, wide
+    Image.fromarray(pixels).save(tmp_path / "d/p.png")
+    parts = [{"type": "text", "text": "a"}, {"type": "image"}]
+    row = {"image": "d/p.png", "messages": [{"role": "user", "content": parts}]}
+    for short_edge, size in [(150, (200, 150)), (None, (400, 300))]:
+        [m] = generate.request_messages(row, tmp_path, short_edge)
+        assert m["content"][0] == {"type": "text", "text": "a"}
+        url = m["content"][1]["image_url"]["url"]
+        assert m["content"][1]["type"] == "image_url"
+        prefix = "data:image/png;base64,"
+        assert url.startswith(prefix)
+        sent = Image.open(io.BytesIO(base64.b64decode(url[len(prefix) :])))
+        assert sent.mode == "L" and sent.size == size
+        assert np.asarray(sent).min() == 0 and np.asarray(sent).max() == 255
+    assert row["messages"][0]["content"][1] == {"type": "image"}  # not mutated
 
 
 def test_configs_consistent():

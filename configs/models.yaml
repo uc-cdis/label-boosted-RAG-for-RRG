@@ -1,7 +1,7 @@
 # Generators. Each entry: the weights (configs/weights.yaml), the container that serves
-# them (configs/containers.yaml), and the extra `vllm serve` arguments. The served model
-# name is the entry's name. Sampling and thinking switches are per request
-# (configs/sampling.yaml).
+# them (configs/containers.yaml), the extra `vllm serve` arguments, and `vision` if its
+# prompts may show images. The served model name is the entry's name. Sampling and
+# thinking switches are per request (configs/sampling.yaml).
 
 # Qwen3.5-27B, text only. --reasoning-parser qwen3 splits the <think> block into the
 # response's `reasoning` field, so `content` is the report alone. --language-model-only
@@ -11,3 +11,21 @@ qwen3.5-27b:
   weights: qwen3.5-27b
   container: vllm
   serve_args: [--reasoning-parser, qwen3, --language-model-only, --max-model-len, "40960"]
+
+# The same weights with the vision encoder, for prompts that show the image. vision:
+# short_edge is the image's shorter side as sent (generate resizes it): 518, RAD-DINO's
+# resize without its crop, so the model sees what the classifiers do and every dataset
+# the same resolution (~320 image tokens here). One image per prompt, no video.
+qwen3.5-27b-vision:
+  weights: qwen3.5-27b
+  container: vllm
+  vision: {short_edge: 518}
+  serve_args: [--reasoning-parser, qwen3, --max-model-len, "40960", --limit-mm-per-prompt, '{"image": 1, "video": 0}']
+
+# Control for the 518 choice: the image at native resolution (Qwen's own processor caps
+# it at 4096² pixels = 16,384 tokens, so --max-model-len covers that plus 32k output).
+qwen3.5-27b-vision-native:
+  weights: qwen3.5-27b
+  container: vllm
+  vision: {short_edge: null}
+  serve_args: [--reasoning-parser, qwen3, --max-model-len, "65536", --limit-mm-per-prompt, '{"image": 1, "video": 0}']

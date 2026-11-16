@@ -11,8 +11,12 @@ the prompt; corpus studies carry reference labels, binarized like the classifier
 classifier is ``classifiers/<dataset>/<encoder>.<classifier>``: ``lr`` by default, any
 other written to ``labrag.<classifier>.<labeler>``.
 ``labrag-oracle.<labeler>`` is labrag with the target's reference labels instead of
-predicted ones: the ceiling for any classifier. Retrieval never returns a study of the
+predicted ones: the ceiling for any classifier. ``no-context``: no retrieval and no
+labels, so its prompt must show the image. Retrieval never returns a study of the
 target's patient.
+
+A prompt version with {image} shows the study's preferred image (the one embedded; its
+path relative to the CXR root in the record's ``image``).
 """
 
 import gzip
@@ -34,8 +38,9 @@ EXPERIMENTS = {
         "corpus": ("train", "val"),
     },
 }
-CONDITIONS = ("retrieval-only", "labrag", "labrag-oracle")
+CONDITIONS = ("no-context", "retrieval-only", "labrag", "labrag-oracle")
 DEFAULT_PROMPT = {
+    "no-context": "section-image",
     "retrieval-only": "preprint-naive",
     "labrag": "preprint-simple",
     "labrag-oracle": "preprint-simple",
@@ -62,11 +67,16 @@ def run(
     adapter = DATASETS[dataset]
     prompt = prompt or DEFAULT_PROMPT[condition]
     version = prompts.load(prompt)
-    with_labels = condition != "retrieval-only"
+    with_labels = condition.startswith("labrag")
+    with_examples = condition != "no-context"
+    with_image = prompts.uses_image(version)
     oracle = condition == "labrag-oracle"
     if classifier != CLASSIFIER and condition != "labrag":
         raise SystemExit("build-prompts: --classifier is for --condition labrag")
-    if prompts.uses_labels(version) != with_labels:
+    if (prompts.uses_labels(version), prompts.uses_examples(version)) != (
+        with_labels,
+        with_examples,
+    ):
         raise SystemExit(f"prompt {prompt!r} does not fit condition {condition!r}")
 
     labeler = LABELER + LABELER_SUFFIX[uncertain]
@@ -81,7 +91,6 @@ def run(
         / labeler
     )
     inputs = {
-        "embeddings": artifacts.artifact_record(emb_dir),
         "labels": artifacts.artifact_record(lab_dir),
         "sources": [artifacts.file_record(cxr_root / adapter.SOURCE_CSV)],
         "splits": [
@@ -96,12 +105,20 @@ def run(
         "targets": list(exp["targets"]),
         "corpus": list(exp["corpus"]),
         "condition": condition,
-        "k": K,
-        "encoder": ENCODER,
-        "similarity": "cosine",
         "prompt": {"name": prompt, **version},
-        "report_text": "whitespace runs collapsed to one space",
     }
+    if with_examples:
+        inputs["embeddings"] = artifacts.artifact_record(emb_dir)
+        config |= {
+            "k": K,
+            "encoder": ENCODER,
+            "similarity": "cosine",
+            "report_text": "whitespace runs collapsed to one space",
+        }
+    if with_image:
+        image_root = cxr_root / adapter.IMAGE_ROOT
+        inputs["images"] = {"root": str(image_root)}  # too many to hash
+        config["image"] = "preferred per study (the embedded one)"
     if with_labels and not oracle:
         inputs["classifier"] = artifacts.artifact_record(clf_dir)
         clf_inputs = artifacts.read_manifest(clf_dir)["inputs"]
@@ -124,7 +141,8 @@ def run(
         if classifier != CLASSIFIER:
             condition_dir = f"{condition}.{classifier}.{labeler}"
     else:
-        config["ranking"] = "cosine"
+        if with_examples:
+            config["ranking"] = "cosine"
         condition_dir = condition
 
     def build(out: Path) -> dict:
@@ -135,6 +153,10 @@ def run(
         studies = studies.loc[labels.index]  # the studies with this section
         target = studies[studies.role.isin(exp["targets"])]
         corpus = studies[studies.role.isin(exp["corpus"])]
+        if not with_examples:
+            summary = write(out, [record(i, row) for i, row in target.iterrows()])
+            print(json.dumps(summary, indent=2))
+            return summary
 
         embedded = pd.read_csv(emb_dir / "studies.csv").set_index("study_id")
         embedded["row"] = np.arange(len(embedded))
@@ -177,32 +199,16 @@ def run(
             examples = [
                 (reports[j], positives(corpus_y[j]) if with_labels else []) for j in idx
             ]
-            labels_i = positives(target_y[i]) if with_labels else None
-            record = {
-                "study_id": study_id,
-                "set": row.role,
-                "messages": prompts.render(version, examples, labels_i),
+            retrieved = {
                 "retrieved": corpus_ids[idx].tolist(),
                 "retrieved_similarity": sim[i, idx].tolist(),
             }
             if with_labels:
-                record["retrieved_jaccard"] = overlap[i, idx].tolist()
-            record |= {"labels": labels_i, "reference": row[section]}
-            records.append(record)
-
-        # mtime=0 and no file name in the gzip header: reruns are byte-identical.
-        with open(out / "prompts.jsonl.gz", "wb") as raw:
-            with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as f:
-                for record in records:
-                    f.write((json.dumps(record, ensure_ascii=False) + "\n").encode())
-
-        chars = [len(r["messages"][0]["content"]) for r in records]
-        summary = {
-            "n_targets": len(target),
-            "n_by_set": target.role.value_counts().sort_index().to_dict(),
-            "n_corpus": len(corpus),
-            "prompt_chars": {"mean": float(np.mean(chars)), "max": int(max(chars))},
-        }
+                retrieved["retrieved_jaccard"] = overlap[i, idx].tolist()
+            labels_i = positives(target_y[i]) if with_labels else None
+            records.append(record(study_id, row, examples, labels_i, retrieved))
+        summary = write(out, records)
+        summary["n_corpus"] = len(corpus)
         if with_labels:
             best = overlap[np.arange(len(top)), top[:, 0]]
             summary["top1_jaccard_1"] = float((best == 1).mean())
@@ -211,6 +217,31 @@ def run(
             )
         print(json.dumps(summary, indent=2))
         return summary
+
+    def record(study_id, row, examples=(), labels_i=None, retrieved=None) -> dict:
+        r = {
+            "study_id": study_id,
+            "set": row.role,
+            "messages": prompts.render(version, list(examples), labels_i, section),
+        }
+        if with_image:
+            r["image"] = f"{adapter.IMAGE_ROOT}/{row.image_path}"
+        return r | (retrieved or {}) | {"labels": labels_i, "reference": row[section]}
+
+    def write(out: Path, records: list[dict]) -> dict:
+        # mtime=0 and no file name in the gzip header: reruns are byte-identical.
+        with open(out / "prompts.jsonl.gz", "wb") as raw:
+            with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as f:
+                for r in records:
+                    f.write((json.dumps(r, ensure_ascii=False) + "\n").encode())
+
+        chars = [prompts.text_chars(r["messages"]) for r in records]
+        sets = pd.Series([r["set"] for r in records]).value_counts().sort_index()
+        return {
+            "n_targets": len(records),
+            "n_by_set": sets.to_dict(),
+            "prompt_chars": {"mean": float(np.mean(chars)), "max": int(max(chars))},
+        }
 
     return artifacts.publish(
         f"prompts/{experiment}/{dataset}/{section}/{condition_dir}/{prompt}",

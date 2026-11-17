@@ -11,9 +11,11 @@ the prompt; corpus studies carry reference labels, binarized like the classifier
 classifier is ``classifiers/<dataset>/<encoder>.<classifier>``: ``lr`` by default, any
 other written to ``labrag.<classifier>.<labeler>``.
 ``labrag-oracle.<labeler>`` is labrag with the target's reference labels instead of
-predicted ones: the ceiling for any classifier. ``no-context``: no retrieval and no
-labels, so its prompt must show the image. Retrieval never returns a study of the
-target's patient.
+predicted ones: the ceiling for any classifier. Two diagnostics between the two (they
+read the reference, so they are never a method): ``labrag-drop-fp.<labeler>``, the
+predicted labels without their false positives, and ``labrag-add-fn.<labeler>``, with
+their misses added. ``no-context``: no retrieval and no labels, so its prompt must show
+the image. Retrieval never returns a study of the target's patient.
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``).
@@ -38,13 +40,18 @@ EXPERIMENTS = {
         "corpus": ("train", "val"),
     },
 }
-CONDITIONS = ("no-context", "retrieval-only", "labrag", "labrag-oracle")
+# label diagnostics -> how the target's labels mix predicted and reference
+DIAGNOSTICS = {
+    "labrag-drop-fp": "predicted and reference",
+    "labrag-add-fn": "predicted or reference",
+}
+CONDITIONS = ("no-context", "retrieval-only", "labrag", "labrag-oracle", *DIAGNOSTICS)
 DEFAULT_PROMPT = {
     "no-context": "section-image",
     "retrieval-only": "preprint-naive",
     "labrag": "preprint-simple",
     "labrag-oracle": "preprint-simple",
-}
+} | {c: "preprint-simple" for c in DIAGNOSTICS}
 K = 5
 ENCODER = "raddino"
 CLASSIFIER = "lr"  # default; the others name their condition directory
@@ -71,8 +78,9 @@ def run(
     with_examples = condition != "no-context"
     with_image = prompts.uses_image(version)
     oracle = condition == "labrag-oracle"
-    if classifier != CLASSIFIER and condition != "labrag":
-        raise SystemExit("build-prompts: --classifier is for --condition labrag")
+    predicted = condition == "labrag" or condition in DIAGNOSTICS
+    if classifier != CLASSIFIER and not predicted:
+        raise SystemExit("build-prompts: --classifier is for predicted labels")
     if (prompts.uses_labels(version), prompts.uses_examples(version)) != (
         with_labels,
         with_examples,
@@ -119,7 +127,7 @@ def run(
         image_root = cxr_root / adapter.IMAGE_ROOT
         inputs["images"] = {"root": str(image_root)}  # too many to hash
         config["image"] = "preferred per study (the embedded one)"
-    if with_labels and not oracle:
+    if predicted:
         inputs["classifier"] = artifacts.artifact_record(clf_dir)
         clf_inputs = artifacts.read_manifest(clf_dir)["inputs"]
         for name in ("embeddings", "labels"):  # the classifier saw these same inputs
@@ -132,7 +140,9 @@ def run(
     if with_labels:
         config |= {
             "labeler": labeler,
-            "target_labels": "reference" if oracle else "predicted",
+            "target_labels": (
+                "reference" if oracle else DIAGNOSTICS.get(condition, "predicted")
+            ),
             "corpus_labels": "reference",
             "binarize": BINARIZE[uncertain],
             "ranking": "jaccard of positive labels (empty vs empty = 1), then cosine",
@@ -183,6 +193,8 @@ def run(
                 pred = pd.read_csv(clf_dir / "predictions.csv").set_index("study_id")
                 assert list(pred.columns) == names, "classifier labels differ"
                 target_y = pred.loc[target.index, names].to_numpy(dtype=int)
+                if condition in DIAGNOSTICS:
+                    target_y = mix_labels(condition, target_y, reference(target))
             overlap = retrieval.jaccard(target_y, corpus_y)
         else:
             overlap = None
@@ -250,3 +262,12 @@ def run(
         build,
         overwrite,
     )
+
+
+def mix_labels(condition: str, predicted: np.ndarray, reference: np.ndarray):
+    """A diagnostic's target labels (0/1 per study and label)."""
+    if condition == "labrag-drop-fp":
+        return predicted & reference
+    if condition == "labrag-add-fn":
+        return predicted | reference
+    raise ValueError(condition)

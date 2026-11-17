@@ -138,7 +138,8 @@ def add_build_prompts(sub) -> None:
     )
     p.add_argument(
         "--classifier",
-        help="labrag: classifier artifact classifiers/<dataset>/<encoder>.<NAME> "
+        help="labrag and its diagnostics: classifier artifact "
+        "classifiers/<dataset>/<encoder>.<NAME> "
         f"(default {build_prompts.CLASSIFIER}), e.g. attn-nvfp4-seed1",
     )
     defaults = ", ".join(f"{c} {v}" for c, v in build_prompts.DEFAULT_PROMPT.items())

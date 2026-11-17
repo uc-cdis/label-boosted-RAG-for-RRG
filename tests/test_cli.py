@@ -13,6 +13,7 @@ from labrag.stages import (
     evaluate,
     generate,
     labels,
+    predict,
 )
 
 CASES = [
@@ -90,6 +91,29 @@ CASES = [
         ),
     ),
     (
+        classify,
+        "classify --dataset chexpertplus --section findings --classifier attn "
+        "--tokens nvfp4 --seed 1 --folds 5",
+        dict(
+            dataset="chexpertplus",
+            section="findings",
+            classifier="attn",
+            tokens="nvfp4",
+            seed=1,
+            folds=5,
+        ),
+    ),
+    (
+        predict,
+        "predict --dataset chexpertplus --section findings "
+        "--classifier padchest/raddino.attn-nvfp4-seed1/padchest60",
+        dict(
+            dataset="chexpertplus",
+            section="findings",
+            classifier="padchest/raddino.attn-nvfp4-seed1/padchest60",
+        ),
+    ),
+    (
         build_prompts,
         "build-prompts --experiment pilot --section findings --condition labrag "
         "--prompt preprint-simple",
@@ -109,6 +133,29 @@ CASES = [
             section="findings",
             condition="labrag",
             classifier="attn-nvfp4-seed1",
+        ),
+    ),
+    (
+        build_prompts,
+        "build-prompts --experiment pilot --section findings --condition labrag "
+        "--classifier attn-nvfp4-seed1-oof5 --corpus-labels predicted",
+        dict(
+            experiment="pilot",
+            section="findings",
+            condition="labrag",
+            classifier="attn-nvfp4-seed1-oof5",
+            corpus_labels="predicted",
+        ),
+    ),
+    (
+        build_prompts,
+        "build-prompts --experiment pilot --section findings --condition labrag "
+        "--predictions padchest/raddino.attn-nvfp4-seed1/padchest60",
+        dict(
+            experiment="pilot",
+            section="findings",
+            condition="labrag",
+            predictions="padchest/raddino.attn-nvfp4-seed1/padchest60",
         ),
     ),
     (

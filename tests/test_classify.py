@@ -66,3 +66,18 @@ def test_packed_store_reads_as_the_float16_store_packed(tmp_path):
             assert torch.equal(
                 a.parts[k].view(torch.uint8), b.parts[k].view(torch.uint8)
             )
+
+
+def test_folds_split_train_patients_only():
+    subject = np.array(["a", "a", "b", "c", "d", "e", "e", "f"])
+    train = np.array([True, True, True, True, True, True, False, False])
+    fold = classify.fold_of(subject, train, 2)
+    assert fold[0] == fold[1]  # one patient, one fold
+    assert fold[6] == fold[7] == -1  # not train: no fold
+    patients = {s: f for s, f, t in zip(subject, fold, train) if t}
+    assert sorted(np.bincount(list(patients.values()))) == [2, 3]  # 5 patients
+
+
+def test_folds_are_for_attn_only():
+    with pytest.raises(SystemExit, match="--folds"):
+        classify.run("chexpertplus", section="findings", folds=5)

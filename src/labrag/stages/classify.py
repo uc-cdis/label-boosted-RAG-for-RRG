@@ -19,8 +19,13 @@ the storage format they are read in) with model.pt instead of model.npz. A float
 token store can be read in any format; a packed store (embed's) only in its own.
 
 Uncertain labels (Irvin et al. 2019): ``zeros`` (U-Zeros, default, ``.u0``) counts only
-positive as 1; ``ones`` (U-Ones, the preprint) also uncertain. No out-of-fold
-predictions yet: nothing trains on them so far.
+positive as 1; ``ones`` (U-Ones, the preprint) also uncertain.
+
+``--folds K`` (attn only, name suffix ``-oofK``) also writes out-of-fold predictions for
+the train role (oof_probs.csv, oof_predictions.csv): train patients split into K folds,
+each predicted by the same training on the other folds (epoch and thresholds on val),
+for wherever predicted labels stand in for reference ones on studies the classifier
+trains on.
 
 Pathologies win (``consistent``): No Finding is cleared wherever a label other than
 Support Devices is predicted, as CheXbert's reference labels do (all but 40 of 46,759).
@@ -60,6 +65,7 @@ PARAMS = {
 NO_FINDING = "No Finding"
 NOT_PATHOLOGY = ("No Finding", "Support Devices")
 CONSISTENCY = "No Finding = 0 when any label other than Support Devices is predicted"
+FOLD_SEED = 20261117
 PADCHEST_CONSISTENCY = "normal = 0 when any other label is predicted"
 
 
@@ -72,6 +78,7 @@ def run(
     uncertain: str = "zeros",
     tokens: str | None = None,
     seed: int | None = None,
+    folds: int | None = None,
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:
@@ -80,8 +87,12 @@ def run(
     if release and uncertain != "zeros":
         raise SystemExit(f"classify: {dataset} labels have no uncertain value")
     attn = classifier in ("attn", "attn-cls")
-    if not attn and (tokens is not None or seed is not None):
-        raise SystemExit("classify: --tokens and --seed are for the attn classifiers")
+    if not attn and (tokens is not None or seed is not None or folds is not None):
+        raise SystemExit(
+            "classify: --tokens, --seed and --folds are for the attn classifiers"
+        )
+    if folds is not None and folds < 2:
+        raise SystemExit("classify: --folds needs at least 2")
     tokens = tokens or "fp16"
     seed = 0 if seed is None else seed
     cxr_root = cxr_root or paths.CXR_ROOT
@@ -124,6 +135,14 @@ def run(
         if classifier == "attn-cls":
             config["input"] = "CLS token only (token 0 of the tokens)"
         name += f"-{tokens}-seed{seed}"
+    if folds:
+        config["oof"] = {
+            "folds": folds,
+            "split": "train-role patients, seeded permutation, position mod folds",
+            "fold_seed": FOLD_SEED,
+            "fold_models": "the same training on the other folds; epoch, thresholds on val",
+        }
+        name += f"-oof{folds}"
 
     def build(out: Path) -> dict:
         labels = pd.read_csv(lab_dir / "labels.csv")
@@ -162,15 +181,31 @@ def run(
             intercept = np.array([f[1] for f in fits])
             P = logistic.predict_proba(X, coef, intercept)
             extra = {"n_iter": [f[2] for f in fits]}
-        threshold = np.array(
-            [logistic.f1_threshold(Y[val, j], P[val, j]) for j in range(len(names))]
-        )
-        if release:
-            pred = consistent(
-                (P >= threshold).astype(int), names, padchest.NO_FINDING, ()
+
+        def decide(P: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+            """Max-F1 thresholds on val, and the consistent 0/1 predictions."""
+            threshold = np.array(
+                [logistic.f1_threshold(Y[val, j], P[val, j]) for j in range(len(names))]
             )
-        else:
-            pred = consistent((P >= threshold).astype(int), names)
+            pred = (P >= threshold).astype(int)
+            if release:
+                return threshold, consistent(pred, names, padchest.NO_FINDING, ())
+            return threshold, consistent(pred, names)
+
+        threshold, pred = decide(P)
+        oof = None
+        if folds:
+            fold = fold_of(studies.subject_id.to_numpy(), train, folds)
+            oof_P, oof_pred, oof = out_of_fold(X, Y, fold, val, seed, decide)
+            held = fold >= 0
+            ids = labels.study_id[held].to_numpy()
+            probs_oof = pd.DataFrame(oof_P[held], columns=names)
+            probs_oof.insert(0, "fold", fold[held])
+            probs_oof.insert(0, "study_id", ids)
+            probs_oof.to_csv(out / "oof_probs.csv", index=False)
+            preds_oof = pd.DataFrame(oof_pred[held], columns=names)
+            preds_oof.insert(0, "study_id", ids)
+            preds_oof.to_csv(out / "oof_predictions.csv", index=False)
 
         metrics = pd.DataFrame(
             {
@@ -223,6 +258,8 @@ def run(
                 "val_mean_auroc": best["val_auroc"],
                 "device": str(device),
             }
+        if oof is not None:
+            summary["oof"] = oof
         return summary
 
     if release:
@@ -269,6 +306,41 @@ def _load_tokens(
         for k, v in new.items():
             packed.parts[k][start : start + len(chunk)] = v
     return packed
+
+
+def out_of_fold(X, Y, fold, val, seed, decide):
+    """Each fold's rows predicted by an attention head trained on the other folds'
+    rows (fold >= 0 only): probabilities, ``decide``'s 0/1 predictions (thresholds on
+    ``val`` from that fold's model), and one summary row per fold."""
+    P = np.full(Y.shape, np.nan)
+    pred = np.zeros(Y.shape, dtype=int)
+    summary = []
+    all_rows = torch.arange(len(X), device=next(iter(X.parts.values())).device)
+    for k in range(fold.max() + 1):
+        model, history = attention.fit(X, Y, (fold >= 0) & (fold != k), val, seed)
+        Pk = attention.predict_proba(model, X, all_rows)
+        held = fold == k
+        P[held], pred[held] = Pk[held], decide(Pk)[1][held]
+        best = max(history, key=lambda r: r["val_auroc"])
+        summary.append(
+            {
+                "fold": k,
+                "n_held_out": int(held.sum()),
+                "best_epoch": best["epoch"],
+                "val_mean_auroc": best["val_auroc"],
+            }
+        )
+    return P, pred, summary
+
+
+def fold_of(subject_id: np.ndarray, train: np.ndarray, folds: int) -> np.ndarray:
+    """Each row's fold (0..folds-1) for train rows, by patient; -1 elsewhere."""
+    patients = np.unique(subject_id[train])
+    order = np.random.default_rng(FOLD_SEED).permutation(len(patients))
+    fold_by_patient = dict(zip(patients[order], np.arange(len(patients)) % folds))
+    return np.array(
+        [fold_by_patient[s] if t else -1 for s, t in zip(subject_id, train)]
+    )
 
 
 def consistent(

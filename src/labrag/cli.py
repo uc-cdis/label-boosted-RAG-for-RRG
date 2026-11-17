@@ -18,6 +18,7 @@ from labrag.stages import (
     evaluate,
     generate,
     labels,
+    predict,
 )
 
 SUITE = ", ".join(evaluate.SUITE)
@@ -125,6 +126,21 @@ def add_classify(sub) -> None:
         type=int,
         help="attn: training seed (default 0)",
     )
+    p.add_argument(
+        "--folds",
+        type=int,
+        help="attn: also out-of-fold predictions for the train role, K folds by patient",
+    )
+
+
+def add_predict(sub) -> None:
+    p = stage(sub, predict, "--dataset")
+    add_section_unless_labels_only(p)
+    p.add_argument(
+        "--classifier",
+        required=True,
+        help="classify artifact under classifiers/: <dataset>/<name>/<labeler>",
+    )
 
 
 def add_build_prompts(sub) -> None:
@@ -154,6 +170,16 @@ def add_build_prompts(sub) -> None:
     p.add_argument(
         "--prompt",
         help=f"version in configs/prompts.yaml (default: {defaults})",
+    )
+    p.add_argument(
+        "--corpus-labels",
+        choices=("reference", "predicted"),
+        help="labrag: corpus labels from the reports (default) or the -oofK classifier",
+    )
+    p.add_argument(
+        "--predictions",
+        help="labrag: target and corpus labels from a predict artifact, "
+        "<source>/<name>/<labeler> (e.g. padchest/raddino.attn-nvfp4-seed1/padchest60)",
     )
 
 
@@ -235,6 +261,7 @@ COMMANDS = (
     add_labels,
     add_embed,
     add_classify,
+    add_predict,
     add_build_prompts,
     add_generate,
     add_evaluate,

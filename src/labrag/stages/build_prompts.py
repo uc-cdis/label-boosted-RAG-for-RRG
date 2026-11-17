@@ -17,6 +17,13 @@ predicted labels without their false positives, and ``labrag-add-fn.<labeler>``,
 their misses added. ``no-context``: no retrieval and no labels, so its prompt must show
 the image. Retrieval never returns a study of the target's patient.
 
+Predicted corpus labels, for labrag only: ``--corpus-labels predicted`` takes them from
+the classifier's out-of-fold predictions (train role; a ``-oofK`` classifier) and its
+plain predictions (val role), directory suffix ``.corpus-predicted``.
+``--predictions <source>/<name>/<labeler>`` takes target and corpus labels from a
+predict artifact (a classifier from another dataset, e.g. PadChest-60), written to
+``labrag.<source>.<classifier>.<labeler>``.
+
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``).
 """
@@ -65,6 +72,8 @@ def run(
     prompt: str | None = None,
     classifier: str = CLASSIFIER,
     uncertain: str = "zeros",
+    corpus_labels: str = "reference",
+    predictions: str | None = None,
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:
@@ -81,6 +90,15 @@ def run(
     predicted = condition == "labrag" or condition in DIAGNOSTICS
     if classifier != CLASSIFIER and not predicted:
         raise SystemExit("build-prompts: --classifier is for predicted labels")
+    if (corpus_labels != "reference" or predictions) and condition != "labrag":
+        raise SystemExit("build-prompts: predicted corpus labels are for labrag only")
+    if predictions and (classifier != CLASSIFIER or corpus_labels != "reference"):
+        raise SystemExit("build-prompts: --predictions brings its own labels")
+    if corpus_labels == "predicted" and "-oof" not in classifier:
+        raise SystemExit(
+            "build-prompts: --corpus-labels predicted needs a -oofK classifier"
+        )
+    transfer = predictions is not None
     if (prompts.uses_labels(version), prompts.uses_examples(version)) != (
         with_labels,
         with_examples,
@@ -127,7 +145,13 @@ def run(
         image_root = cxr_root / adapter.IMAGE_ROOT
         inputs["images"] = {"root": str(image_root)}  # too many to hash
         config["image"] = "preferred per study (the embedded one)"
-    if predicted:
+    if transfer:
+        pred_dir = paths.SHARED_ROOT / "predictions" / dataset / section
+        source, clf_name, labeler = predictions.split("/")
+        pred_dir = pred_dir / f"{source}.{clf_name}.{labeler}"
+        inputs["predictions"] = artifacts.artifact_record(pred_dir)
+        config["predictions"] = predictions
+    elif predicted:
         inputs["classifier"] = artifacts.artifact_record(clf_dir)
         clf_inputs = artifacts.read_manifest(clf_dir)["inputs"]
         for name in ("embeddings", "labels"):  # the classifier saw these same inputs
@@ -143,13 +167,26 @@ def run(
             "target_labels": (
                 "reference" if oracle else DIAGNOSTICS.get(condition, "predicted")
             ),
-            "corpus_labels": "reference",
-            "binarize": BINARIZE[uncertain],
+            "corpus_labels": (
+                f"predicted by {predictions}"
+                if transfer
+                else (
+                    "predicted: out of fold (train), plain (val)"
+                    if corpus_labels == "predicted"
+                    else "reference"
+                )
+            ),
+            "binarize": "predicted 0/1" if transfer else BINARIZE[uncertain],
             "ranking": "jaccard of positive labels (empty vs empty = 1), then cosine",
         }
         condition_dir = f"{condition}.{labeler}"
         if classifier != CLASSIFIER:
             condition_dir = f"{condition}.{classifier}.{labeler}"
+        if corpus_labels == "predicted":
+            condition_dir += ".corpus-predicted"
+        if transfer:
+            short = clf_name.removeprefix(f"{ENCODER}.")
+            condition_dir = f"{condition}.{source}.{short}.{labeler}"
     else:
         if with_examples:
             config["ranking"] = "cosine"
@@ -158,6 +195,10 @@ def run(
     def build(out: Path) -> dict:
         labels = pd.read_csv(lab_dir / "labels.csv").set_index("study_id")
         names = list(labels.columns)
+        if transfer:
+            transferred = pd.read_csv(pred_dir / "predictions.csv")
+            transferred = transferred.set_index("study_id")
+            names = list(transferred.columns)
         studies = adapter.load_studies(cxr_root).set_index("study_id")
         studies["role"] = adapter.classifier_roles(studies, paths.SPLITS_DIR)
         studies = studies.loc[labels.index]  # the studies with this section
@@ -186,8 +227,15 @@ def run(
                 y = labels.loc[rows.index, names].isin(POSITIVE[uncertain])
                 return y.to_numpy(dtype=int)
 
-            corpus_y = reference(corpus)
-            if oracle:
+            if transfer:
+                corpus_y = transferred.loc[corpus.index].to_numpy(dtype=int)
+            elif corpus_labels == "predicted":
+                corpus_y = predicted_corpus(clf_dir, corpus, names)
+            else:
+                corpus_y = reference(corpus)
+            if transfer:
+                target_y = transferred.loc[target.index].to_numpy(dtype=int)
+            elif oracle:
                 target_y = reference(target)
             else:
                 pred = pd.read_csv(clf_dir / "predictions.csv").set_index("study_id")
@@ -262,6 +310,18 @@ def run(
         build,
         overwrite,
     )
+
+
+def predicted_corpus(clf_dir: Path, corpus: pd.DataFrame, names: list[str]):
+    """Corpus labels from a -oofK classifier: out of fold for its train role, plain
+    predictions for the rest (val: never trained on)."""
+    oof = pd.read_csv(clf_dir / "oof_predictions.csv").set_index("study_id")
+    plain = pd.read_csv(clf_dir / "predictions.csv").set_index("study_id")
+    assert list(oof.columns) == list(plain.columns) == names, "classifier labels differ"
+    train = corpus.role.eq("train")
+    y = plain.loc[corpus.index, names].copy()
+    y.loc[train] = oof.loc[corpus.index[train], names]
+    return y.to_numpy(dtype=int)
 
 
 def mix_labels(condition: str, predicted: np.ndarray, reference: np.ndarray):

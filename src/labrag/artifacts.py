@@ -28,6 +28,8 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
+import pandas as pd
+
 from labrag import paths
 
 MANIFEST = "manifest.json"
@@ -59,6 +61,12 @@ def git_commit(repo: Path = paths.REPO_ROOT) -> dict:
         [*git, "status", "--porcelain"], capture_output=True, text=True
     )
     return {"sha": sha.stdout.strip(), "dirty": bool(status.stdout.strip())}
+
+
+def read_table(path: Path) -> pd.DataFrame:
+    """An artifact's CSV with study_id read as text (PadChest's ids are mostly digits,
+    which pandas would otherwise turn into numbers)."""
+    return pd.read_csv(path, dtype={"study_id": str})
 
 
 def read_manifest(artifact_dir: Path) -> dict | None:

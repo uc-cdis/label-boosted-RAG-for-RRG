@@ -164,3 +164,12 @@ def test_stale_tree_follows_the_chain(tmp_path):
     assert stale[down] == [f"{up} has other outputs now"]
     assert stale[tmp_path / "x" / "last"] == [f"{down} is stale"]
     assert up not in stale
+
+
+def test_read_table_keeps_digit_study_ids_as_text(tmp_path):
+    path = tmp_path / "labels.csv"
+    path.write_text(
+        "study_id,A\n216840111366964012373310883942009086102412934,1\n0012,0\nx-2,1\n"
+    )
+    ids = artifacts.read_table(path).study_id.tolist()
+    assert ids == ["216840111366964012373310883942009086102412934", "0012", "x-2"]

@@ -145,14 +145,14 @@ def run(
         name += f"-oof{folds}"
 
     def build(out: Path) -> dict:
-        labels = pd.read_csv(lab_dir / "labels.csv")
+        labels = artifacts.read_table(lab_dir / "labels.csv")
         names = list(labels.columns.drop("study_id"))
         studies = adapter.load_studies(cxr_root).set_index("study_id")
         studies["role"] = adapter.classifier_roles(studies, paths.SPLITS_DIR)
         studies = studies.loc[labels.study_id]  # KeyError if a label has no study
 
         # The embedded image must be the one the adapter picks for the study today.
-        embedded = pd.read_csv(emb_dir / "studies.csv").set_index("study_id")
+        embedded = artifacts.read_table(emb_dir / "studies.csv").set_index("study_id")
         embedded["row"] = np.arange(len(embedded))
         embedded = embedded.loc[labels.study_id]
         assert (embedded.image_path == studies.image_path).all(), "image mismatch"

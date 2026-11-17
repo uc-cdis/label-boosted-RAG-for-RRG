@@ -63,7 +63,7 @@ def run(
     def build(out: Path) -> dict:
         studies = adapter.load_studies(cxr_root).set_index("study_id")
         studies["role"] = adapter.classifier_roles(studies, paths.SPLITS_DIR)
-        embedded = pd.read_csv(emb_dir / "studies.csv")
+        embedded = artifacts.read_table(emb_dir / "studies.csv")
         studies = studies.loc[embedded.study_id]
         image = embedded.image_path.to_numpy()
         assert (image == studies.image_path).all(), "image mismatch"

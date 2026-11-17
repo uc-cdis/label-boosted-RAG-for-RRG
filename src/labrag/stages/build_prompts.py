@@ -193,10 +193,10 @@ def run(
         condition_dir = condition
 
     def build(out: Path) -> dict:
-        labels = pd.read_csv(lab_dir / "labels.csv").set_index("study_id")
+        labels = artifacts.read_table(lab_dir / "labels.csv").set_index("study_id")
         names = list(labels.columns)
         if transfer:
-            transferred = pd.read_csv(pred_dir / "predictions.csv")
+            transferred = artifacts.read_table(pred_dir / "predictions.csv")
             transferred = transferred.set_index("study_id")
             names = list(transferred.columns)
         studies = adapter.load_studies(cxr_root).set_index("study_id")
@@ -209,7 +209,7 @@ def run(
             print(json.dumps(summary, indent=2))
             return summary
 
-        embedded = pd.read_csv(emb_dir / "studies.csv").set_index("study_id")
+        embedded = artifacts.read_table(emb_dir / "studies.csv").set_index("study_id")
         embedded["row"] = np.arange(len(embedded))
         emb = np.load(emb_dir / "embeddings.npy")
 
@@ -238,7 +238,9 @@ def run(
             elif oracle:
                 target_y = reference(target)
             else:
-                pred = pd.read_csv(clf_dir / "predictions.csv").set_index("study_id")
+                pred = artifacts.read_table(clf_dir / "predictions.csv").set_index(
+                    "study_id"
+                )
                 assert list(pred.columns) == names, "classifier labels differ"
                 target_y = pred.loc[target.index, names].to_numpy(dtype=int)
                 if condition in DIAGNOSTICS:
@@ -315,8 +317,8 @@ def run(
 def predicted_corpus(clf_dir: Path, corpus: pd.DataFrame, names: list[str]):
     """Corpus labels from a -oofK classifier: out of fold for its train role, plain
     predictions for the rest (val: never trained on)."""
-    oof = pd.read_csv(clf_dir / "oof_predictions.csv").set_index("study_id")
-    plain = pd.read_csv(clf_dir / "predictions.csv").set_index("study_id")
+    oof = artifacts.read_table(clf_dir / "oof_predictions.csv").set_index("study_id")
+    plain = artifacts.read_table(clf_dir / "predictions.csv").set_index("study_id")
     assert list(oof.columns) == list(plain.columns) == names, "classifier labels differ"
     train = corpus.role.eq("train")
     y = plain.loc[corpus.index, names].copy()

@@ -68,6 +68,28 @@ CASES = [
         ),
     ),
     (
+        labels,
+        "labels --dataset padchest --labeler padchest60",
+        dict(dataset="padchest", labeler="padchest60"),
+    ),
+    (
+        embed,
+        "embed --dataset padchest --feature tokens",
+        dict(dataset="padchest", feature="tokens"),
+    ),
+    (
+        classify,
+        "classify --dataset padchest --labeler padchest60 --classifier attn "
+        "--tokens nvfp4 --seed 1",
+        dict(
+            dataset="padchest",
+            labeler="padchest60",
+            classifier="attn",
+            tokens="nvfp4",
+            seed=1,
+        ),
+    ),
+    (
         build_prompts,
         "build-prompts --experiment pilot --section findings --condition labrag "
         "--prompt preprint-simple",

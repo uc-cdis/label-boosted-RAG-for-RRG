@@ -33,3 +33,19 @@ files in place from the code in this repo (git diff shows any change), and
 - **Draw:** `numpy.random.default_rng(20261111).choice(sorted(eligible), 6412, replace=False)`
   (10%, rounded), written sorted.
 - **Code:** `src/labrag/data/chexpertplus.py::draw_classifier_val_split`.
+
+## `padchest_classifier_val_split.csv`
+
+6,590 PadChest patients whose studies set the PadChest classifier thresholds (the
+classifiers are fit on the other patients). Column: `subject_id`.
+
+- **Why:** PadChest has no official validation split, and PadChest-GR validation (455
+  studies) leaves 22 of the 60 PadChest-60 labels with fewer than 10 positives.
+- **Source:** `padchest/PADCHEST_chest_x_ray_images_labels_160K_01.02.19.csv.gz` and
+  `padchest-gr/master_table.csv` (author releases).
+- **Eligible:** patients of the studies the adapter keeps (one usable frontal image),
+  minus every patient in PadChest-GR validation or test (65,904). PadChest-GR train
+  patients are eligible.
+- **Draw:** `numpy.random.default_rng(20261117).choice(sorted(eligible), 6590, replace=False)`
+  (10%, rounded), written sorted.
+- **Code:** `src/labrag/data/padchest.py::draw_classifier_val_split`.

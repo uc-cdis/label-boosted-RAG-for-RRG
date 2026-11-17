@@ -100,7 +100,7 @@ def run(
     )
     inputs = {
         "labels": artifacts.artifact_record(lab_dir),
-        "sources": [artifacts.file_record(cxr_root / adapter.SOURCE_CSV)],
+        "sources": [artifacts.file_record(cxr_root / f) for f in adapter.SOURCE_FILES],
         "splits": [
             artifacts.file_record(paths.SPLITS_DIR / f) for f in adapter.SPLIT_FILES
         ],

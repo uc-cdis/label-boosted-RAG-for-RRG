@@ -13,7 +13,7 @@ a no-op on full-range 8-bit images. Training resized with B-spline, the processo
 bicubic (as for anyone using the reference).
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -61,13 +61,12 @@ def embed(
     batch_size: int = BATCH_SIZE,
     num_workers: int = 0,
     progress: bool = False,
-    tokens: np.ndarray | None = None,
+    on_tokens: Callable[[int, torch.Tensor], None] | None = None,
 ) -> np.ndarray:
     """CLS embedding of each image, float32, shape (len(paths), 768), in input order.
 
-    If ``tokens`` is given (shape (len(paths), TOKENS, 768), e.g. a float16 memmap),
-    the full ``last_hidden_state`` (CLS + patches) is also written into it, cast to its
-    dtype; a non-finite value after the cast is an error.
+    If ``on_tokens`` is given, it is called per batch with the batch's first row index
+    and its full ``last_hidden_state`` (CLS + patches; float32, on ``device``).
     """
     loader = DataLoader(
         _Images(paths, processor),
@@ -86,10 +85,8 @@ def embed(
         hidden = model(pixel_values=pixels.to(device)).last_hidden_state
         cls = hidden[:, 0]
         out[start : start + len(cls)] = cls.float().cpu().numpy()
-        if tokens is not None:
-            batch = hidden.cpu().numpy().astype(tokens.dtype)
-            assert np.isfinite(batch).all(), "non-finite tokens"
-            tokens[start : start + len(cls)] = batch
+        if on_tokens is not None:
+            on_tokens(start, hidden)
         start += len(cls)
     assert start == len(paths)
     return out

@@ -64,14 +64,21 @@ def add_splits(sub) -> None:
     p.add_argument("--dataset", **OPTIONS["--dataset"])
 
 
+def add_section_unless_labels_only(p: argparse.ArgumentParser) -> None:
+    """--section, required by the stage for every dataset but PadChest."""
+    p.add_argument(
+        "--section", choices=labels.SECTIONS, help="report section (none for PadChest)"
+    )
+
+
 def add_labels(sub) -> None:
-    stage(
+    p = stage(
         sub,
         labels,
         "--dataset",
-        "--section",
         "--labeler",
     )
+    add_section_unless_labels_only(p)
 
 
 def add_embed(sub) -> None:
@@ -84,7 +91,8 @@ def add_embed(sub) -> None:
     p.add_argument(
         "--feature",
         choices=embed.FEATURES,
-        help="cls (default) or tokens: CLS + patch tokens, float16; needs --section",
+        help="cls (default) or tokens: CLS + patch tokens, float16; needs --section "
+        "(except PadChest)",
     )
     p.add_argument(
         "--section",
@@ -98,11 +106,11 @@ def add_classify(sub) -> None:
         sub,
         classify,
         "--dataset",
-        "--section",
         "--encoder",
         "--labeler",
         "--uncertain",
     )
+    add_section_unless_labels_only(p)
     p.add_argument(
         "--classifier",
         choices=classify.CLASSIFIERS,

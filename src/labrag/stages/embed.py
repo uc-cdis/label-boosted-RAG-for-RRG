@@ -9,9 +9,11 @@ stages pick their rows by study_id. The image is the study's preferred one, the 
 row that gives its canonical report text (the adapter's load_studies).
 
 ``--feature tokens`` (with ``--section``) instead writes
-``embeddings/<dataset>/<encoder>.tokens/<section>/tokens.npy``: the full last hidden
-state (CLS + patch tokens), float16, shape (n_studies, tokens, dim), for the studies
-with that section's text only (the full dataset would be ~4x larger).
+``embeddings/<dataset>/<encoder>.tokens/<section>/``: the full last hidden state (CLS +
+patch tokens) of the studies with that section's text, cast to float16 and stored
+packed in TOKEN_FORMAT (quant.create_store): the same tokens classify gets by packing a
+float16 store. A labels-only dataset (PadChest) takes no ``--section``:
+``embeddings/<dataset>/<encoder>.tokens/`` holds every study.
 """
 
 import os
@@ -21,13 +23,19 @@ import numpy as np
 import torch
 
 from labrag import artifacts, paths, weights
-from labrag.data import DATASETS
+from labrag.classifiers import quant
+from labrag.data import DATASETS, labels_only
 from labrag.encoders import raddino
 
 # encoder name -> configs/weights.yaml entry
 ENCODERS = {"raddino": "rad-dino"}
 MAX_WORKERS = 32  # image decoding + resizing is the bottleneck, not the GPU
 FEATURES = ("cls", "tokens")
+TOKEN_FORMAT = "nvfp4"  # the classifiers' format, ~1/3.5 the size of float16
+TOKENS_FEATURE = (
+    "tokens: last_hidden_state (CLS + patches) as float16, stored as "
+    + quant.DESCRIPTION[TOKEN_FORMAT]
+)
 
 
 def run(
@@ -38,7 +46,10 @@ def run(
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:
-    if (feature == "tokens") != (section is not None):
+    if labels_only(dataset):
+        if section is not None:
+            raise SystemExit(f"embed: {dataset} has no report sections; drop --section")
+    elif (feature == "tokens") != (section is not None):
         raise SystemExit(
             "embed: --section goes with --feature tokens, and only with it"
         )
@@ -47,7 +58,7 @@ def run(
     model_dir, weights_record = weights.resolve(ENCODERS[encoder])
     image_root = cxr_root / adapter.IMAGE_ROOT
     inputs = {
-        "sources": [artifacts.file_record(cxr_root / adapter.SOURCE_CSV)],
+        "sources": [artifacts.file_record(cxr_root / f) for f in adapter.SOURCE_FILES],
         "images": {"root": str(image_root)},  # too many to hash; paths in studies.csv
         "weights": weights_record,
     }
@@ -60,9 +71,12 @@ def run(
         "feature": "cls",
     }
     relpath = f"embeddings/{dataset}/{encoder}"
-    if feature == "tokens":
+    if feature == "tokens" and section is None:
+        config["feature"] = TOKENS_FEATURE
+        relpath = f"embeddings/{dataset}/{encoder}.tokens"
+    elif feature == "tokens":
         config |= {
-            "feature": "tokens: last_hidden_state (CLS + patches), float16",
+            "feature": TOKENS_FEATURE,
             "section": section,
             "studies": f"with {section} text",
         }
@@ -76,14 +90,16 @@ def run(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         num_workers = min(MAX_WORKERS, max(1, len(os.sched_getaffinity(0)) - 1))
         model, processor = raddino.load_model(model_dir, device)
-        tokens = None
+        store = on_tokens = None
         if feature == "tokens":
-            tokens = np.lib.format.open_memmap(
-                out / "tokens.npy",
-                mode="w+",
-                dtype=np.float16,
-                shape=(len(studies), raddino.TOKENS, raddino.DIM),
-            )
+            shape = (len(studies), raddino.TOKENS, raddino.DIM)
+            store = quant.create_store(out, TOKEN_FORMAT, shape)
+
+            def on_tokens(start: int, hidden: torch.Tensor) -> None:
+                half = hidden.half()
+                assert torch.isfinite(half).all(), "non-finite tokens"
+                quant.write_rows(store, start, quant.pack(TOKEN_FORMAT, half))
+
         emb = raddino.embed(
             [image_root / p for p in studies.image_path],
             model,
@@ -91,14 +107,15 @@ def run(
             device,
             num_workers=num_workers,
             progress=True,
-            tokens=tokens,
+            on_tokens=on_tokens,
         )
         assert np.isfinite(emb).all(), "non-finite embeddings"
-        if tokens is None:
+        if store is None:
             np.save(out / "embeddings.npy", emb)
         else:
-            tokens.flush()
-            del tokens
+            for part in store.values():
+                part.flush()
+            del store
         studies.to_csv(out / "studies.csv", index=False)
         return {
             "n_studies": len(studies),

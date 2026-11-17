@@ -15,7 +15,8 @@ other roles predicted only. Classifiers:
 - ``attn-cls``: ``attn`` given only the CLS token, the control for the patch tokens.
 
 The ``attn`` ones are written to ``<encoder>.<classifier>-<tokens>-seed<seed>`` (tokens =
-the storage format they are read in) with model.pt instead of model.npz.
+the storage format they are read in) with model.pt instead of model.npz. A float16
+token store can be read in any format; a packed store (embed's) only in its own.
 
 Uncertain labels (Irvin et al. 2019): ``zeros`` (U-Zeros, default, ``.u0``) counts only
 positive as 1; ``ones`` (U-Ones, the preprint) also uncertain. No out-of-fold
@@ -23,6 +24,11 @@ predictions yet: nothing trains on them so far.
 
 Pathologies win (``consistent``): No Finding is cleared wherever a label other than
 Support Devices is predicted, as CheXbert's reference labels do (all but 40 of 46,759).
+PadChest's ``normal`` is cleared wherever any other label is predicted (its labels pair
+normal with another label in 155 of 108,746 studies, devices included).
+
+A labels-only dataset (PadChest) takes no ``--section``: it reads
+``labels/<dataset>/<labeler>/`` and writes ``classifiers/<dataset>/<name>/<labeler>/``.
 """
 
 from pathlib import Path
@@ -34,7 +40,7 @@ from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_sco
 
 from labrag import artifacts, paths
 from labrag.classifiers import attention, logistic, quant
-from labrag.data import DATASETS
+from labrag.data import DATASETS, check_section, labels_only, padchest
 
 CLASSIFIERS = ("lr", "lr-tuned", "attn", "attn-cls")
 TOKEN_CHUNK = 256  # studies packed at a time while loading tokens
@@ -54,11 +60,12 @@ PARAMS = {
 NO_FINDING = "No Finding"
 NOT_PATHOLOGY = ("No Finding", "Support Devices")
 CONSISTENCY = "No Finding = 0 when any label other than Support Devices is predicted"
+PADCHEST_CONSISTENCY = "normal = 0 when any other label is predicted"
 
 
 def run(
     dataset: str,
-    section: str,
+    section: str | None = None,
     encoder: str = "raddino",
     labeler: str = "chexbert14",
     classifier: str = "lr",
@@ -68,6 +75,10 @@ def run(
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:
+    check_section("classify", dataset, section)
+    release = labels_only(dataset)  # PadChest: 0/1 release labels, no section
+    if release and uncertain != "zeros":
+        raise SystemExit(f"classify: {dataset} labels have no uncertain value")
     attn = classifier in ("attn", "attn-cls")
     if not attn and (tokens is not None or seed is not None):
         raise SystemExit("classify: --tokens and --seed are for the attn classifiers")
@@ -77,12 +88,17 @@ def run(
     adapter = DATASETS[dataset]
     emb_dir = paths.SHARED_ROOT / "embeddings" / dataset / encoder
     if attn:
-        emb_dir = emb_dir.with_name(f"{encoder}.tokens") / section
-    lab_dir = paths.SHARED_ROOT / "labels" / dataset / section / labeler
+        emb_dir = emb_dir.with_name(f"{encoder}.tokens") / (section or "")
+        stored = quant.stored_format(emb_dir)
+        if stored not in (None, "fp16", tokens):
+            raise SystemExit(
+                f"classify: tokens are stored as {stored}: --tokens {stored}"
+            )
+    lab_dir = paths.SHARED_ROOT / "labels" / dataset / (section or "") / labeler
     inputs = {
         "embeddings": artifacts.artifact_record(emb_dir),
         "labels": artifacts.artifact_record(lab_dir),
-        "sources": [artifacts.file_record(cxr_root / adapter.SOURCE_CSV)],
+        "sources": [artifacts.file_record(cxr_root / f) for f in adapter.SOURCE_FILES],
         "splits": [
             artifacts.file_record(paths.SPLITS_DIR / f) for f in adapter.SPLIT_FILES
         ],
@@ -95,10 +111,12 @@ def run(
         "labeler": labeler,
         "classifier": classifier,
         "params": PARAMS[classifier],
-        "binarize": BINARIZE[uncertain],
+        "binarize": (
+            "release labels: 1 present, 0 absent" if release else BINARIZE[uncertain]
+        ),
         "fit": "train",
         "threshold": "max F1 on val; predict prob >= threshold",
-        "consistency": CONSISTENCY,
+        "consistency": PADCHEST_CONSISTENCY if release else CONSISTENCY,
     }
     name = f"{encoder}.{classifier}"
     if attn:
@@ -128,7 +146,7 @@ def run(
             attention.deterministic()
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             keep = 1 if classifier == "attn-cls" else None
-            X = _load_tokens(emb_dir / "tokens.npy", rows, tokens, device, keep)
+            X = _load_tokens(emb_dir, rows, tokens, device, keep)
             model, history = attention.fit(X, Y, train, val, seed)
             P = attention.predict_proba(model, X, torch.arange(len(X), device=device))
             extra = {}
@@ -147,7 +165,12 @@ def run(
         threshold = np.array(
             [logistic.f1_threshold(Y[val, j], P[val, j]) for j in range(len(names))]
         )
-        pred = consistent((P >= threshold).astype(int), names)
+        if release:
+            pred = consistent(
+                (P >= threshold).astype(int), names, padchest.NO_FINDING, ()
+            )
+        else:
+            pred = consistent((P >= threshold).astype(int), names)
 
         metrics = pd.DataFrame(
             {
@@ -156,7 +179,11 @@ def run(
                 "train_pos": Y[train].sum(0),
                 "threshold": threshold,
                 **_scores("val", Y[val], P[val], pred[val]),
-                **_scores("official_valid", Y[official], P[official], pred[official]),
+                **(
+                    _scores("official_valid", Y[official], P[official], pred[official])
+                    if official.any()
+                    else {}
+                ),
             }
         )
         if attn:
@@ -198,8 +225,12 @@ def run(
             }
         return summary
 
+    if release:
+        relpath = f"classifiers/{dataset}/{name}/{labeler}"
+    else:
+        relpath = f"classifiers/{dataset}/{name}/{section}/{labeler}{LABELER_SUFFIX[uncertain]}"
     return artifacts.publish(
-        f"classifiers/{dataset}/{name}/{section}/{labeler}{LABELER_SUFFIX[uncertain]}",
+        relpath,
         config,
         inputs,
         build,
@@ -208,30 +239,50 @@ def run(
 
 
 def _load_tokens(
-    path: Path,
+    directory: Path,
     rows: np.ndarray,
     fmt: str,
     device: torch.device,
     keep: int | None = None,
 ) -> quant.Packed:
-    """Rows ``rows`` of a float16 tokens.npy (only its first ``keep`` tokens if given),
-    packed in format ``fmt`` on ``device``."""
-    stored = np.load(path, mmap_mode="r")
-    _, t, d = stored.shape
+    """Rows ``rows`` of the tokens stored in ``directory`` (only their first ``keep``
+    tokens if given) in format ``fmt`` on ``device``: a float16 store is packed here, a
+    packed store (format ``fmt``) is read as is."""
+    if quant.stored_format(directory) == "fp16":
+        stored = np.load(directory / "tokens.npy", mmap_mode="r")
+        _, t, d = stored.shape
+        parts = None
+    else:
+        parts = quant.open_store(directory, fmt)
+        t, d = parts["scale"].shape[1], quant.Packed(fmt, parts).dim
     packed = quant.empty(fmt, (len(rows), keep or t, d), device)
     for start in range(0, len(rows), TOKEN_CHUNK):
         chunk = rows[start : start + TOKEN_CHUNK]
-        x = torch.from_numpy(np.ascontiguousarray(stored[chunk, :keep])).to(device)
-        for k, v in quant.pack(fmt, x).items():
+        if parts is None:
+            x = torch.from_numpy(np.ascontiguousarray(stored[chunk, :keep])).to(device)
+            new = quant.pack(fmt, x)
+        else:
+            new = {
+                k: quant.from_store(v[chunk, :keep], packed.parts[k]).to(device)
+                for k, v in parts.items()
+            }
+        for k, v in new.items():
             packed.parts[k][start : start + len(chunk)] = v
     return packed
 
 
-def consistent(pred: np.ndarray, names: list[str]) -> np.ndarray:
-    """Pathologies win over No Finding: clear No Finding where any pathology is 1."""
+def consistent(
+    pred: np.ndarray,
+    names: list[str],
+    no_finding: str = NO_FINDING,
+    not_pathology: tuple[str, ...] = NOT_PATHOLOGY,
+) -> np.ndarray:
+    """Pathologies win over ``no_finding``: clear it where any label other than itself
+    and ``not_pathology`` is 1."""
     pred = pred.copy()
-    pathology = [j for j, n in enumerate(names) if n not in NOT_PATHOLOGY]
-    pred[pred[:, pathology].any(axis=1), names.index(NO_FINDING)] = 0
+    keep = {no_finding, *not_pathology}
+    pathology = [j for j, n in enumerate(names) if n not in keep]
+    pred[pred[:, pathology].any(axis=1), names.index(no_finding)] = 0
     return pred
 
 

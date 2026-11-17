@@ -9,7 +9,7 @@ from labrag.data import DATASETS
 @pytest.mark.parametrize("dataset", sorted(DATASETS))
 def test_write_splits_reproduces_committed_files(tmp_path, dataset):
     adapter = DATASETS[dataset]
-    if not (paths.CXR_ROOT / adapter.SOURCE_CSV).exists():
+    if not all((paths.CXR_ROOT / f).exists() for f in adapter.SOURCE_FILES):
         pytest.skip(f"{dataset} source not mounted")
     adapter.write_splits(paths.CXR_ROOT, tmp_path)
     for name in adapter.SPLIT_FILES:

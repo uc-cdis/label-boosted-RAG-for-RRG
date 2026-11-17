@@ -67,7 +67,8 @@ def run(
         studies = studies.loc[embedded.study_id]
         image = embedded.image_path.to_numpy()
         assert (image == studies.image_path).all(), "image mismatch"
-        saved = torch.load(clf_dir / "model.pt", weights_only=True)
+        # Our own artifact (inputs are sha256-checked); it holds a numpy threshold.
+        saved = torch.load(clf_dir / "model.pt", weights_only=False)
         names, threshold = saved["labels"], np.asarray(saved["threshold"])
         params = clf_config["params"]
 

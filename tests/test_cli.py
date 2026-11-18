@@ -34,11 +34,6 @@ CASES = [
         dict(dataset="chexpertplus", encoder="raddino", overwrite=True),
     ),
     (
-        embed,
-        "embed --dataset chexpertplus --feature tokens --section findings",
-        dict(dataset="chexpertplus", feature="tokens", section="findings"),
-    ),
-    (
         classify,
         "classify --dataset chexpertplus --section findings --classifier attn "
         "--tokens nvfp4 --seed 2",
@@ -76,8 +71,8 @@ CASES = [
     ),
     (
         labels,
-        "labels --dataset padchest --labeler padchest60",
-        dict(dataset="padchest", labeler="padchest60"),
+        "labels --dataset padchest --section report --labeler padchest60",
+        dict(dataset="padchest", section="report", labeler="padchest60"),
     ),
     (
         embed,
@@ -86,8 +81,15 @@ CASES = [
     ),
     (
         classify,
-        "classify --dataset chexpertplus --classifier attn --tokens nvfp4 --seed 1",
-        dict(dataset="chexpertplus", classifier="attn", tokens="nvfp4", seed=1),
+        "classify --dataset chexpertplus --section findings-impression "
+        "--classifier attn --tokens nvfp4 --seed 1",
+        dict(
+            dataset="chexpertplus",
+            section="findings-impression",
+            classifier="attn",
+            tokens="nvfp4",
+            seed=1,
+        ),
     ),
     (
         embed,
@@ -96,10 +98,11 @@ CASES = [
     ),
     (
         classify,
-        "classify --dataset padchest --labeler padchest60 --classifier attn "
-        "--tokens nvfp4 --seed 1",
+        "classify --dataset padchest --section report --labeler padchest60 "
+        "--classifier attn --tokens nvfp4 --seed 1",
         dict(
             dataset="padchest",
+            section="report",
             labeler="padchest60",
             classifier="attn",
             tokens="nvfp4",
@@ -121,21 +124,21 @@ CASES = [
     ),
     (
         threshold,
-        "threshold --classifier chexpertplus/raddino.attn-nvfp4-seed1-sections/"
-        "chexbert14.u0 --rule prevalence",
+        "threshold --classifier chexpertplus/raddino.attn-nvfp4-seed1/"
+        "findings-impression/chexbert14 --rule prevalence",
         dict(
-            classifier="chexpertplus/raddino.attn-nvfp4-seed1-sections/chexbert14.u0",
+            classifier="chexpertplus/raddino.attn-nvfp4-seed1/findings-impression/"
+            "chexbert14",
             rule="prevalence",
         ),
     ),
     (
         predict,
-        "predict --dataset chexpertplus --section findings "
-        "--classifier padchest/raddino.attn-nvfp4-seed1/padchest60",
+        "predict --dataset chexpertplus "
+        "--classifier padchest/raddino.attn-nvfp4-seed1/report/padchest60",
         dict(
             dataset="chexpertplus",
-            section="findings",
-            classifier="padchest/raddino.attn-nvfp4-seed1/padchest60",
+            classifier="padchest/raddino.attn-nvfp4-seed1/report/padchest60",
         ),
     ),
     (
@@ -152,35 +155,36 @@ CASES = [
     (
         build_prompts,
         "build-prompts --experiment pilot --section findings --condition labrag "
-        "--classifier attn-nvfp4-seed1",
+        "--classifier chexpertplus/raddino.attn-nvfp4-seed1/findings/chexbert14",
         dict(
             experiment="pilot",
             section="findings",
             condition="labrag",
-            classifier="attn-nvfp4-seed1",
+            classifier="chexpertplus/raddino.attn-nvfp4-seed1/findings/chexbert14",
         ),
     ),
     (
         build_prompts,
         "build-prompts --experiment pilot --section findings --condition labrag "
-        "--classifier attn-nvfp4-seed1-oof5 --corpus-labels predicted",
+        "--classifier chexpertplus/raddino.attn-nvfp4-seed1-oof5/findings/chexbert14 "
+        "--corpus-labels predicted",
         dict(
             experiment="pilot",
             section="findings",
             condition="labrag",
-            classifier="attn-nvfp4-seed1-oof5",
+            classifier="chexpertplus/raddino.attn-nvfp4-seed1-oof5/findings/chexbert14",
             corpus_labels="predicted",
         ),
     ),
     (
         build_prompts,
         "build-prompts --experiment pilot --section findings --condition labrag "
-        "--predictions padchest/raddino.attn-nvfp4-seed1/padchest60",
+        "--predictions padchest/raddino.attn-nvfp4-seed1/report/padchest60",
         dict(
             experiment="pilot",
             section="findings",
             condition="labrag",
-            predictions="padchest/raddino.attn-nvfp4-seed1/padchest60",
+            predictions="padchest/raddino.attn-nvfp4-seed1/report/padchest60",
         ),
     ),
     (

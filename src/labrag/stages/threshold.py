@@ -1,11 +1,10 @@
 """Stage ``threshold``: a classifier's predictions under another threshold rule.
 
 ``--classifier`` is a classify artifact under ``classifiers/``. Reads its probabilities
-(probs.csv, or probs.<section>.csv for a ``-sections`` head) and the labels it trained
-on; writes the same path with the rule's suffix on the classifier name (before
-``-sections``): predictions(.<section>).csv and metrics.csv, thresholds per label (and
-section) on the val studies with labels, the source's binarization and consistency
-rule. No model of its own: build-prompts checks the source's inputs, predict refuses it.
+(probs.<section>.csv) and the labels it trained on; writes the same path with the
+rule's suffix on the classifier name: predictions.<section>.csv and metrics.csv,
+thresholds per section and label on its val studies, the source's binarization and
+consistency rule. No model of its own: build-prompts checks the source's inputs, predict refuses it.
 
 Rules: ``0.5`` for every label; ``prevalence``: per label, as many val predictions as
 val positives (more only on ties). Max F1 is classify's own.
@@ -18,7 +17,6 @@ import pandas as pd
 
 from labrag import artifacts, paths
 from labrag.classifiers import logistic
-from labrag.data import padchest
 from labrag.stages import classify
 
 RULES = {"0.5": "-t50", "prevalence": "-prev"}  # rule: classifier name suffix
@@ -40,28 +38,16 @@ def run(classifier: str, rule: str, overwrite: bool = False) -> Path:
         raise SystemExit(
             "threshold: -oofK classifiers (fold models' thresholds) unsupported"
         )
-    parts = src_rel.split("/")  # classifiers, dataset, name, [section,] labeler
-    name = parts[2]
-    if name.endswith(classify.SECTIONS_SUFFIX):
-        new = name.removesuffix(classify.SECTIONS_SUFFIX) + RULES[rule]
-        new += classify.SECTIONS_SUFFIX
-    else:
-        new = name + RULES[rule]
-    relpath = "/".join([*parts[:2], new, *parts[3:]])
+    parts = src_rel.split("/")  # classifiers, dataset, name, section, labeler
+    relpath = "/".join([*parts[:2], parts[2] + RULES[rule], *parts[3:]])
 
-    sections = src_config.get("sections")
-    trained = manifest["inputs"]["labels"]
-    by_section = {s: trained[s] for s in sections} if sections else {None: trained}
     labels = {}
-    for s, record in by_section.items():
+    for s, record in manifest["inputs"]["labels"].items():
         now = artifacts.artifact_record(Path(record["path"]))
         if now["outputs"] != record["outputs"]:
             raise SystemExit(f"threshold: {record['path']} changed since classify")
         labels[s] = now
-    inputs = {
-        "classifier": artifacts.artifact_record(src),
-        "labels": labels if sections else labels[None],
-    }
+    inputs = {"classifier": artifacts.artifact_record(src), "labels": labels}
     config = {
         "stage": "threshold",
         "classifier": src_rel,
@@ -72,13 +58,12 @@ def run(classifier: str, rule: str, overwrite: bool = False) -> Path:
     }
     ones = src_config["binarize"] == classify.BINARIZE["ones"]
     positive = classify.POSITIVE["ones" if ones else "zeros"]
-    release = src_config["consistency"].startswith(classify.PADCHEST_CONSISTENCY)
+    release = src_config["binarize"] == classify.RELEASE_BINARIZE
 
     def build(out: Path) -> dict:
         metrics, summary = [], {}
         for s, record in labels.items():
-            tag = f".{s}" if sections else ""
-            probs = artifacts.read_table(src / f"probs{tag}.csv").set_index("study_id")
+            probs = artifacts.read_table(src / f"probs.{s}.csv").set_index("study_id")
             ref = artifacts.read_table(Path(record["path"]) / "labels.csv")
             ref = ref.set_index("study_id")
             names = list(ref.columns)
@@ -86,17 +71,13 @@ def run(classifier: str, rule: str, overwrite: bool = False) -> Path:
             P, Y, role, has = matrices(probs, ref, names, positive)
             val, official = (role == "val") & has, (role == "official_valid") & has
             cutoff = cutoffs(rule, Y[val], P[val])
-            pred = (P >= cutoff).astype(int)
-            if release:
-                pred = classify.consistent(pred, names, padchest.NO_FINDING, ())
-            else:
-                pred = classify.consistent(pred, names)
+            pred = classify.predict_labels(P, cutoff, names, release)
             preds = pd.DataFrame(pred, columns=names)
             preds.insert(0, "study_id", probs.index)
-            preds.to_csv(out / f"predictions{tag}.csv", index=False)
+            preds.to_csv(out / f"predictions.{s}.csv", index=False)
             table = pd.DataFrame(
                 {
-                    **({"section": s} if sections else {}),
+                    "section": s,
                     "label": names,
                     "train_pos": Y[(role == "train") & has].sum(0),
                     "threshold": cutoff,
@@ -111,7 +92,7 @@ def run(classifier: str, rule: str, overwrite: bool = False) -> Path:
                 }
             )
             metrics.append(table)
-            summary[s or "labels"] = {
+            summary[s] = {
                 "val_studies": int(val.sum()),
                 "val_predicted_per_study": float(pred[val].sum(1).mean()),
                 "val_reference_per_study": float(Y[val].sum(1).mean()),

@@ -4,9 +4,9 @@ Writes ``labels/<dataset>/<section>/<labeler>/labels.csv``: one row per study wi
 section, columns study_id + one per condition (1 positive, 0 negative, -1 uncertain,
 blank = not mentioned).
 
-A labels-only dataset (PadChest) has no section: ``labels/<dataset>/<labeler>/`` holds
-labels.csv (one row per labelled study, 1 present / 0 absent, columns most common
-first) and vocabulary.csv (label, train count), from the release's own labels.
+A labels-only dataset (PadChest, section ``report``): labels.csv (one row per labelled
+study, 1 present / 0 absent, columns most common first) and vocabulary.csv (label,
+train count), from the release's own labels.
 """
 
 import subprocess
@@ -19,13 +19,12 @@ from labrag import artifacts, paths, weights
 from labrag.data import DATASETS, check_section, labels_only, padchest
 from labrag.labelers import chexbert
 
-SECTIONS = ("findings", "impression")
 LABELERS = ("chexbert14", *padchest.VOCABULARIES)
 
 
 def run(
     dataset: str,
-    section: str | None = None,
+    section: str,
     labeler: str = "chexbert14",
     overwrite: bool = False,
     cxr_root: Path | None = None,
@@ -33,7 +32,7 @@ def run(
     check_section("labels", dataset, section)
     cxr_root = cxr_root or paths.CXR_ROOT
     if labels_only(dataset):
-        return _release_labels(dataset, labeler, overwrite, cxr_root)
+        return _release_labels(dataset, section, labeler, overwrite, cxr_root)
     if labeler != "chexbert14":
         raise SystemExit(f"labels: {labeler} is for PadChest only")
     adapter = DATASETS[dataset]
@@ -77,7 +76,7 @@ def run(
 
 
 def _release_labels(
-    dataset: str, labeler: str, overwrite: bool, cxr_root: Path
+    dataset: str, section: str, labeler: str, overwrite: bool, cxr_root: Path
 ) -> Path:
     """PadChest: the release's labels, restricted to a vocabulary drawn on train."""
     if labeler not in padchest.VOCABULARIES:
@@ -95,6 +94,7 @@ def _release_labels(
     config = {
         "stage": "labels",
         "dataset": dataset,
+        "section": section,
         "labeler": labeler,
         "labels": f"release Labels column; the {n} most common on train",
         "left_out": list(padchest.NOT_FINDINGS),
@@ -118,5 +118,5 @@ def _release_labels(
         return {"n_studies": len(labels), "n_labels": len(names)}
 
     return artifacts.publish(
-        f"labels/{dataset}/{labeler}", config, inputs, build, overwrite
+        f"labels/{dataset}/{section}/{labeler}", config, inputs, build, overwrite
     )

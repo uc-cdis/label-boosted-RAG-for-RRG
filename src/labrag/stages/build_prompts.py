@@ -7,10 +7,10 @@ without), reference (trimmed only).
 
 Conditions: ``retrieval-only`` (top K by image similarity) and ``labrag.<labeler>``
 (Jaccard on positive labels, ties by image similarity; the target's predicted labels in
-the prompt; corpus studies carry reference labels, binarized like the classifier). Its
-classifier is ``classifiers/<dataset>/<encoder>.<classifier>``: ``lr`` by default, any
-other written to ``labrag.<classifier>.<labeler>``; a ``-sections`` one (a readout per
-section) gives its predictions.<section>.csv.
+the prompt; corpus studies carry reference labels, binarized like the classifier).
+``--classifier <dataset>/<name>/<sections>/<labeler>`` (under ``classifiers/``; the
+experiment's dataset, the --uncertain labeler) gives its predictions.<section>.csv,
+written to ``labrag.<name>.<sections>.<labeler>`` (name without the encoder).
 ``labrag-oracle.<labeler>`` is labrag with the target's reference labels instead of
 predicted ones: the ceiling for any classifier. Two diagnostics between the two (they
 read the reference, so they are never a method): ``labrag-drop-fp.<labeler>``, the
@@ -21,9 +21,10 @@ the image. Retrieval never returns a study of the target's patient.
 Predicted corpus labels, for labrag only: ``--corpus-labels predicted`` takes them from
 the classifier's out-of-fold predictions (train role; a ``-oofK`` classifier) and its
 plain predictions (val role), directory suffix ``.corpus-predicted``.
-``--predictions <source>/<name>/<labeler>`` takes target and corpus labels from a
-predict artifact (a classifier from another dataset, e.g. PadChest-60), written to
-``labrag.<source>.<classifier>.<labeler>``.
+``--predictions <source>/<name>/<sections>/<labeler>`` takes target and corpus labels
+from a predict artifact (a classifier from another dataset, e.g. PadChest-60: its
+readout for the section, or its only one), written to
+``labrag.<source>.<name>.<sections>.<labeler>``.
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``).
@@ -37,9 +38,9 @@ import numpy as np
 import pandas as pd
 
 from labrag import artifacts, paths, prompts, retrieval
-from labrag.data import DATASETS
+from labrag.data import DATASETS, JOIN
 from labrag.stages import threshold
-from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, POSITIVE, SECTIONS_SUFFIX
+from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, POSITIVE
 
 # experiment -> dataset, target roles, corpus roles
 EXPERIMENTS = {
@@ -63,7 +64,6 @@ DEFAULT_PROMPT = {
 } | {c: "preprint-simple" for c in DIAGNOSTICS}
 K = 5
 ENCODER = "raddino"
-CLASSIFIER = "lr"  # default; the others name their condition directory
 LABELER = "chexbert14"
 
 
@@ -72,7 +72,7 @@ def run(
     section: str,
     condition: str,
     prompt: str | None = None,
-    classifier: str = CLASSIFIER,
+    classifier: str | None = None,
     uncertain: str = "zeros",
     corpus_labels: str = "reference",
     predictions: str | None = None,
@@ -90,13 +90,18 @@ def run(
     with_image = prompts.uses_image(version)
     oracle = condition == "labrag-oracle"
     predicted = condition == "labrag" or condition in DIAGNOSTICS
-    if classifier != CLASSIFIER and not predicted:
+    if classifier is not None and not predicted:
         raise SystemExit("build-prompts: --classifier is for predicted labels")
     if (corpus_labels != "reference" or predictions) and condition != "labrag":
         raise SystemExit("build-prompts: predicted corpus labels are for labrag only")
-    if predictions and (classifier != CLASSIFIER or corpus_labels != "reference"):
+    if predictions and (classifier is not None or corpus_labels != "reference"):
         raise SystemExit("build-prompts: --predictions brings its own labels")
-    if corpus_labels == "predicted" and "-oof" not in classifier:
+    if predicted and not predictions and classifier is None:
+        raise SystemExit(
+            "build-prompts: predicted labels need --classifier "
+            "<dataset>/<name>/<sections>/<labeler> or --predictions"
+        )
+    if corpus_labels == "predicted" and "-oof" not in (classifier or ""):
         raise SystemExit(
             "build-prompts: --corpus-labels predicted needs a -oofK classifier"
         )
@@ -108,9 +113,26 @@ def run(
         raise SystemExit(f"prompt {prompt!r} does not fit condition {condition!r}")
 
     labeler = LABELER + LABELER_SUFFIX[uncertain]
+    if transfer:
+        source, clf_name, clf_sections, labeler = parse_classifier(predictions)
+        readout = section if section in clf_sections.split(JOIN) else clf_sections
+        if JOIN in readout:
+            raise SystemExit(f"build-prompts: {predictions} has no {section} readout")
+    elif predicted:
+        source, clf_name, clf_sections, clf_labeler = parse_classifier(classifier)
+        if source != dataset:
+            raise SystemExit(
+                f"build-prompts: a {source} classifier on {dataset} goes through "
+                "predict and --predictions"
+            )
+        if clf_labeler != labeler:
+            raise SystemExit(
+                f"build-prompts: --uncertain gives {labeler}, not {clf_labeler}"
+            )
+        if section not in clf_sections.split(JOIN):
+            raise SystemExit(f"build-prompts: {classifier} has no {section} readout")
     emb_dir = paths.SHARED_ROOT / "embeddings" / dataset / ENCODER
     lab_dir = paths.SHARED_ROOT / "labels" / dataset / section / LABELER
-    clf_dir, clf_predictions = classifier_files(dataset, classifier, section, labeler)
     inputs = {
         "labels": artifacts.artifact_record(lab_dir),
         "sources": [artifacts.file_record(cxr_root / f) for f in adapter.SOURCE_FILES],
@@ -141,17 +163,16 @@ def run(
         inputs["images"] = {"root": str(image_root)}  # too many to hash
         config["image"] = "preferred per study (the embedded one)"
     if transfer:
-        pred_dir = paths.SHARED_ROOT / "predictions" / dataset / section
-        source, clf_name, labeler = predictions.split("/")
-        pred_dir = pred_dir / f"{source}.{clf_name}.{labeler}"
+        pred_dir = paths.SHARED_ROOT / "predictions" / dataset / predictions.strip("/")
         inputs["predictions"] = artifacts.artifact_record(pred_dir)
         config["predictions"] = predictions
     elif predicted:
+        clf_dir = paths.SHARED_ROOT / "classifiers" / classifier.strip("/")
         inputs["classifier"] = artifacts.artifact_record(clf_dir)
         clf_inputs = threshold.trained_manifest(clf_dir)["inputs"]
         for name in ("embeddings", "labels"):  # the classifier saw these same inputs
             record = clf_inputs[name]
-            if name == "labels" and clf_predictions != "predictions.csv":
+            if name == "labels":
                 record = record[section]  # one labels input per section
             if name == "embeddings" and record["path"] != str(emb_dir):
                 continue  # trained on tokens: its own image check is in classify
@@ -178,13 +199,12 @@ def run(
             "ranking": "jaccard of positive labels (empty vs empty = 1), then cosine",
         }
         condition_dir = f"{condition}.{labeler}"
-        if classifier != CLASSIFIER:
-            condition_dir = f"{condition}.{classifier}.{labeler}"
+        if predicted:
+            short = clf_name.removeprefix(f"{ENCODER}.")
+            short = f"{source}.{short}" if transfer else short
+            condition_dir = f"{condition}.{short}.{clf_sections}.{labeler}"
         if corpus_labels == "predicted":
             condition_dir += ".corpus-predicted"
-        if transfer:
-            short = clf_name.removeprefix(f"{ENCODER}.")
-            condition_dir = f"{condition}.{source}.{short}.{labeler}"
     else:
         if with_examples:
             config["ranking"] = "cosine"
@@ -194,7 +214,7 @@ def run(
         labels = artifacts.read_table(lab_dir / "labels.csv").set_index("study_id")
         names = list(labels.columns)
         if transfer:
-            transferred = artifacts.read_table(pred_dir / "predictions.csv")
+            transferred = artifacts.read_table(pred_dir / f"predictions.{readout}.csv")
             transferred = transferred.set_index("study_id")
             names = list(transferred.columns)
         studies = adapter.load_studies(cxr_root).set_index("study_id")
@@ -226,9 +246,10 @@ def run(
                 return y.to_numpy(dtype=int)
 
             if transfer:
-                corpus_y = transferred.loc[corpus.index].to_numpy(dtype=int)
+                corpus_y = transferred.loc[predicted_rows(transferred, corpus)]
+                corpus_y = corpus_y.to_numpy(dtype=int)
             elif corpus_labels == "predicted":
-                corpus_y = predicted_corpus(clf_dir, corpus, names)
+                corpus_y = predicted_corpus(clf_dir, section, corpus, names)
             else:
                 corpus_y = reference(corpus)
             if transfer:
@@ -236,9 +257,8 @@ def run(
             elif oracle:
                 target_y = reference(target)
             else:
-                pred = artifacts.read_table(clf_dir / clf_predictions).set_index(
-                    "study_id"
-                )
+                pred = artifacts.read_table(clf_dir / f"predictions.{section}.csv")
+                pred = pred.set_index("study_id")
                 assert list(pred.columns) == names, "classifier labels differ"
                 target_y = pred.loc[target.index, names].to_numpy(dtype=int)
                 if condition in DIAGNOSTICS:
@@ -312,26 +332,41 @@ def run(
     )
 
 
-def classifier_files(
-    dataset: str, classifier: str, section: str, labeler: str
-) -> tuple[Path, str]:
-    """A classifier's artifact directory and its predictions file for ``section``."""
-    root = paths.SHARED_ROOT / "classifiers" / dataset / f"{ENCODER}.{classifier}"
-    if classifier.endswith(SECTIONS_SUFFIX):
-        return root / labeler, f"predictions.{section}.csv"
-    return root / section / labeler, "predictions.csv"
+def parse_classifier(path: str) -> list[str]:
+    """dataset, name, sections, labeler of a classifier path under classifiers/."""
+    parts = path.strip("/").split("/")
+    if len(parts) != 4:
+        raise SystemExit(
+            f"build-prompts: {path!r} is not <dataset>/<name>/<sections>/<labeler>"
+        )
+    return parts
 
 
-def predicted_corpus(clf_dir: Path, corpus: pd.DataFrame, names: list[str]):
+def predicted_corpus(
+    clf_dir: Path, section: str, corpus: pd.DataFrame, names: list[str]
+):
     """Corpus labels from a -oofK classifier: out of fold for its train role, plain
     predictions for the rest (val: never trained on)."""
-    oof = artifacts.read_table(clf_dir / "oof_predictions.csv").set_index("study_id")
-    plain = artifacts.read_table(clf_dir / "predictions.csv").set_index("study_id")
+    oof = artifacts.read_table(clf_dir / f"oof_predictions.{section}.csv")
+    oof = oof.set_index("study_id")
+    plain = artifacts.read_table(clf_dir / f"predictions.{section}.csv")
+    plain = plain.set_index("study_id")
     assert list(oof.columns) == list(plain.columns) == names, "classifier labels differ"
     train = corpus.role.eq("train")
-    y = plain.loc[corpus.index, names].copy()
-    y.loc[train] = oof.loc[corpus.index[train], names]
+    y = plain.loc[predicted_rows(plain, corpus), names].copy()
+    y.loc[train] = oof.loc[predicted_rows(oof, corpus[train]), names]
     return y.to_numpy(dtype=int)
+
+
+def predicted_rows(pred: pd.DataFrame, rows: pd.DataFrame) -> pd.Index:
+    """``rows``' study ids, all of them with a prediction in ``pred``."""
+    missing = ~rows.index.isin(pred.index)
+    if missing.any():
+        raise SystemExit(
+            f"build-prompts: {missing.sum()} corpus studies have no predicted labels "
+            f"(not in the classifier's frontal tokens?), e.g. {rows.index[missing][0]}"
+        )
+    return rows.index
 
 
 def mix_labels(condition: str, predicted: np.ndarray, reference: np.ndarray):

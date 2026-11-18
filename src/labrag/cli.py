@@ -27,7 +27,7 @@ SUITE = ", ".join(evaluate.SUITE)
 # Options shared by several stages.
 OPTIONS = {
     "--dataset": dict(required=True, choices=sorted(DATASETS)),
-    "--section": dict(required=True, choices=labels.SECTIONS),
+    "--section": dict(required=True, choices=data.SECTIONS),
     "--encoder": dict(choices=sorted(embed.ENCODERS)),
     "--labeler": dict(choices=labels.LABELERS),
     "--uncertain": dict(
@@ -66,21 +66,14 @@ def add_splits(sub) -> None:
     p.add_argument("--dataset", **OPTIONS["--dataset"])
 
 
-def add_section_unless_labels_only(p: argparse.ArgumentParser) -> None:
-    """--section, required by the stage for every dataset but PadChest."""
-    p.add_argument(
-        "--section", choices=labels.SECTIONS, help="report section (none for PadChest)"
-    )
-
-
 def add_labels(sub) -> None:
-    p = stage(
+    stage(
         sub,
         labels,
         "--dataset",
+        "--section",
         "--labeler",
     )
-    add_section_unless_labels_only(p)
 
 
 def add_embed(sub) -> None:
@@ -95,12 +88,6 @@ def add_embed(sub) -> None:
         choices=embed.FEATURES,
         help="cls (default) or tokens: CLS + patch tokens, stored as NVFP4",
     )
-    p.add_argument(
-        "--section",
-        choices=labels.SECTIONS,
-        help="tokens only for the studies with this section's text; none: every "
-        "study with a frontal image",
-    )
 
 
 def add_classify(sub) -> None:
@@ -114,9 +101,10 @@ def add_classify(sub) -> None:
     )
     p.add_argument(
         "--section",
-        choices=labels.SECTIONS,
-        help="report section; none: one attn head for every section's labels on the "
-        "frontal tokens (PadChest: always none)",
+        required=True,
+        help=f"labels of a section ({', '.join(data.SECTIONS)}), or of several joined "
+        f"by {data.JOIN} (attn: one head, a readout per section), e.g. "
+        "findings-impression",
     )
     p.add_argument(
         "--classifier",
@@ -145,7 +133,7 @@ def add_threshold(sub) -> None:
         "--classifier",
         required=True,
         help="classify artifact under classifiers/, e.g. "
-        "chexpertplus/raddino.attn-nvfp4-seed1/findings/chexbert14.u0",
+        "chexpertplus/raddino.attn-nvfp4-seed1/findings/chexbert14",
     )
     p.add_argument(
         "--rule",
@@ -158,11 +146,10 @@ def add_threshold(sub) -> None:
 
 def add_predict(sub) -> None:
     p = stage(sub, predict, "--dataset")
-    add_section_unless_labels_only(p)
     p.add_argument(
         "--classifier",
         required=True,
-        help="classify artifact under classifiers/: <dataset>/<name>/<labeler>",
+        help="classify artifact under classifiers/: <dataset>/<name>/<sections>/<labeler>",
     )
 
 
@@ -185,9 +172,9 @@ def add_build_prompts(sub) -> None:
     )
     p.add_argument(
         "--classifier",
-        help="labrag and its diagnostics: classifier artifact "
-        "classifiers/<dataset>/<encoder>.<NAME> "
-        f"(default {build_prompts.CLASSIFIER}), e.g. attn-nvfp4-seed1",
+        help="labrag and its diagnostics: classify or threshold artifact under "
+        "classifiers/, <dataset>/<name>/<sections>/<labeler>, e.g. "
+        "chexpertplus/raddino.attn-nvfp4-seed1/findings-impression/chexbert14",
     )
     defaults = ", ".join(f"{c} {v}" for c, v in build_prompts.DEFAULT_PROMPT.items())
     p.add_argument(
@@ -201,8 +188,9 @@ def add_build_prompts(sub) -> None:
     )
     p.add_argument(
         "--predictions",
-        help="labrag: target and corpus labels from a predict artifact, "
-        "<source>/<name>/<labeler> (e.g. padchest/raddino.attn-nvfp4-seed1/padchest60)",
+        help="labrag: target and corpus labels from a predict artifact, its "
+        "classifier <source>/<name>/<sections>/<labeler> "
+        "(e.g. padchest/raddino.attn-nvfp4-seed1/report/padchest60)",
     )
 
 

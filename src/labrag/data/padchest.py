@@ -1,6 +1,7 @@
 """PadChest adapter: the author labels CSV (one row per image; labels per study) and the
 released PNGs. Labels only (LABELS_ONLY): the reports are stemmed Spanish, so studies
-carry no report section. PadChest-GR's official split decides which patients are held
+carry no report text, only the release's labels of the whole report (section
+``report``). PadChest-GR's official split decides which patients are held
 out; the threshold patients are drawn here."""
 
 import ast
@@ -13,7 +14,8 @@ SOURCE_CSV = "padchest/PADCHEST_chest_x_ray_images_labels_160K_01.02.19.csv.gz"
 GR_TABLE = "padchest-gr/master_table.csv"
 SOURCE_FILES = (SOURCE_CSV, GR_TABLE)
 IMAGE_ROOT = "padchest/images"  # image_path is relative to this
-LABELS_ONLY = True  # no report sections: stages take no --section
+LABELS_ONLY = True  # labels from the release, no report text
+SECTIONS = ("report",)
 
 # Labels that are not image findings, left out of every PadChest vocabulary.
 NOT_FINDINGS = ("unchanged", "exclude", "suboptimal study")
@@ -62,6 +64,7 @@ CORRUPT_IMAGES = frozenset(
 # Frontal views by preference (ties by image_path); a study with none drops out.
 # AP_horizontal is AP lying down. L, COSTAL (rib views), EXCLUDE and UNK are never used.
 VIEW_RANK = {"PA": 0, "AP": 1, "AP_horizontal": 2}
+FRONTAL_VIEWS = tuple(VIEW_RANK)
 
 # PadChest-GR split of a patient, strictest first: a study whose images name several
 # patients (one in the release) takes the strictest of their splits.

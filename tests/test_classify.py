@@ -24,15 +24,21 @@ def test_padchest_normal_is_cleared_by_any_other_label():
     assert out.tolist() == [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 
 
-def test_section_only_for_datasets_with_sections():
-    with pytest.raises(SystemExit, match="drop --section"):
+def test_sections_are_checked():
+    with pytest.raises(SystemExit, match="sections are \\['report'\\]"):
         classify.run("padchest", section="findings")
-    with pytest.raises(SystemExit, match="without --section only the attn"):
-        classify.run("chexpertplus")
-    with pytest.raises(SystemExit, match="--folds needs --section"):
-        classify.run("chexpertplus", classifier="attn", folds=5)
+    with pytest.raises(SystemExit, match="in the order"):
+        classify.run("chexpertplus", section="impression-findings", classifier="attn")
+    with pytest.raises(SystemExit, match="in the order"):
+        classify.run("chexpertplus", section="findings-findings", classifier="attn")
+    with pytest.raises(SystemExit, match="several sections only for the attn"):
+        classify.run("chexpertplus", section="findings-impression")
+    with pytest.raises(SystemExit, match="--folds needs a single section"):
+        classify.run(
+            "chexpertplus", section="findings-impression", classifier="attn", folds=5
+        )
     with pytest.raises(SystemExit, match="no uncertain"):
-        classify.run("padchest", uncertain="ones")
+        classify.run("padchest", section="report", uncertain="ones")
 
 
 def test_load_tokens_keeps_the_first_tokens(tmp_path):
@@ -78,13 +84,6 @@ def test_folds_split_train_patients_only():
     assert fold[6] == fold[7] == -1  # not train: no fold
     patients = {s: f for s, f, t in zip(subject, fold, train) if t}
     assert sorted(np.bincount(list(patients.values()))) == [2, 3]  # 5 patients
-
-
-def test_embed_section_only_with_tokens():
-    from labrag.stages import embed
-
-    with pytest.raises(SystemExit, match="--feature tokens only"):
-        embed.run("chexpertplus", section="findings")
 
 
 def test_folds_are_for_attn_only():

@@ -32,14 +32,17 @@ def test_every_diagnostic_mixes_and_has_a_prompt():
 def test_predicted_corpus_takes_out_of_fold_labels_for_train(tmp_path):
     names = ["A", "B"]
     pd.DataFrame({"study_id": ["t1", "t2"], "A": [1, 0], "B": [0, 0]}).to_csv(
-        tmp_path / "oof_predictions.csv", index=False
+        tmp_path / "oof_predictions.findings.csv", index=False
     )
     pd.DataFrame(
         {"study_id": ["t1", "t2", "v1"], "A": [0, 1, 1], "B": [1, 1, 0]}
-    ).to_csv(tmp_path / "predictions.csv", index=False)
+    ).to_csv(tmp_path / "predictions.findings.csv", index=False)
     corpus = pd.DataFrame({"role": ["val", "train", "train"]}, index=["v1", "t2", "t1"])
-    y = build_prompts.predicted_corpus(tmp_path, corpus, names)
+    y = build_prompts.predicted_corpus(tmp_path, "findings", corpus, names)
     assert y.tolist() == [[1, 0], [0, 0], [1, 0]]
+
+
+CLF = "chexpertplus/raddino.attn-nvfp4-seed1/findings-impression/chexbert14"
 
 
 def test_predicted_corpus_options_are_checked():
@@ -47,19 +50,30 @@ def test_predicted_corpus_options_are_checked():
     with pytest.raises(SystemExit, match="labrag only"):
         run("pilot", "findings", "retrieval-only", corpus_labels="predicted")
     with pytest.raises(SystemExit, match="-oofK"):
-        run("pilot", "findings", "labrag", corpus_labels="predicted")
+        run("pilot", "findings", "labrag", classifier=CLF, corpus_labels="predicted")
     with pytest.raises(SystemExit, match="its own labels"):
-        run("pilot", "findings", "labrag", classifier="x", predictions="a/b/c")
+        run("pilot", "findings", "labrag", classifier=CLF, predictions="a/b/c/d")
 
 
-def test_sections_classifier_gives_its_section_predictions():
-    from labrag.stages.build_prompts import classifier_files
+@pytest.mark.parametrize(
+    "classifier, kwargs, match",
+    [
+        (None, {}, "need --classifier"),
+        ("chexpertplus/raddino.lr/chexbert14", {}, "is not <dataset>"),
+        ("padchest/raddino.attn-nvfp4-seed1/report/padchest60", {}, "--predictions"),
+        (CLF, {"uncertain": "ones"}, "gives chexbert14.u1, not chexbert14"),
+        ("chexpertplus/raddino.lr/impression/chexbert14", {}, "no findings readout"),
+    ],
+)
+def test_classifier_path_is_checked(classifier, kwargs, match):
+    with pytest.raises(SystemExit, match=match):
+        build_prompts.run(
+            "pilot", "findings", "labrag", classifier=classifier, **kwargs
+        )
 
-    d, f = classifier_files("chexpertplus", "attn-nvfp4-seed1", "findings", "x.u0")
-    assert d.parts[-3:] == ("raddino.attn-nvfp4-seed1", "findings", "x.u0")
-    assert f == "predictions.csv"
-    d, f = classifier_files(
-        "chexpertplus", "attn-nvfp4-seed1-sections", "findings", "x.u0"
-    )
-    assert d.parts[-2:] == ("raddino.attn-nvfp4-seed1-sections", "x.u0")
-    assert f == "predictions.findings.csv"
+
+def test_corpus_studies_without_predictions_are_refused():
+    pred = pd.DataFrame({"A": [1]}, index=["t1"])
+    corpus = pd.DataFrame({"role": ["train", "train"]}, index=["t1", "lateral"])
+    with pytest.raises(SystemExit, match="1 corpus studies have no predicted"):
+        build_prompts.predicted_rows(pred, corpus)

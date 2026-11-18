@@ -1,12 +1,15 @@
-"""Stage ``classify``: per-label image classifiers for one report section's labels.
+"""Stage ``classify``: per-label image classifiers for one or more sections' labels.
 
-Writes ``classifiers/<dataset>/<encoder>.<classifier>/<section>/<labeler>[.u0]/``:
-model.npz (coef, intercept, threshold per label; C for lr-tuned), probs.csv (study_id,
-role, one column per label), predictions.csv (0/1, the layout of labels.csv),
-metrics.csv (per label, on val and official valid).
+Writes ``classifiers/<dataset>/<encoder>.<classifier>/<section>/<labeler>[.u1]/``:
+model.npz (coef, intercept, threshold per label; C for lr-tuned), metrics.csv (per
+section and label, on val and official valid), and per section s of the classifier
+probs.<s>.csv (study_id, role, one column per label) and predictions.<s>.csv (0/1, the
+layout of labels.csv).
 
-Fit within each section, on the adapter's ``train`` role; max-F1 thresholds on ``val``;
-other roles predicted only. Classifiers:
+Its studies: those with labels in any of its sections and an embedding (the attn ones
+read the frontal token store, so studies whose preferred image is lateral drop out;
+counted in the summary). Fit on the adapter's ``train`` role; max-F1 thresholds per
+section on its ``val`` studies; other roles predicted only. Classifiers:
 
 - ``lr``: per-label logistic regression on the CLS embedding (the preprint's; CPU).
 - ``lr-tuned``: ``lr`` on standardized features with C picked per label on val (CPU).
@@ -18,30 +21,23 @@ The ``attn`` ones are written to ``<encoder>.<classifier>-<tokens>-seed<seed>`` 
 the storage format they are read in) with model.pt instead of model.npz. A float16
 token store can be read in any format; a packed store (embed's) only in its own.
 
-Uncertain labels (Irvin et al. 2019): ``zeros`` (U-Zeros, default, ``.u0``) counts only
-positive as 1; ``ones`` (U-Ones, the preprint) also uncertain.
+``--section`` with sections joined by ``-`` (``findings-impression``; attn only): one
+head learns every section's labels, one query per label shared by the sections, one
+readout per section, and each study's loss only over the sections it has labels for.
 
-``--folds K`` (attn only, name suffix ``-oofK``) also writes out-of-fold predictions for
-the train role (oof_probs.csv, oof_predictions.csv): train patients split into K folds,
-each predicted by the same training on the other folds (epoch and thresholds on val),
-for wherever predicted labels stand in for reference ones on studies the classifier
-trains on.
+Uncertain labels (Irvin et al. 2019): ``zeros`` (U-Zeros, the default) counts only
+positive as 1; ``ones`` (U-Ones, the preprint, labeler suffix ``.u1``) also uncertain.
+
+``--folds K`` (attn, one section; name suffix ``-oofK``) also writes out-of-fold
+predictions for the train role (oof_probs.<s>.csv, oof_predictions.<s>.csv): train
+patients split into K folds, each predicted by the same training on the other folds
+(epoch and thresholds on val), for wherever predicted labels stand in for reference
+ones on studies the classifier trains on.
 
 Pathologies win (``consistent``): No Finding is cleared wherever a label other than
 Support Devices is predicted, as CheXbert's reference labels do (all but 40 of 46,759).
 PadChest's ``normal`` is cleared wherever any other label is predicted (its labels pair
 normal with another label in 155 of 108,746 studies, devices included).
-
-A labels-only dataset (PadChest) takes no ``--section``: it reads
-``labels/<dataset>/<labeler>/`` and writes ``classifiers/<dataset>/<name>/<labeler>/``.
-
-Without ``--section`` on a dataset with sections (attn only, no ``--folds``), one head
-learns every section's labels (labels.SECTIONS) from the frontal token store (``embed
---feature tokens`` without ``--section``): one query per label shared by the sections,
-one readout per section, and each study's loss only over the sections it has labels
-for. Written to ``classifiers/<dataset>/<name>-sections/<labeler>[.u0]/`` with probs.<section>.csv
-and predictions.<section>.csv for every embedded study, thresholds per section and
-label on the val studies with that section, metrics.csv with a section column.
 """
 
 from pathlib import Path
@@ -53,8 +49,7 @@ from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_sco
 
 from labrag import artifacts, paths
 from labrag.classifiers import attention, logistic, quant
-from labrag.data import DATASETS, check_section, labels_only, padchest
-from labrag.stages.labels import SECTIONS
+from labrag.data import DATASETS, labels_only, padchest, split_sections
 
 CLASSIFIERS = ("lr", "lr-tuned", "attn", "attn-cls")
 TOKEN_CHUNK = 256  # studies packed at a time while loading tokens
@@ -64,7 +59,8 @@ BINARIZE = {
     "ones": "positive or uncertain = 1, negative or blank = 0",
     "zeros": "positive = 1, uncertain or negative or blank = 0",
 }
-LABELER_SUFFIX = {"ones": "", "zeros": ".u0"}
+RELEASE_BINARIZE = "release labels: 1 present, 0 absent"
+LABELER_SUFFIX = {"zeros": "", "ones": ".u1"}
 PARAMS = {
     "lr": logistic.PARAMS,
     "lr-tuned": logistic.TUNED_PARAMS,
@@ -76,12 +72,11 @@ NOT_PATHOLOGY = ("No Finding", "Support Devices")
 CONSISTENCY = "No Finding = 0 when any label other than Support Devices is predicted"
 FOLD_SEED = 20261117
 PADCHEST_CONSISTENCY = "normal = 0 when any other label is predicted"
-SECTIONS_SUFFIX = "-sections"  # name suffix of a head with a readout per section
 
 
 def run(
     dataset: str,
-    section: str | None = None,
+    section: str,
     encoder: str = "raddino",
     labeler: str = "chexbert14",
     classifier: str = "lr",
@@ -92,21 +87,8 @@ def run(
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:
-    release = labels_only(dataset)  # PadChest: 0/1 release labels, no section
-    if section is None and not release:
-        return _sections_head(
-            dataset=dataset,
-            encoder=encoder,
-            labeler=labeler,
-            classifier=classifier,
-            uncertain=uncertain,
-            tokens=tokens,
-            seed=seed,
-            folds=folds,
-            overwrite=overwrite,
-            cxr_root=cxr_root,
-        )
-    check_section("classify", dataset, section)
+    sections = split_sections("classify", dataset, section)
+    release = labels_only(dataset)  # PadChest: 0/1 release labels
     if release and uncertain != "zeros":
         raise SystemExit(f"classify: {dataset} labels have no uncertain value")
     attn = classifier in ("attn", "attn-cls")
@@ -114,6 +96,10 @@ def run(
         raise SystemExit(
             "classify: --tokens, --seed and --folds are for the attn classifiers"
         )
+    if len(sections) > 1 and not attn:
+        raise SystemExit("classify: several sections only for the attn classifiers")
+    if folds is not None and len(sections) > 1:
+        raise SystemExit("classify: --folds needs a single section")
     if folds is not None and folds < 2:
         raise SystemExit("classify: --folds needs at least 2")
     tokens = tokens or "fp16"
@@ -122,16 +108,18 @@ def run(
     adapter = DATASETS[dataset]
     emb_dir = paths.SHARED_ROOT / "embeddings" / dataset / encoder
     if attn:
-        emb_dir = emb_dir.with_name(f"{encoder}.tokens") / (section or "")
+        emb_dir = emb_dir.with_name(f"{encoder}.tokens") / "frontal"
         stored = quant.stored_format(emb_dir)
         if stored not in (None, "fp16", tokens):
             raise SystemExit(
                 f"classify: tokens are stored as {stored}: --tokens {stored}"
             )
-    lab_dir = paths.SHARED_ROOT / "labels" / dataset / (section or "") / labeler
+    lab_dirs = {
+        s: paths.SHARED_ROOT / "labels" / dataset / s / labeler for s in sections
+    }
     inputs = {
         "embeddings": artifacts.artifact_record(emb_dir),
-        "labels": artifacts.artifact_record(lab_dir),
+        "labels": {s: artifacts.artifact_record(d) for s, d in lab_dirs.items()},
         "sources": [artifacts.file_record(cxr_root / f) for f in adapter.SOURCE_FILES],
         "splits": [
             artifacts.file_record(paths.SPLITS_DIR / f) for f in adapter.SPLIT_FILES
@@ -140,18 +128,20 @@ def run(
     config = {
         "stage": "classify",
         "dataset": dataset,
-        "section": section,
+        "sections": sections,
         "encoder": encoder,
         "labeler": labeler,
         "classifier": classifier,
         "params": PARAMS[classifier],
-        "binarize": (
-            "release labels: 1 present, 0 absent" if release else BINARIZE[uncertain]
-        ),
-        "fit": "train",
-        "threshold": "max F1 on val; predict prob >= threshold",
+        "binarize": RELEASE_BINARIZE if release else BINARIZE[uncertain],
+        "fit": "train; each section's loss on the studies with its labels",
+        "threshold": "max F1 per section on its val studies; predict prob >= threshold",
         "consistency": PADCHEST_CONSISTENCY if release else CONSISTENCY,
     }
+    if len(sections) > 1:
+        config["readouts"] = (
+            "one query per label shared by the sections, a readout per section"
+        )
     name = f"{encoder}.{classifier}"
     if attn:
         config |= {"tokens": quant.DESCRIPTION[tokens], "seed": seed}
@@ -168,28 +158,48 @@ def run(
         name += f"-oof{folds}"
 
     def build(out: Path) -> dict:
-        labels = artifacts.read_table(lab_dir / "labels.csv")
-        names = list(labels.columns.drop("study_id"))
+        labels = {
+            s: artifacts.read_table(d / "labels.csv").set_index("study_id")
+            for s, d in lab_dirs.items()
+        }
+        names = list(labels[sections[0]].columns)
+        assert all(list(t.columns) == names for t in labels.values()), "labels differ"
+        n = len(names)
+        blocks = {s: slice(i * n, (i + 1) * n) for i, s in enumerate(sections)}
+        embedded = artifacts.read_table(emb_dir / "studies.csv")
+        any_label = embedded.study_id.isin(
+            set().union(*(t.index for t in labels.values()))
+        ).to_numpy()
+        rows = np.flatnonzero(any_label)
+        ids = embedded.study_id[any_label].reset_index(drop=True)
         studies = adapter.load_studies(cxr_root).set_index("study_id")
         studies["role"] = adapter.classifier_roles(studies, paths.SPLITS_DIR)
-        studies = studies.loc[labels.study_id]  # KeyError if a label has no study
-
+        studies = studies.loc[ids]
         # The embedded image must be the one the adapter picks for the study today.
-        embedded = artifacts.read_table(emb_dir / "studies.csv").set_index("study_id")
-        embedded["row"] = np.arange(len(embedded))
-        embedded = embedded.loc[labels.study_id]
-        assert (embedded.image_path == studies.image_path).all(), "image mismatch"
-        rows = embedded.row.to_numpy()
-        Y = labels[names].isin(POSITIVE[uncertain]).to_numpy(dtype=int)
+        embedded_image = embedded.image_path.to_numpy()[rows]
+        assert (embedded_image == studies.image_path.to_numpy()).all(), "image mismatch"
         role = studies.role.to_numpy()
-        train, val, official = role == "train", role == "val", role == "official_valid"
+        train, val = role == "train", role == "val"
+        official = role == "official_valid"
+        has = {s: ids.isin(t.index).to_numpy() for s, t in labels.items()}
+        Y = np.zeros((len(ids), n * len(sections)), dtype=int)
+        for s, t in labels.items():
+            y = t.loc[ids[has[s]], names].isin(POSITIVE[uncertain])
+            Y[has[s], blocks[s]] = y.to_numpy(dtype=int)
+        mask = None
+        if len(sections) > 1:
+            mask = np.concatenate(
+                [np.repeat(has[s][:, None], n, 1) for s in sections], 1
+            )
 
         if attn:
             attention.deterministic()
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             keep = 1 if classifier == "attn-cls" else None
             X = _load_tokens(emb_dir, rows, tokens, device, keep)
-            model, history = attention.fit(X, Y, train, val, seed)
+            model, history = attention.fit(
+                X, Y, train, val, seed, mask=mask, readouts=len(sections)
+            )
             P = attention.predict_proba(model, X, torch.arange(len(X), device=device))
             extra = {}
         elif classifier == "lr-tuned":
@@ -199,21 +209,22 @@ def run(
             extra = {"C": C, "n_iter": n_iter}
         else:
             X = np.load(emb_dir / "embeddings.npy")[rows]
-            fits = [logistic.fit(X[train], Y[train, j]) for j in range(len(names))]
+            fits = [logistic.fit(X[train], Y[train, j]) for j in range(n)]
             coef = np.stack([f[0] for f in fits])
             intercept = np.array([f[1] for f in fits])
             P = logistic.predict_proba(X, coef, intercept)
             extra = {"n_iter": [f[2] for f in fits]}
 
         def decide(P: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-            """Max-F1 thresholds on val, and the consistent 0/1 predictions."""
-            threshold = np.array(
-                [logistic.f1_threshold(Y[val, j], P[val, j]) for j in range(len(names))]
-            )
-            pred = (P >= threshold).astype(int)
-            if release:
-                return threshold, consistent(pred, names, padchest.NO_FINDING, ())
-            return threshold, consistent(pred, names)
+            """Max-F1 thresholds per section on its val studies (sections x labels),
+            and the consistent 0/1 predictions."""
+            thresholds, pred = [], np.zeros(P.shape, dtype=int)
+            for s, b in blocks.items():
+                Yv, Pv = Y[val & has[s], b], P[val & has[s], b]
+                t = np.array([logistic.f1_threshold(y, p) for y, p in zip(Yv.T, Pv.T)])
+                pred[:, b] = predict_labels(P[:, b], t, names, release)
+                thresholds.append(t)
+            return np.stack(thresholds), pred
 
         threshold, pred = decide(P)
         oof = None
@@ -221,33 +232,57 @@ def run(
             fold = fold_of(studies.subject_id.to_numpy(), train, folds)
             oof_P, oof_pred, oof = out_of_fold(X, Y, fold, val, seed, decide)
             held = fold >= 0
-            ids = labels.study_id[held].to_numpy()
+            (s,) = sections
             probs_oof = pd.DataFrame(oof_P[held], columns=names)
             probs_oof.insert(0, "fold", fold[held])
-            probs_oof.insert(0, "study_id", ids)
-            probs_oof.to_csv(out / "oof_probs.csv", index=False)
+            probs_oof.insert(0, "study_id", ids[held].to_numpy())
+            probs_oof.to_csv(out / f"oof_probs.{s}.csv", index=False)
             preds_oof = pd.DataFrame(oof_pred[held], columns=names)
-            preds_oof.insert(0, "study_id", ids)
-            preds_oof.to_csv(out / "oof_predictions.csv", index=False)
+            preds_oof.insert(0, "study_id", ids[held].to_numpy())
+            preds_oof.to_csv(out / f"oof_predictions.{s}.csv", index=False)
 
-        metrics = pd.DataFrame(
-            {
-                "label": names,
-                **extra,
-                "train_pos": Y[train].sum(0),
-                "threshold": threshold,
-                **_scores("val", Y[val], P[val], pred[val]),
-                **(
-                    _scores("official_valid", Y[official], P[official], pred[official])
-                    if official.any()
-                    else {}
-                ),
-            }
-        )
+        metrics, by_section = [], {}
+        for i, (s, b) in enumerate(blocks.items()):
+            v, o = val & has[s], official & has[s]
+            Ys, Ps, preds_s = Y[:, b], P[:, b], pred[:, b]
+            by_section[s] = attention.mean_auroc(Ys[v], Ps[v])
+            metrics.append(
+                pd.DataFrame(
+                    {
+                        "section": s,
+                        "label": names,
+                        **extra,
+                        "train_pos": Ys[train & has[s]].sum(0),
+                        "threshold": threshold[i],
+                        **_scores("val", Ys[v], Ps[v], preds_s[v]),
+                        **(
+                            _scores("official_valid", Ys[o], Ps[o], preds_s[o])
+                            if o.any()
+                            else {}
+                        ),
+                    }
+                )
+            )
+            probs = pd.DataFrame(Ps, columns=names)
+            probs.insert(0, "role", role)
+            probs.insert(0, "study_id", ids)
+            probs.to_csv(out / f"probs.{s}.csv", index=False)
+            preds = pd.DataFrame(preds_s, columns=names)
+            preds.insert(0, "study_id", ids)
+            preds.to_csv(out / f"predictions.{s}.csv", index=False)
+        metrics = pd.concat(metrics, ignore_index=True)
+        metrics.to_csv(out / "metrics.csv", index=False)
+        print(metrics.to_string(index=False))
+
         if attn:
             state = {k: v.cpu() for k, v in model.state_dict().items()}
             torch.save(
-                {"labels": names, "state_dict": state, "threshold": threshold},
+                {
+                    "labels": names,
+                    "sections": sections,
+                    "state_dict": state,
+                    "threshold": threshold,
+                },
                 out / "model.pt",
             )
             pd.DataFrame(history).to_csv(out / "history.csv", index=False)
@@ -255,23 +290,21 @@ def run(
             np.savez(
                 out / "model.npz",
                 labels=np.array(names),
+                sections=np.array(sections),
                 coef=coef,
                 intercept=intercept,
                 threshold=threshold,
                 **({"C": extra["C"]} if "C" in extra else {}),
             )
-        probs = pd.DataFrame(P, columns=names)
-        probs.insert(0, "role", role)
-        probs.insert(0, "study_id", labels.study_id)
-        probs.to_csv(out / "probs.csv", index=False)
-        preds = pd.DataFrame(pred, columns=names)
-        preds.insert(0, "study_id", labels.study_id)
-        preds.to_csv(out / "predictions.csv", index=False)
-        metrics.to_csv(out / "metrics.csv", index=False)
-        print(metrics.to_string(index=False))
         summary = {
-            "n_studies": len(labels),
+            "n_studies": len(ids),
             "n_by_role": pd.Series(role).value_counts().sort_index().to_dict(),
+            "n_labelled": {s: int(h.sum()) for s, h in has.items()},
+            "n_labelled_not_embedded": {
+                s: int((~t.index.isin(embedded.study_id)).sum())
+                for s, t in labels.items()
+            },
+            "val_mean_auroc_by_section": by_section,
         }
         if attn:
             best = max(history, key=lambda h: h["val_auroc"])
@@ -285,174 +318,20 @@ def run(
             summary["oof"] = oof
         return summary
 
-    if release:
-        relpath = f"classifiers/{dataset}/{name}/{labeler}"
-    else:
-        relpath = f"classifiers/{dataset}/{name}/{section}/{labeler}{LABELER_SUFFIX[uncertain]}"
-    return artifacts.publish(
-        relpath,
-        config,
-        inputs,
-        build,
-        overwrite,
+    relpath = (
+        f"classifiers/{dataset}/{name}/{section}/{labeler}{LABELER_SUFFIX[uncertain]}"
     )
-
-
-def _sections_head(
-    dataset: str,
-    encoder: str,
-    labeler: str,
-    classifier: str,
-    uncertain: str,
-    tokens: str | None,
-    seed: int | None,
-    folds: int | None,
-    overwrite: bool,
-    cxr_root: Path | None,
-) -> Path:
-    """One attn head with a readout per section, on the frontal tokens (see above)."""
-    if classifier not in ("attn", "attn-cls"):
-        raise SystemExit(
-            "classify: without --section only the attn classifiers (all sections' "
-            "labels on the frontal tokens); give --section for the others"
-        )
-    if folds is not None:
-        raise SystemExit("classify: --folds needs --section")
-    tokens = tokens or "fp16"
-    seed = 0 if seed is None else seed
-    cxr_root = cxr_root or paths.CXR_ROOT
-    adapter = DATASETS[dataset]
-    emb_dir = paths.SHARED_ROOT / "embeddings" / dataset / f"{encoder}.tokens/frontal"
-    stored = quant.stored_format(emb_dir)
-    if stored not in (None, "fp16", tokens):
-        raise SystemExit(f"classify: tokens are stored as {stored}: --tokens {stored}")
-    lab_dirs = {
-        s: paths.SHARED_ROOT / "labels" / dataset / s / labeler for s in SECTIONS
-    }
-    inputs = {
-        "embeddings": artifacts.artifact_record(emb_dir),
-        "labels": {s: artifacts.artifact_record(d) for s, d in lab_dirs.items()},
-        "sources": [artifacts.file_record(cxr_root / f) for f in adapter.SOURCE_FILES],
-        "splits": [
-            artifacts.file_record(paths.SPLITS_DIR / f) for f in adapter.SPLIT_FILES
-        ],
-    }
-    config = {
-        "stage": "classify",
-        "dataset": dataset,
-        "sections": list(SECTIONS),
-        "encoder": encoder,
-        "labeler": labeler,
-        "classifier": classifier,
-        "params": PARAMS[classifier],
-        "readouts": "one query per label shared by the sections, a readout per section",
-        "binarize": BINARIZE[uncertain],
-        "fit": "train; each section's loss on the studies with its labels",
-        "threshold": "max F1 per section on its val studies; predict prob >= threshold",
-        "consistency": CONSISTENCY + ", per section",
-        "tokens": quant.DESCRIPTION[tokens],
-        "seed": seed,
-    }
-    if classifier == "attn-cls":
-        config["input"] = "CLS token only (token 0 of the tokens)"
-    name = f"{encoder}.{classifier}-{tokens}-seed{seed}{SECTIONS_SUFFIX}"
-
-    def build(out: Path) -> dict:
-        embedded = artifacts.read_table(emb_dir / "studies.csv")
-        studies = adapter.load_studies(cxr_root).set_index("study_id")
-        studies = studies.loc[embedded.study_id]
-        assert (embedded.image_path.to_numpy() == studies.image_path).all(), "image"
-        role = adapter.classifier_roles(studies, paths.SPLITS_DIR).to_numpy()
-        names, Ys, has = None, [], {}
-        for s, d in lab_dirs.items():
-            labels = artifacts.read_table(d / "labels.csv").set_index("study_id")
-            assert names in (None, list(labels.columns)), "sections' labels differ"
-            names = list(labels.columns)
-            has[s] = embedded.study_id.isin(labels.index).to_numpy()
-            y = np.zeros((len(embedded), len(names)), dtype=int)
-            rows = embedded.study_id[has[s]]
-            y[has[s]] = labels.loc[rows, names].isin(POSITIVE[uncertain]).to_numpy()
-            Ys.append(y)
-        n = len(names)
-        Y = np.concatenate(Ys, axis=1)
-        mask = np.concatenate(
-            [np.repeat(h[:, None], n, axis=1) for h in has.values()], 1
-        )
-        labelled = mask.any(axis=1)
-        train, val = (role == "train") & labelled, (role == "val") & labelled
-
-        attention.deterministic()
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        keep = 1 if classifier == "attn-cls" else None
-        X = _load_tokens(emb_dir, np.arange(len(embedded)), tokens, device, keep)
-        model, history = attention.fit(
-            X, Y, train, val, seed, mask=mask, readouts=len(SECTIONS)
-        )
-        P = attention.predict_proba(model, X, torch.arange(len(X), device=device))
-
-        thresholds, metrics, by_section = [], [], {}
-        for i, s in enumerate(SECTIONS):
-            Ps, Ysec = P[:, i * n : (i + 1) * n], Y[:, i * n : (i + 1) * n]
-            v, o = val & has[s], (role == "official_valid") & has[s]
-            threshold = np.array(
-                [logistic.f1_threshold(Ysec[v, j], Ps[v, j]) for j in range(n)]
-            )
-            pred = consistent((Ps >= threshold).astype(int), names)
-            thresholds.append(threshold)
-            by_section[s] = attention.mean_auroc(Ysec[v], Ps[v])
-            metrics.append(
-                pd.DataFrame(
-                    {
-                        "section": s,
-                        "label": names,
-                        "train_pos": Ysec[train & has[s]].sum(0),
-                        "threshold": threshold,
-                        **_scores("val", Ysec[v], Ps[v], pred[v]),
-                        **(
-                            _scores("official_valid", Ysec[o], Ps[o], pred[o])
-                            if o.any()
-                            else {}
-                        ),
-                    }
-                )
-            )
-            probs = pd.DataFrame(Ps, columns=names)
-            probs.insert(0, "role", role)
-            probs.insert(0, "study_id", embedded.study_id)
-            probs.to_csv(out / f"probs.{s}.csv", index=False)
-            preds = pd.DataFrame(pred, columns=names)
-            preds.insert(0, "study_id", embedded.study_id)
-            preds.to_csv(out / f"predictions.{s}.csv", index=False)
-
-        metrics = pd.concat(metrics, ignore_index=True)
-        metrics.to_csv(out / "metrics.csv", index=False)
-        print(metrics.to_string(index=False))
-        state = {k: v.cpu() for k, v in model.state_dict().items()}
-        torch.save(
-            {
-                "labels": names,
-                "sections": list(SECTIONS),
-                "state_dict": state,
-                "threshold": np.stack(thresholds),
-            },
-            out / "model.pt",
-        )
-        pd.DataFrame(history).to_csv(out / "history.csv", index=False)
-        best = max(history, key=lambda h: h["val_auroc"])
-        return {
-            "n_studies": len(embedded),
-            "n_by_role": pd.Series(role).value_counts().sort_index().to_dict(),
-            "n_labelled": {s: int(h.sum()) for s, h in has.items()},
-            "n_train": int(train.sum()),
-            "epochs": len(history),
-            "best_epoch": best["epoch"],
-            "val_mean_auroc": best["val_auroc"],
-            "val_mean_auroc_by_section": by_section,
-            "device": str(device),
-        }
-
-    relpath = f"classifiers/{dataset}/{name}/{labeler}{LABELER_SUFFIX[uncertain]}"
     return artifacts.publish(relpath, config, inputs, build, overwrite)
+
+
+def predict_labels(
+    P: np.ndarray, threshold: np.ndarray, names: list[str], release: bool
+) -> np.ndarray:
+    """0/1 predictions at ``threshold``, made consistent by the dataset's rule."""
+    pred = (P >= threshold).astype(int)
+    if release:
+        return consistent(pred, names, padchest.NO_FINDING, ())
+    return consistent(pred, names)
 
 
 def _load_tokens(

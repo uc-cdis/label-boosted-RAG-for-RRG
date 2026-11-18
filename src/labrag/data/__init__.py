@@ -10,10 +10,12 @@ Each adapter module provides:
   (``train``, ``val``, or a held-out role), from the frozen files ``SPLIT_FILES``;
 - ``write_splits(cxr_root, splits_dir)``: redraws those files (only for splits drawn
   here, not official ones);
-- ``LABELS_ONLY`` (optional, default False): no report sections; its labels come from
-  the release, and stages take no ``--section`` for it.
-- ``FRONTAL_VIEWS`` (datasets with sections): the ``view`` values of a frontal image,
-  for the classifiers' frontal-only token store.
+- ``SECTIONS``: the report sections its labels describe (PadChest: ``report``, the
+  whole report);
+- ``LABELS_ONLY`` (optional, default False): its labels come from the release, not
+  from a labeler run on report text;
+- ``FRONTAL_VIEWS``: the ``view`` values of a frontal image, for the classifiers'
+  frontal-only token store.
 """
 
 from labrag import paths
@@ -22,17 +24,32 @@ from labrag.data import chexpertplus, padchest
 DATASETS = {"chexpertplus": chexpertplus, "padchest": padchest}
 
 
+SECTIONS = tuple(dict.fromkeys(s for a in DATASETS.values() for s in a.SECTIONS))
+JOIN = "-"  # findings-impression: one classifier over several sections' labels
+
+
 def labels_only(dataset: str) -> bool:
-    """True for a dataset without report sections (PadChest)."""
+    """True for a dataset whose labels come from the release (PadChest)."""
     return getattr(DATASETS[dataset], "LABELS_ONLY", False)
 
 
-def check_section(stage: str, dataset: str, section: str | None) -> None:
-    """A labels-only dataset takes no --section; every other dataset needs one."""
-    if labels_only(dataset) and section is not None:
-        raise SystemExit(f"{stage}: {dataset} has no report sections; drop --section")
-    if not labels_only(dataset) and section is None:
-        raise SystemExit(f"{stage}: {dataset} needs --section")
+def check_section(stage: str, dataset: str, section: str) -> None:
+    """``section`` must be one of the dataset's sections."""
+    if section not in DATASETS[dataset].SECTIONS:
+        raise SystemExit(
+            f"{stage}: {dataset} sections are {list(DATASETS[dataset].SECTIONS)}"
+        )
+
+
+def split_sections(stage: str, dataset: str, section: str) -> list[str]:
+    """The sections of a (possibly joined) section name, in the dataset's order."""
+    parts = section.split(JOIN)
+    order = list(DATASETS[dataset].SECTIONS)
+    for s in parts:
+        check_section(stage, dataset, s)
+    if parts != sorted(set(parts), key=order.index):
+        raise SystemExit(f"{stage}: join sections once each, in the order {order}")
+    return parts
 
 
 def write_splits(dataset: str) -> None:

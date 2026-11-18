@@ -9,6 +9,7 @@ import pandas as pd
 SOURCE_CSV = "chexpertplus/df_chexpert_plus_240401.csv"
 SOURCE_FILES = (SOURCE_CSV,)
 IMAGE_ROOT = "chexpertplus"  # image_path is relative to this
+SECTIONS = ("findings", "impression")
 
 # Corrupt (renamed .BAK locally); its study's only image, so the study drops out.
 CORRUPT_IMAGES = frozenset({"PNG/train/patient32368/study1/view1_frontal.png"})

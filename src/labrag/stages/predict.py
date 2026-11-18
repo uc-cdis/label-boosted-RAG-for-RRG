@@ -1,5 +1,10 @@
 """Stage ``predict``: a trained attention-head classifier applied to another dataset.
 
+A ``finetune`` classifier (RAD-DINO fine-tuned with the head) is applied to any
+dataset, its training datasets included, from the images: per section, max-F1
+thresholds on the target's own val studies when the target has that section's labels
+(metrics.csv: their val scores), else the classifier's pooled-val thresholds.
+
 Writes ``predictions/<dataset>/<classifier>/`` for ``--classifier
 <source>/<name>/<section>/<labeler>`` (a classify artifact under ``classifiers/``): per
 section s of the classifier, probs.<s>.csv (study_id, role, one column per label) and
@@ -8,13 +13,14 @@ rule) for every study of the dataset's frontal token store, read in the format t
 classifier was trained on.
 """
 
+import os
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
 
-from labrag import artifacts, paths
+from labrag import artifacts, paths, weights
 from labrag.classifiers import attention, quant
 from labrag.data import DATASETS
 from labrag.stages import classify
@@ -32,6 +38,10 @@ def run(
     clf_dir = paths.SHARED_ROOT / "classifiers" / classifier
     clf_record = artifacts.artifact_record(clf_dir)
     clf_config = artifacts.read_manifest(clf_dir)["config"]
+    if clf_config["stage"] == "finetune":
+        return _finetuned(
+            dataset, classifier, clf_dir, clf_record, clf_config, overwrite, cxr_root
+        )
     if clf_config["stage"] != "classify":
         raise SystemExit("predict: --classifier must be a classify artifact (a model)")
     if clf_config["classifier"] not in ("attn", "attn-cls"):
@@ -105,6 +115,122 @@ def run(
                 "empty_label_sets": int((pred.sum(1) == 0).sum()),
             }
         return {"n_studies": len(embedded), **summary, "device": str(device)}
+
+    relpath = f"predictions/{dataset}/{classifier}"
+    return artifacts.publish(relpath, config, inputs, build, overwrite)
+
+
+def _finetuned(
+    dataset, classifier, clf_dir, clf_record, clf_config, overwrite, cxr_root
+):
+    """predictions/<dataset>/<classifier>/ of a finetune classifier, from the images."""
+    from labrag.classifiers import finetune, logistic
+    from labrag.stages import finetune as finetune_stage
+
+    adapter = DATASETS[dataset]
+    sections, labeler = clf_config["sections"], clf_config["labeler"]
+    model_dir, weights_record = weights.resolve(finetune_stage.embed_weights())
+    binarize = clf_config["binarize"]
+    positive = {v: k for k, v in classify.BINARIZE.items()}[binarize]
+    lab_dirs = {
+        s: paths.SHARED_ROOT / "labels" / dataset / s / labeler
+        for s in sections
+        if s in adapter.SECTIONS
+        and (paths.SHARED_ROOT / "labels" / dataset / s / labeler).is_dir()
+    }
+    inputs = {
+        "classifier": clf_record,
+        "labels": {s: artifacts.artifact_record(d) for s, d in lab_dirs.items()},
+        "sources": [artifacts.file_record(cxr_root / f) for f in adapter.SOURCE_FILES],
+        "splits": [
+            artifacts.file_record(paths.SPLITS_DIR / f) for f in adapter.SPLIT_FILES
+        ],
+        "images": {"root": str(cxr_root / adapter.IMAGE_ROOT)},
+        "weights": weights_record,
+    }
+    config = {
+        "stage": "predict",
+        "dataset": dataset,
+        "classifier": classifier,
+        "image": clf_config["image"],
+        "threshold": {
+            s: (
+                "max F1 on this dataset's val"
+                if s in lab_dirs
+                else "the classifier's (max F1 on its pooled val)"
+            )
+            for s in sections
+        },
+        "consistency": clf_config["consistency"],
+    }
+
+    def build(out: Path) -> dict:
+        studies = adapter.load_studies(cxr_root)
+        role = adapter.classifier_roles(studies, paths.SPLITS_DIR).to_numpy()
+        ids = studies.study_id.reset_index(drop=True)
+        saved = torch.load(clf_dir / "model.pt", weights_only=False)
+        names, stored = saved["labels"], np.asarray(saved["threshold"])
+        assert saved["sections"] == sections, "model.pt sections differ"
+        attention.deterministic()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        backbone = finetune.load_backbone(model_dir)
+        model = finetune.build(
+            backbone, len(names), len(sections), clf_config["classifier"] == "attn-cls"
+        )
+        model.load_state_dict(saved["state_dict"])
+        model.to(device)
+        root = cxr_root / adapter.IMAGE_ROOT
+        images = finetune.Images(
+            [root / p for p in studies.image_path], finetune.load_processor(model_dir)
+        )
+        workers = min(
+            finetune_stage.MAX_WORKERS, max(0, len(os.sched_getaffinity(0)) - 1)
+        )
+        P = finetune.predict_proba(model, images, device, workers)
+        n, summary, metrics = len(names), {}, []
+        val = role == "val"
+        for i, s in enumerate(sections):
+            Ps = P[:, i * n : (i + 1) * n]
+            t = stored[i]
+            if s in lab_dirs:
+                labels = artifacts.read_table(lab_dirs[s] / "labels.csv").set_index(
+                    "study_id"
+                )
+                has = ids.isin(labels.index).to_numpy()
+                Y = labels.reindex(ids)[names].isin(classify.POSITIVE[positive])
+                Y = Y.to_numpy(dtype=int)
+                v = val & has
+                t = np.array(
+                    [logistic.f1_threshold(y, p) for y, p in zip(Y[v].T, Ps[v].T)]
+                )
+                pred_v = classify.predict_labels(Ps[v], t, names, False)
+                metrics.append(
+                    pd.DataFrame(
+                        {
+                            "section": s,
+                            "label": names,
+                            "threshold": t,
+                            **classify._scores("val", Y[v], Ps[v], pred_v),
+                        }
+                    )
+                )
+            pred = classify.predict_labels(Ps, t, names, False)
+            probs = pd.DataFrame(Ps, columns=names)
+            probs.insert(0, "role", role)
+            probs.insert(0, "study_id", ids)
+            probs.to_csv(out / f"probs.{s}.csv", index=False)
+            preds = pd.DataFrame(pred, columns=names)
+            preds.insert(0, "study_id", ids)
+            preds.to_csv(out / f"predictions.{s}.csv", index=False)
+            summary[s] = {
+                "labels_per_study": float(pred.sum(1).mean()),
+                "empty_label_sets": int((pred.sum(1) == 0).sum()),
+            }
+        if metrics:
+            pd.concat(metrics, ignore_index=True).to_csv(
+                out / "metrics.csv", index=False
+            )
+        return {"n_studies": len(ids), **summary, "device": str(device)}
 
     relpath = f"predictions/{dataset}/{classifier}"
     return artifacts.publish(relpath, config, inputs, build, overwrite)

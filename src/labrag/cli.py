@@ -16,6 +16,7 @@ from labrag.stages import (
     compare,
     embed,
     evaluate,
+    finetune,
     generate,
     labels,
     predict,
@@ -125,6 +126,23 @@ def add_classify(sub) -> None:
         type=int,
         help="attn: also out-of-fold predictions for the train role, K folds by patient",
     )
+
+
+def add_finetune(sub) -> None:
+    p = stage(sub, finetune, "--labeler", "--uncertain")
+    p.add_argument(
+        "--dataset",
+        required=True,
+        help=f"training datasets ({', '.join(sorted(DATASETS))}) joined by {data.JOIN}, "
+        "e.g. chexpertplus-mimic-rexgradient",
+    )
+    p.add_argument(
+        "--section",
+        required=True,
+        help=f"sections joined by {data.JOIN}, a readout each, e.g. findings-impression",
+    )
+    p.add_argument("--classifier", choices=finetune.CLASSIFIERS)
+    p.add_argument("--seed", type=int, help="training seed (default 0)")
 
 
 def add_threshold(sub) -> None:
@@ -272,6 +290,7 @@ COMMANDS = (
     add_labels,
     add_embed,
     add_classify,
+    add_finetune,
     add_threshold,
     add_predict,
     add_build_prompts,

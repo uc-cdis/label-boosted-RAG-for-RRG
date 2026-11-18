@@ -5,7 +5,12 @@ residual feed-forward block and one logit per label: each label pools its own im
 regions. The queries don't attend to each other (unlike Query2Label's decoder); labels
 share only the projection and feed-forward weights. Given only the CLS token, the
 attention passes it through and the head is a jointly trained MLP on CLS. Trained jointly on all labels with BCE, AdamW, early stopping on mean val
-AUROC. Deterministic for a given seed and device: deterministic torch algorithms, the
+AUROC.
+
+``readouts`` > 1 gives each label several logits (one per report section) from the same
+query: the sections share where to look, and only the last linear layer learns what
+each section reports. Logits are readout-major; a mask leaves out each study's
+sections without labels, in the loss and in the val AUROC. Deterministic for a given seed and device: deterministic torch algorithms, the
 attention written out (no fused kernels), a seeded generator for the batch order.
 """
 
@@ -36,10 +41,18 @@ PREDICT_BATCH = 512
 
 
 class Head(nn.Module):
-    def __init__(self, n_labels: int, dim: int, heads: int, ffn: int, dropout: float):
+    def __init__(
+        self,
+        n_labels: int,
+        dim: int,
+        heads: int,
+        ffn: int,
+        dropout: float,
+        readouts: int = 1,
+    ):
         super().__init__()
         assert dim % heads == 0
-        self.heads = heads
+        self.heads, self.readouts = heads, readouts
         self.query = nn.Parameter(torch.randn(n_labels, dim) * 0.02)
         self.q, self.k, self.v, self.o = (nn.Linear(dim, dim) for _ in range(4))
         self.norm1, self.norm2 = nn.LayerNorm(dim), nn.LayerNorm(dim)
@@ -47,8 +60,8 @@ class Head(nn.Module):
             nn.Linear(dim, ffn), nn.GELU(), nn.Dropout(dropout), nn.Linear(ffn, dim)
         )
         self.drop = nn.Dropout(dropout)
-        self.weight = nn.Parameter(torch.zeros(n_labels, dim))
-        self.bias = nn.Parameter(torch.zeros(n_labels))
+        self.weight = nn.Parameter(torch.zeros(readouts * n_labels, dim))
+        self.bias = nn.Parameter(torch.zeros(readouts * n_labels))
 
     def attention(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Pooled features (B, labels, dim) and weights (B, heads, labels, tokens)."""
@@ -62,11 +75,15 @@ class Head(nn.Module):
         return self.o(pooled), weights
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Logits (B, labels) for tokens x (B, tokens, dim)."""
+        """Logits (B, readouts * labels) for tokens x (B, tokens, dim)."""
         pooled, _ = self.attention(x)
         z = self.norm1(self.query + self.drop(pooled))
         z = self.norm2(z + self.drop(self.ffn(z)))
-        return (z * self.weight).sum(-1) + self.bias
+        if self.readouts == 1:  # the single-readout heads' exact arithmetic
+            return (z * self.weight).sum(-1) + self.bias
+        r = self.readouts
+        logits = (z.unsqueeze(1) * self.weight.view(r, *z.shape[1:])).sum(-1)
+        return (logits + self.bias.view(r, -1)).flatten(1)
 
 
 def deterministic() -> None:
@@ -87,9 +104,16 @@ def predict_proba(model: Head, tokens: Packed, rows: torch.Tensor) -> np.ndarray
     return torch.cat(out).numpy()
 
 
-def mean_auroc(Y: np.ndarray, P: np.ndarray) -> float:
-    """Mean AUROC over the labels with both classes present."""
-    scores = [roc_auc_score(y, p) for y, p in zip(Y.T, P.T) if 0 < y.sum() < len(y)]
+def mean_auroc(Y: np.ndarray, P: np.ndarray, mask: np.ndarray | None = None) -> float:
+    """Mean AUROC over the labels with both classes present (each label on the rows
+    where ``mask`` is true, if given)."""
+    if mask is None:
+        mask = np.ones(Y.shape, dtype=bool)
+    scores = [
+        roc_auc_score(y[m], p[m])
+        for y, p, m in zip(Y.T, P.T, mask.T)
+        if 0 < y[m].sum() < m.sum()
+    ]
     assert scores, "no label has both classes"
     return float(np.mean(scores))
 
@@ -101,19 +125,31 @@ def fit(
     val: np.ndarray,
     seed: int,
     log=print,
+    mask: np.ndarray | None = None,
+    readouts: int = 1,
 ) -> tuple[Head, list[dict]]:
     """Train on rows ``train`` of (tokens, Y); pick the epoch by mean AUROC on ``val``.
-    Returns the selected model and one history row per epoch."""
+    Y has ``readouts`` blocks of label columns; ``mask`` (Y's shape) marks the entries
+    with a label (all, if not given). Returns the selected model and one history row
+    per epoch."""
     device = next(iter(tokens.parts.values())).device
     torch.manual_seed(seed)
     order = torch.Generator().manual_seed(seed)
     model = Head(
-        Y.shape[1], tokens.dim, PARAMS["heads"], PARAMS["ffn"], PARAMS["dropout"]
+        Y.shape[1] // readouts,
+        tokens.dim,
+        PARAMS["heads"],
+        PARAMS["ffn"],
+        PARAMS["dropout"],
+        readouts,
     ).to(device)
     opt = torch.optim.AdamW(
         model.parameters(), lr=PARAMS["lr"], weight_decay=PARAMS["weight_decay"]
     )
     targets = torch.as_tensor(Y, dtype=torch.float32, device=device)
+    weights = None
+    if mask is not None:
+        weights = torch.as_tensor(mask, dtype=torch.float32, device=device)
     train_rows = torch.as_tensor(np.flatnonzero(train), device=device)
     val_rows = torch.as_tensor(np.flatnonzero(val), device=device)
     loss_fn = nn.BCEWithLogitsLoss()
@@ -123,13 +159,21 @@ def fit(
         perm = train_rows[torch.randperm(len(train_rows), generator=order).to(device)]
         total = 0.0
         for batch in perm.split(PARAMS["batch_size"]):
-            loss = loss_fn(model(tokens.take(batch)), targets[batch])
+            logits = model(tokens.take(batch))
+            if weights is None:
+                loss = loss_fn(logits, targets[batch])
+            else:  # mean over the labelled entries only
+                w = weights[batch]
+                each = nn.functional.binary_cross_entropy_with_logits(
+                    logits, targets[batch], reduction="none"
+                )
+                loss = (each * w).sum() / w.sum()
             opt.zero_grad(set_to_none=True)
             loss.backward()
             opt.step()
             total += loss.item() * len(batch)
         P = predict_proba(model, tokens, val_rows)
-        auroc = mean_auroc(Y[val], P)
+        auroc = mean_auroc(Y[val], P, None if mask is None else mask[val])
         history.append(
             {"epoch": epoch, "train_loss": total / len(perm), "val_auroc": auroc}
         )

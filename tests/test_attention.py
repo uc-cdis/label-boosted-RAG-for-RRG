@@ -38,6 +38,49 @@ def test_forward_shape():
     torch.testing.assert_close(weights.sum(-1), torch.ones(5, 8, 3))
 
 
+def test_readouts_share_the_query_and_keep_one_readout():
+    torch.manual_seed(0)
+    one = attention.Head(n_labels=3, dim=16, heads=8, ffn=32, dropout=0.0)
+    two = attention.Head(n_labels=3, dim=16, heads=8, ffn=32, dropout=0.0, readouts=2)
+    state = one.state_dict()
+    w = torch.randn(3, 16)
+    state |= {"weight": w, "bias": torch.zeros(3)}
+    one.load_state_dict(state)
+    state |= {"weight": torch.cat([w, 2 * w]), "bias": torch.zeros(6)}
+    two.load_state_dict(state)
+    x = torch.randn(5, 7, 16)
+    out = two(x)
+    assert out.shape == (5, 6)
+    torch.testing.assert_close(out[:, :3], one(x))  # readout-major blocks
+    torch.testing.assert_close(out[:, 3:], 2 * one(x))
+
+
+def test_mean_auroc_masks_rows_per_label():
+    Y = np.array([[1, 0], [0, 1], [1, 1], [0, 0]])
+    P = np.array([[0.9, 0.1], [0.1, 0.9], [0.8, 0.2], [0.2, 0.8]])
+    mask = np.array([[1, 1], [1, 1], [1, 0], [1, 0]], dtype=bool)
+    assert attention.mean_auroc(Y, P) == 0.875  # label 0: 1.0, label 1: 0.75
+    assert attention.mean_auroc(Y, P, mask) == 1.0  # label 1 on rows 0-1 only
+
+
+def test_masked_entries_do_not_train(small):
+    store, Y, train, val = small
+    Y2 = np.concatenate([Y, Y], axis=1)  # two readouts, same labels
+    mask = np.ones(Y2.shape, dtype=bool)
+    mask[::2, 3:] = False  # every other study lacks the second section
+    noise = Y2.copy()
+    noise[~mask] = 1 - noise[~mask]
+    fit = lambda y: attention.fit(
+        store, y, train, val, 1, log=lambda _: None, mask=mask, readouts=2
+    )
+    model, history = fit(Y2)
+    _, history_noise = fit(noise)
+    assert history == history_noise
+    P = attention.predict_proba(model, store, torch.arange(len(store)))
+    assert P.shape == Y2.shape
+    assert attention.mean_auroc(Y2[val], P[val], mask[val]) > 0.9
+
+
 def test_learns_and_is_deterministic(small):
     store, Y, train, val = small
     model, history = attention.fit(store, Y, train, val, seed=1, log=lambda _: None)

@@ -80,6 +80,16 @@ CASES = [
     ),
     (
         embed,
+        "embed --dataset chexpertplus --feature tokens",
+        dict(dataset="chexpertplus", feature="tokens"),
+    ),
+    (
+        classify,
+        "classify --dataset chexpertplus --classifier attn --tokens nvfp4 --seed 1",
+        dict(dataset="chexpertplus", classifier="attn", tokens="nvfp4", seed=1),
+    ),
+    (
+        embed,
         "embed --dataset padchest --feature tokens",
         dict(dataset="padchest", feature="tokens"),
     ),

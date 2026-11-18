@@ -18,6 +18,7 @@ CORRUPT_IMAGES = frozenset({"PNG/train/patient32368/study1/view1_frontal.png"})
 # LL/RL images are labelled Frontal and mostly are (by eye), so they rank as "other
 # frontal". Every LL/RL study also has PA or AP, so the tier never decides here.
 VIEW_RANK = {"PA": 0, "AP": 1, "LL": 2, "RL": 2, "Lateral": 3}
+FRONTAL_VIEWS = ("PA", "AP", "LL", "RL")  # labelled Frontal in the release
 
 # Section-parser debris, not report text (stripped, case-insensitive; the only such
 # values in section_findings, 2026-11-09).

@@ -92,13 +92,13 @@ def add_embed(sub) -> None:
     p.add_argument(
         "--feature",
         choices=embed.FEATURES,
-        help="cls (default) or tokens: CLS + patch tokens, float16; needs --section "
-        "(except PadChest)",
+        help="cls (default) or tokens: CLS + patch tokens, stored as NVFP4",
     )
     p.add_argument(
         "--section",
         choices=labels.SECTIONS,
-        help="tokens only for the studies with this section's text",
+        help="tokens only for the studies with this section's text; none: every "
+        "study with a frontal image",
     )
 
 
@@ -111,7 +111,12 @@ def add_classify(sub) -> None:
         "--labeler",
         "--uncertain",
     )
-    add_section_unless_labels_only(p)
+    p.add_argument(
+        "--section",
+        choices=labels.SECTIONS,
+        help="report section; none: one attn head for every section's labels on the "
+        "frontal tokens (PadChest: always none)",
+    )
     p.add_argument(
         "--classifier",
         choices=classify.CLASSIFIERS,

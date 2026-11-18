@@ -12,6 +12,8 @@ Each adapter module provides:
   here, not official ones);
 - ``LABELS_ONLY`` (optional, default False): no report sections; its labels come from
   the release, and stages take no ``--section`` for it.
+- ``FRONTAL_VIEWS`` (datasets with sections): the ``view`` values of a frontal image,
+  for the classifiers' frontal-only token store.
 """
 
 from labrag import paths

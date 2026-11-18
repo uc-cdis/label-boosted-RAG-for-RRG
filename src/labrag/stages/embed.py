@@ -12,8 +12,11 @@ row that gives its canonical report text (the adapter's load_studies).
 ``embeddings/<dataset>/<encoder>.tokens/<section>/``: the full last hidden state (CLS +
 patch tokens) of the studies with that section's text, cast to float16 and stored
 packed in TOKEN_FORMAT (quant.create_store): the same tokens classify gets by packing a
-float16 store. A labels-only dataset (PadChest) takes no ``--section``:
-``embeddings/<dataset>/<encoder>.tokens/`` holds every study.
+float16 store. Without ``--section``, ``embeddings/<dataset>/<encoder>.tokens/frontal/``
+holds every study whose preferred image is frontal (FRONTAL_VIEWS), with or without
+report text: the classifiers learn every section's labels from it. A labels-only
+dataset (PadChest) takes no ``--section``: ``embeddings/<dataset>/<encoder>.tokens/``
+holds every study (all frontal).
 """
 
 import os
@@ -49,10 +52,8 @@ def run(
     if labels_only(dataset):
         if section is not None:
             raise SystemExit(f"embed: {dataset} has no report sections; drop --section")
-    elif (feature == "tokens") != (section is not None):
-        raise SystemExit(
-            "embed: --section goes with --feature tokens, and only with it"
-        )
+    elif section is not None and feature != "tokens":
+        raise SystemExit("embed: --section goes with --feature tokens only")
     cxr_root = cxr_root or paths.CXR_ROOT
     adapter = DATASETS[dataset]
     model_dir, weights_record = weights.resolve(ENCODERS[encoder])
@@ -71,9 +72,16 @@ def run(
         "feature": "cls",
     }
     relpath = f"embeddings/{dataset}/{encoder}"
-    if feature == "tokens" and section is None:
+    frontal = feature == "tokens" and section is None and not labels_only(dataset)
+    if feature == "tokens" and labels_only(dataset):
         config["feature"] = TOKENS_FEATURE
         relpath = f"embeddings/{dataset}/{encoder}.tokens"
+    elif frontal:
+        config |= {
+            "feature": TOKENS_FEATURE,
+            "studies": f"preferred image frontal (view in {list(adapter.FRONTAL_VIEWS)})",
+        }
+        relpath = f"embeddings/{dataset}/{encoder}.tokens/frontal"
     elif feature == "tokens":
         config |= {
             "feature": TOKENS_FEATURE,
@@ -86,6 +94,9 @@ def run(
         studies = adapter.load_studies(cxr_root)
         if section is not None:
             studies = studies[studies[section].notna()].reset_index(drop=True)
+        if frontal:
+            studies = studies[studies.view.isin(adapter.FRONTAL_VIEWS)]
+            studies = studies.reset_index(drop=True)
         studies = studies[["study_id", "image_path"]]
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         num_workers = min(MAX_WORKERS, max(1, len(os.sched_getaffinity(0)) - 1))

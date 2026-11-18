@@ -34,6 +34,8 @@ def run(
     clf_config = artifacts.read_manifest(clf_dir)["config"]
     if clf_config["classifier"] not in ("attn", "attn-cls"):
         raise SystemExit("predict: only the attn classifiers (they read the tokens)")
+    if "sections" in clf_config:
+        raise SystemExit("predict: classifiers with a readout per section not yet")
     source = clf_config["dataset"]
     if source == dataset:
         raise SystemExit("predict: same dataset; classify already predicts it")

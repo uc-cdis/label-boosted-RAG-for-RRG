@@ -19,7 +19,7 @@ from labrag import artifacts, paths, weights
 from labrag.data import DATASETS, check_section, labels_only, padchest
 from labrag.labelers import chexbert
 
-SECTIONS = ("findings",)
+SECTIONS = ("findings", "impression")
 LABELERS = ("chexbert14", *padchest.VOCABULARIES)
 
 

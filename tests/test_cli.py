@@ -23,6 +23,11 @@ CASES = [
         dict(dataset="chexpertplus", section="findings"),
     ),
     (
+        labels,
+        "labels --dataset chexpertplus --section impression",
+        dict(dataset="chexpertplus", section="impression"),
+    ),
+    (
         embed,
         "embed --dataset chexpertplus --encoder raddino --overwrite",
         dict(dataset="chexpertplus", encoder="raddino", overwrite=True),

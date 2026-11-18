@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Remove labrag's Docker leftovers from one node, as a job per node:
 #
-#   slurm/submit.sh -w <node> --with-nvl02 --cpus-per-task=1 -- slurm/clean-docker.sh [--apply]
+#   slurm/submit.sh -w <node> --cpus-per-task=1 -- slurm/clean-docker.sh [--apply]
 #
 # Lists by default; --apply removes containers/networks of dead jobs (labrag-eval-<job>,
 # labrag-<job>-<port>), every labrag/* image, dangling images and unused build cache

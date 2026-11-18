@@ -2,23 +2,18 @@
 # Submit a pipeline job at the current commit. Run from a clone of this repo on a host
 # with the Slurm client.
 #
-#   slurm/submit.sh [--with-nvl02] [sbatch options...] -- <command> [args...]
+#   slurm/submit.sh [sbatch options...] -- <command> [args...]
 #   e.g. slurm/submit.sh --gres=gpu:1 --cpus-per-task=16 -- labrag labels --dataset chexpertplus --section findings
 #   (request a rail type, gpu:h200_rail0/1, only when the job needs rail alignment;
 #   --cpus-per-task defaults to 72, slurm/job.sh's #SBATCH default)
 #
 # The job runs HEAD, cloned from GitHub on each node: clean tree, HEAD pushed.
-# kg35-nvl02 has no data and is excluded unless --with-nvl02.
 set -euo pipefail
 
-usage="usage: slurm/submit.sh [--with-nvl02] [sbatch options...] -- <command> [args...]"
-exclude=(--exclude=kg35-nvl02)
+usage="usage: slurm/submit.sh [sbatch options...] -- <command> [args...]"
 sbatch_args=()
 while (($#)) && [[ $1 != -- ]]; do
-  case $1 in
-    --with-nvl02) exclude=() ;;
-    *) sbatch_args+=("$1") ;;
-  esac
+  sbatch_args+=("$1")
   shift
 done
 [[ ${1:-} == -- ]] && shift || { echo "$usage" >&2; exit 1; }
@@ -46,4 +41,4 @@ if ! GIT_TERMINAL_PROMPT=0 git -C "$probe" fetch -q --depth 1 "$url" "$sha" 2>/d
   exit 1
 fi
 
-sbatch --job-name=labrag "${exclude[@]}" "${sbatch_args[@]}" slurm/job.sh "$sha" "$url" "$@"
+sbatch --job-name=labrag "${sbatch_args[@]}" slurm/job.sh "$sha" "$url" "$@"

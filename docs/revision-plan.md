@@ -307,7 +307,7 @@ Settled:
 ## 8. Infrastructure
 - **Envs:** one uv env (`uv.lock`) per run checkout; vLLM and the metrics (§7) run as containers.
 - **Runner** (`slurm/submit.sh` + `slurm/job.sh`). The code, env and source data live on each node's local disk; only the shared storage below is common to all nodes:
-  - the submitter pins the run to the current commit, refuses a dirty or unpushed tree, and keeps data-reading jobs off kg35-nvl02 (it has no copy of the data)
+  - the submitter pins the run to the current commit and refuses a dirty or unpushed tree
   - on each node, the job fetches that commit from GitHub into its own directory and builds the env from the commit's `uv.lock`. Runs at different commits never share code or env.
   - model weights and vLLM images are pre-pulled on every node; the job checks they are present at the pinned revision and digest, and never downloads them
   - **shared storage:** `/opt/gpu_working/steven/labrag-shared`, an NFS directory visible from every node. It holds both the intermediates later stages need and the main results. NFS is easy to overload, so jobs are written to go easy on it:
@@ -321,7 +321,7 @@ Settled:
   - `evaluate`: per-study scores, on content-only text (no section header), as ReXrank's Findings board. Each metric runs in its own container with its upstream's code. GREEN's judge is served by a pinned vLLM, while GREEN's own image does all the text work; upstream's HF generate is kept as the reference. One job (one GPU) runs the whole suite at once: GREEN and RaTEScore share the GPU, while CXR-Report-Metric scores fixed-size chunks in parallel CPU containers, so `--cpus-per-task` sets the balance.
   - `compare`: each condition's mean and every pair's difference, with paired-bootstrap 95% CIs (§3, Statistics), from the conditions' scores artifacts. CPU only, about a second.
 - **Provenance:** each artifact's manifest records the output checksums of the artifacts it read and the checksums of the model files it loaded. If an upstream artifact now has other outputs, or a model's pins in `configs/weights.yaml` changed, the artifact is stale: it is refused (rebuilt only with `--overwrite`), and no stage reads it. `labrag provenance` lists every stale artifact on shared storage, through the whole chain.
-- **At most 8 GPUs per job** (e.g. a large teacher or judge server). Across jobs there is no cap: we use as many GPUs as the data locations allow (kg35-nvl02 has no source data, so jobs that read data get the other 12).
+- **At most 8 GPUs per job** (e.g. a large teacher or judge server). Across jobs there is no cap: we use every GPU that has the data (all 4 nodes).
 - **GPU wrapper** (`src/labrag/serving.py`; multi-node serving not built yet):
   - tensor-parallel size taken from `CUDA_VISIBLE_DEVICES`
   - free port, health check, teardown

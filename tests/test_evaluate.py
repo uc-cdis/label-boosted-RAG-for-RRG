@@ -441,3 +441,29 @@ def test_compose_runs_as_the_jobs_own_project(monkeypatch):
     monkeypatch.setenv("SLURM_JOB_ID", "123")
     evaluate.compose("down", tag="abc")
     assert seen["cmd"][4:7] == ["-p", "labrag-eval-123", "down"]
+
+
+def test_build_image_holds_the_node_lock(tmp_path, monkeypatch):
+    import fcntl
+
+    from labrag import paths, serving
+
+    monkeypatch.setattr(paths, "RUN_ROOT", tmp_path)
+    monkeypatch.setattr(
+        evaluate.artifacts, "git_commit", lambda: {"sha": "a" * 40, "dirty": False}
+    )
+    held = []
+
+    def build(*args, tag):
+        with open(tmp_path / "docker-build.lock") as other:
+            try:
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held.append(False)
+            except BlockingIOError:
+                held.append(True)
+
+    monkeypatch.setattr(evaluate, "compose", build)
+    monkeypatch.setattr(serving, "image_id", lambda ref: "sha256:x")
+    image = evaluate.build_image(evaluate.METRICS["ratescore"])
+    assert held == [True]
+    assert image["image_id"] == "sha256:x"

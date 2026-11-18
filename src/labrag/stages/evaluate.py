@@ -25,6 +25,7 @@ are refused.
 
 import concurrent.futures
 import contextlib
+import fcntl
 import gzip
 import json
 import os
@@ -613,9 +614,14 @@ def build_image(spec: dict) -> dict:
     # A dirty dev tree builds what's on disk, which no commit describes.
     tag = "dev" if commit["dirty"] else commit["sha"]
     service, _, name = image_build(spec)
-    compose("build", service, tag=tag)
     ref = f"{name}:{tag}"
-    built = serving.image_id(ref)
+    # One build per node at a time: concurrent builds of a tag each retag it, so a job
+    # could record another build's image id. A waiting job's build is a cache hit.
+    paths.RUN_ROOT.mkdir(parents=True, exist_ok=True)
+    with open(paths.RUN_ROOT / "docker-build.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        compose("build", service, tag=tag)
+        built = serving.image_id(ref)
     if built is None:
         raise SystemExit(f"{ref}: not found after the build")
     return {

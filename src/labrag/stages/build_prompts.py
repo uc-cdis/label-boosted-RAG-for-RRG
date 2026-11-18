@@ -9,7 +9,8 @@ Conditions: ``retrieval-only`` (top K by image similarity) and ``labrag.<labeler
 (Jaccard on positive labels, ties by image similarity; the target's predicted labels in
 the prompt; corpus studies carry reference labels, binarized like the classifier). Its
 classifier is ``classifiers/<dataset>/<encoder>.<classifier>``: ``lr`` by default, any
-other written to ``labrag.<classifier>.<labeler>``.
+other written to ``labrag.<classifier>.<labeler>``; a ``-sections`` one (a readout per
+section) gives its predictions.<section>.csv.
 ``labrag-oracle.<labeler>`` is labrag with the target's reference labels instead of
 predicted ones: the ceiling for any classifier. Two diagnostics between the two (they
 read the reference, so they are never a method): ``labrag-drop-fp.<labeler>``, the
@@ -37,7 +38,7 @@ import pandas as pd
 
 from labrag import artifacts, paths, prompts, retrieval
 from labrag.data import DATASETS
-from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, POSITIVE
+from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, POSITIVE, SECTIONS_SUFFIX
 
 # experiment -> dataset, target roles, corpus roles
 EXPERIMENTS = {
@@ -108,14 +109,7 @@ def run(
     labeler = LABELER + LABELER_SUFFIX[uncertain]
     emb_dir = paths.SHARED_ROOT / "embeddings" / dataset / ENCODER
     lab_dir = paths.SHARED_ROOT / "labels" / dataset / section / LABELER
-    clf_dir = (
-        paths.SHARED_ROOT
-        / "classifiers"
-        / dataset
-        / f"{ENCODER}.{classifier}"
-        / section
-        / labeler
-    )
+    clf_dir, clf_predictions = classifier_files(dataset, classifier, section, labeler)
     inputs = {
         "labels": artifacts.artifact_record(lab_dir),
         "sources": [artifacts.file_record(cxr_root / f) for f in adapter.SOURCE_FILES],
@@ -155,10 +149,13 @@ def run(
         inputs["classifier"] = artifacts.artifact_record(clf_dir)
         clf_inputs = artifacts.read_manifest(clf_dir)["inputs"]
         for name in ("embeddings", "labels"):  # the classifier saw these same inputs
-            if name == "embeddings" and clf_inputs[name]["path"] != str(emb_dir):
+            record = clf_inputs[name]
+            if name == "labels" and clf_predictions != "predictions.csv":
+                record = record[section]  # one labels input per section
+            if name == "embeddings" and record["path"] != str(emb_dir):
                 continue  # trained on tokens: its own image check is in classify
             assert (
-                clf_inputs[name]["outputs"] == inputs[name]["outputs"]
+                record["outputs"] == inputs[name]["outputs"]
             ), f"classifier {name} differ"
         config["classifier"] = classifier
     if with_labels:
@@ -238,7 +235,7 @@ def run(
             elif oracle:
                 target_y = reference(target)
             else:
-                pred = artifacts.read_table(clf_dir / "predictions.csv").set_index(
+                pred = artifacts.read_table(clf_dir / clf_predictions).set_index(
                     "study_id"
                 )
                 assert list(pred.columns) == names, "classifier labels differ"
@@ -312,6 +309,16 @@ def run(
         build,
         overwrite,
     )
+
+
+def classifier_files(
+    dataset: str, classifier: str, section: str, labeler: str
+) -> tuple[Path, str]:
+    """A classifier's artifact directory and its predictions file for ``section``."""
+    root = paths.SHARED_ROOT / "classifiers" / dataset / f"{ENCODER}.{classifier}"
+    if classifier.endswith(SECTIONS_SUFFIX):
+        return root / labeler, f"predictions.{section}.csv"
+    return root / section / labeler, "predictions.csv"
 
 
 def predicted_corpus(clf_dir: Path, corpus: pd.DataFrame, names: list[str]):

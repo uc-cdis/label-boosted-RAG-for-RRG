@@ -50,3 +50,16 @@ def test_predicted_corpus_options_are_checked():
         run("pilot", "findings", "labrag", corpus_labels="predicted")
     with pytest.raises(SystemExit, match="its own labels"):
         run("pilot", "findings", "labrag", classifier="x", predictions="a/b/c")
+
+
+def test_sections_classifier_gives_its_section_predictions():
+    from labrag.stages.build_prompts import classifier_files
+
+    d, f = classifier_files("chexpertplus", "attn-nvfp4-seed1", "findings", "x.u0")
+    assert d.parts[-3:] == ("raddino.attn-nvfp4-seed1", "findings", "x.u0")
+    assert f == "predictions.csv"
+    d, f = classifier_files(
+        "chexpertplus", "attn-nvfp4-seed1-sections", "findings", "x.u0"
+    )
+    assert d.parts[-2:] == ("raddino.attn-nvfp4-seed1-sections", "x.u0")
+    assert f == "predictions.findings.csv"

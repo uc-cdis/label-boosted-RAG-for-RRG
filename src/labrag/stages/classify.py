@@ -39,7 +39,7 @@ Without ``--section`` on a dataset with sections (attn only, no ``--folds``), on
 learns every section's labels (labels.SECTIONS) from the frontal token store (``embed
 --feature tokens`` without ``--section``): one query per label shared by the sections,
 one readout per section, and each study's loss only over the sections it has labels
-for. Written to ``classifiers/<dataset>/<name>/<labeler>[.u0]/`` with probs.<section>.csv
+for. Written to ``classifiers/<dataset>/<name>-sections/<labeler>[.u0]/`` with probs.<section>.csv
 and predictions.<section>.csv for every embedded study, thresholds per section and
 label on the val studies with that section, metrics.csv with a section column.
 """
@@ -76,6 +76,7 @@ NOT_PATHOLOGY = ("No Finding", "Support Devices")
 CONSISTENCY = "No Finding = 0 when any label other than Support Devices is predicted"
 FOLD_SEED = 20261117
 PADCHEST_CONSISTENCY = "normal = 0 when any other label is predicted"
+SECTIONS_SUFFIX = "-sections"  # name suffix of a head with a readout per section
 
 
 def run(
@@ -354,7 +355,7 @@ def _sections_head(
     }
     if classifier == "attn-cls":
         config["input"] = "CLS token only (token 0 of the tokens)"
-    name = f"{encoder}.{classifier}-{tokens}-seed{seed}"
+    name = f"{encoder}.{classifier}-{tokens}-seed{seed}{SECTIONS_SUFFIX}"
 
     def build(out: Path) -> dict:
         embedded = artifacts.read_table(emb_dir / "studies.csv")

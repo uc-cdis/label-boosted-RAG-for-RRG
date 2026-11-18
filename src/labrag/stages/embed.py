@@ -5,12 +5,11 @@ Writes ``embeddings/<dataset>/<encoder>/``:
 - ``studies.csv``: study_id and the image_path that was embedded.
 
 Every study of the dataset is embedded (all splits, with or without report text); later
-stages pick their rows by study_id. The image is the study's preferred one, the same
-row that gives its canonical report text (the adapter's load_studies).
+stages pick their rows by study_id. The image is the study's preferred frontal one, the
+same row that gives its canonical report text (the adapter's load_studies).
 
 ``--feature tokens`` instead writes ``embeddings/<dataset>/<encoder>.tokens/frontal/``:
-the full last hidden state (CLS + patch tokens) of every study whose preferred image is
-frontal (the adapter's FRONTAL_VIEWS), with or without report text, cast to float16
+the full last hidden state (CLS + patch tokens) of the same studies, cast to float16
 and stored packed in TOKEN_FORMAT (quant.create_store): the same tokens classify gets
 by packing a float16 store. One store per dataset: the classifiers pick their studies
 by study_id, whatever sections they learn.
@@ -58,23 +57,17 @@ def run(
         "stage": "embed",
         "dataset": dataset,
         "encoder": encoder,
-        "image": "preferred per study",
+        "image": "preferred frontal per study",
         "pixels": "min-max to 8-bit grayscale",
         "feature": "cls",
     }
     relpath = f"embeddings/{dataset}/{encoder}"
     if feature == "tokens":
-        config |= {
-            "feature": TOKENS_FEATURE,
-            "studies": f"preferred image frontal (view in {list(adapter.FRONTAL_VIEWS)})",
-        }
+        config["feature"] = TOKENS_FEATURE
         relpath = f"embeddings/{dataset}/{encoder}.tokens/frontal"
 
     def build(out: Path) -> dict:
         studies = adapter.load_studies(cxr_root)
-        if feature == "tokens":
-            studies = studies[studies.view.isin(adapter.FRONTAL_VIEWS)]
-            studies = studies.reset_index(drop=True)
         studies = studies[["study_id", "image_path"]]
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         num_workers = min(MAX_WORKERS, max(1, len(os.sched_getaffinity(0)) - 1))

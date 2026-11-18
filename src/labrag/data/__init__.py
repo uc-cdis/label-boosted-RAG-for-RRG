@@ -1,9 +1,9 @@
 """Dataset adapters, one module per dataset.
 
 Each adapter module provides:
-- ``load_studies(cxr_root)``: one row per study (study_id, subject_id, split, view,
-  image_path, and one column per report section, or ``labels`` for a labels-only
-  dataset);
+- ``load_studies(cxr_root)``: one row per study with a frontal image (study_id,
+  subject_id, split, view, image_path, and one column per report section, or
+  ``labels`` for a labels-only dataset); lateral images are never used;
 - ``SOURCE_FILES``: the author release files it reads, relative to cxr_root;
 - ``IMAGE_ROOT``: the directory ``image_path`` is relative to, under cxr_root;
 - ``classifier_roles(studies, splits_dir)``: each study's role for the classifiers
@@ -14,8 +14,7 @@ Each adapter module provides:
   whole report);
 - ``LABELS_ONLY`` (optional, default False): its labels come from the release, not
   from a labeler run on report text;
-- ``FRONTAL_VIEWS``: the ``view`` values of a frontal image, for the classifiers'
-  frontal-only token store.
+- ``FRONTAL_VIEWS``: the ``view`` values of a frontal image.
 """
 
 from labrag import paths

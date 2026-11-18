@@ -132,7 +132,7 @@ def canonical_studies(images: pd.DataFrame) -> pd.DataFrame:
     strictest = strictness.groupby(images.study_id).min()
     split = strictest.map(dict(enumerate(GR_SPLITS)))
     images = images[
-        ~images.image_path.isin(CORRUPT_IMAGES) & images.view.isin(VIEW_RANK)
+        ~images.image_path.isin(CORRUPT_IMAGES) & images.view.isin(FRONTAL_VIEWS)
     ]
     rank = images.view.map(VIEW_RANK)
     order = np.lexsort((images.image_path.to_numpy(), rank.to_numpy()))

@@ -14,12 +14,14 @@ SECTIONS = ("findings", "impression")
 # Corrupt (renamed .BAK locally); its study's only image, so the study drops out.
 CORRUPT_IMAGES = frozenset({"PNG/train/patient32368/study1/view1_frontal.png"})
 
-# Preference rank of a study's image (ties by image_path), which also picks its report
-# text. ``view`` is ap_pa on frontals, else "Lateral". ap_pa is undocumented; its 17
-# LL/RL images are labelled Frontal and mostly are (by eye), so they rank as "other
+# Preference rank of a study's frontal image (ties by image_path), which also picks its
+# report text. ``view`` is ap_pa on frontals, else "Lateral". ap_pa is undocumented; its
+# 17 LL/RL images are labelled Frontal and mostly are (by eye), so they rank as "other
 # frontal". Every LL/RL study also has PA or AP, so the tier never decides here.
-VIEW_RANK = {"PA": 0, "AP": 1, "LL": 2, "RL": 2, "Lateral": 3}
-FRONTAL_VIEWS = ("PA", "AP", "LL", "RL")  # labelled Frontal in the release
+# Lateral images are never used: a study without a frontal image drops out (37).
+VIEW_RANK = {"PA": 0, "AP": 1, "LL": 2, "RL": 2}
+FRONTAL_VIEWS = tuple(VIEW_RANK)  # labelled Frontal in the release
+LATERAL = "Lateral"
 
 # Section-parser debris, not report text (stripped, case-insensitive; the only such
 # values in section_findings, 2026-11-09).
@@ -63,8 +65,9 @@ def load_images(cxr_root: Path) -> pd.DataFrame:
     assert (
         frontal == df.ap_pa.notna()
     ).all(), "ap_pa should be set exactly on frontals"
-    view = df.ap_pa.where(frontal, "Lateral")
-    assert view.isin(VIEW_RANK).all(), f"unexpected views: {set(view) - set(VIEW_RANK)}"
+    view = df.ap_pa.where(frontal, LATERAL)
+    known = {*VIEW_RANK, LATERAL}
+    assert view.isin(known).all(), f"unexpected views: {set(view) - known}"
     return pd.DataFrame(
         {
             "subject_id": df.deid_patient_id,
@@ -85,10 +88,13 @@ def load_studies(cxr_root: Path) -> pd.DataFrame:
 
 
 def canonical_studies(images: pd.DataFrame) -> pd.DataFrame:
-    """One row per study: its preferred image (VIEW_RANK, then path) and that image's
-    report text, since a study's images can carry different anonymized text
-    (Stanford-AIMI/chexpert-plus#13). Text is stripped; no text (has_text) is NaN."""
-    images = images[~images.image_path.isin(CORRUPT_IMAGES)]
+    """One row per study with a usable frontal image: the preferred one (VIEW_RANK,
+    then path) and that image's report text, since a study's images can carry different
+    anonymized text (Stanford-AIMI/chexpert-plus#13). Text is stripped; no text
+    (has_text) is NaN."""
+    images = images[
+        ~images.image_path.isin(CORRUPT_IMAGES) & images.view.isin(FRONTAL_VIEWS)
+    ]
     rank = images.view.map(VIEW_RANK)
     order = np.lexsort((images.image_path.to_numpy(), rank.to_numpy()))
     studies = images.iloc[order].drop_duplicates("study_id").sort_values("study_id")

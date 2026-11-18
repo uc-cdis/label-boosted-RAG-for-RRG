@@ -364,7 +364,7 @@ def predicted_rows(pred: pd.DataFrame, rows: pd.DataFrame) -> pd.Index:
     if missing.any():
         raise SystemExit(
             f"build-prompts: {missing.sum()} corpus studies have no predicted labels "
-            f"(not in the classifier's frontal tokens?), e.g. {rows.index[missing][0]}"
+            f"(e.g. {rows.index[missing][0]})"
         )
     return rows.index
 

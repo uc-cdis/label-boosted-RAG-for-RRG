@@ -35,6 +35,7 @@ def test_view_preference_beats_path_order():
             ("p3_s1", "RL", "PNG/c/view2_frontal.png", "rl"),
             ("p4_s1", "RL", "PNG/d/view1_frontal.png", "rl"),  # LL/RL tie: path
             ("p4_s1", "LL", "PNG/d/view2_frontal.png", "ll"),
+            ("p5_s1", "Lateral", "PNG/e/view1_lateral.png", "lateral only"),
         ]
     )
     studies = chexpertplus.canonical_studies(images).set_index("study_id")
@@ -43,7 +44,7 @@ def test_view_preference_beats_path_order():
         "p2_s1": "ap",
         "p3_s1": "rl",
         "p4_s1": "rl",
-    }
+    }  # p5_s1: no frontal image, dropped
 
 
 def test_path_breaks_ties_within_a_view():
@@ -63,7 +64,7 @@ def test_corrupt_image_is_skipped_and_text_is_cleaned():
     images = _images(
         [
             ("p1_s1", "PA", corrupt, "corrupt row"),
-            ("p1_s1", "Lateral", "PNG/a/view2_lateral.png", "  kept text \n"),
+            ("p1_s1", "AP", "PNG/a/view2_frontal.png", "  kept text \n"),
             ("p2_s1", "PA", "PNG/b/view1_frontal.png", " / "),
         ]
     )
@@ -77,7 +78,9 @@ def test_release_studies():
     images = chexpertplus.load_images(paths.CXR_ROOT)
     studies = chexpertplus.load_studies(paths.CXR_ROOT)
     assert studies.study_id.is_unique
-    assert len(studies) == images.study_id.nunique() - 1  # the corrupt-image study
+    # the corrupt-image study and the 37 without a frontal image
+    assert len(studies) == images.study_id.nunique() - 1 - 37
+    assert studies.view.isin(chexpertplus.FRONTAL_VIEWS).all()
     assert (studies.split == "valid").sum() > 0
     # 61 valid studies with Findings (docs/revision-plan.md §2)
     assert studies[studies.split == "valid"].findings.notna().sum() == 61

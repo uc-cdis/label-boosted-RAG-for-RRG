@@ -6,10 +6,9 @@ section and label, on val and official valid), and per section s of the classifi
 probs.<s>.csv (study_id, role, one column per label) and predictions.<s>.csv (0/1, the
 layout of labels.csv).
 
-Its studies: those with labels in any of its sections and an embedding (the attn ones
-read the frontal token store, so studies whose preferred image is lateral drop out;
-counted in the summary). Fit on the adapter's ``train`` role; max-F1 thresholds per
-section on its ``val`` studies; other roles predicted only. Classifiers:
+Its studies: those with labels in any of its sections (each must be embedded). Fit on
+the adapter's ``train`` role; max-F1 thresholds per section on its ``val`` studies;
+other roles predicted only. Classifiers:
 
 - ``lr``: per-label logistic regression on the CLS embedding (the preprint's; CPU).
 - ``lr-tuned``: ``lr`` on standardized features with C picked per label on val (CPU).
@@ -167,9 +166,9 @@ def run(
         n = len(names)
         blocks = {s: slice(i * n, (i + 1) * n) for i, s in enumerate(sections)}
         embedded = artifacts.read_table(emb_dir / "studies.csv")
-        any_label = embedded.study_id.isin(
-            set().union(*(t.index for t in labels.values()))
-        ).to_numpy()
+        labelled = set().union(*(t.index for t in labels.values()))
+        any_label = embedded.study_id.isin(labelled).to_numpy()
+        assert any_label.sum() == len(labelled), "labelled studies not embedded"
         rows = np.flatnonzero(any_label)
         ids = embedded.study_id[any_label].reset_index(drop=True)
         studies = adapter.load_studies(cxr_root).set_index("study_id")
@@ -300,10 +299,6 @@ def run(
             "n_studies": len(ids),
             "n_by_role": pd.Series(role).value_counts().sort_index().to_dict(),
             "n_labelled": {s: int(h.sum()) for s, h in has.items()},
-            "n_labelled_not_embedded": {
-                s: int((~t.index.isin(embedded.study_id)).sum())
-                for s, t in labels.items()
-            },
             "val_mean_auroc_by_section": by_section,
         }
         if attn:

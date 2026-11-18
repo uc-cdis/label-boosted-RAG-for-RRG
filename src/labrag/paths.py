@@ -15,7 +15,7 @@ MODELS_ROOT = Path(os.environ.get("LABRAG_MODELS_ROOT", "/opt/gpudata/models"))
 # Shared NFS storage visible from every node: the artifacts later stages read, and the
 # results (docs/revision-plan.md §8). Jobs build on local disk and publish here once.
 SHARED_ROOT = Path(
-    os.environ.get("LABRAG_SHARED_ROOT", "/opt/gpu_working/steven/labrag-shared")
+    os.environ.get("LABRAG_SHARED_ROOT", "/shared/gpudata/songs1/labrag-shared")
 )
 
 # Node-local run root of slurm/job.sh (commit checkouts, uv cache, logs). Long-lived

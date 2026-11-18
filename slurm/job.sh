@@ -41,7 +41,7 @@ publish_log() {
   exec 1>&3 2>&4 # back to Slurm's log; tee sees EOF and drains
   wait "$tee_pid" || true
   if [[ -n ${SLURM_JOB_ID:-} ]]; then
-    local dest=${LABRAG_SHARED_ROOT:-/opt/gpu_working/steven/labrag-shared}/logs
+    local dest=${LABRAG_SHARED_ROOT:-/shared/gpudata/songs1/labrag-shared}/logs
     mkdir -p "$dest" && cp "$log" "$dest/.$SLURM_JOB_ID.out.tmp" &&
       mv "$dest/.$SLURM_JOB_ID.out.tmp" "$dest/$SLURM_JOB_ID.out" ||
       echo "could not copy $log to $dest" >&2

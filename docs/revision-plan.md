@@ -310,7 +310,7 @@ Settled:
   - the submitter pins the run to the current commit and refuses a dirty or unpushed tree
   - on each node, the job fetches that commit from GitHub into its own directory and builds the env from the commit's `uv.lock`. Runs at different commits never share code or env.
   - model weights and vLLM images are pre-pulled on every node; the job checks they are present at the pinned revision and digest, and never downloads them
-  - **shared storage:** `/opt/gpu_working/steven/labrag-shared`, an NFS directory visible from every node. It holds both the intermediates later stages need and the main results. NFS is easy to overload, so jobs are written to go easy on it:
+  - **shared storage:** `/shared/gpudata/songs1/labrag-shared`, an NFS directory visible from every node. It holds both the intermediates later stages need and the main results. NFS is easy to overload, so jobs are written to go easy on it:
     - every job, on every node, works on local disk and copies its outputs to NFS once at the end, as a few large files (e.g. one compressed JSONL per generation cell), then renames them into place; never many small files, and never appending to a shared file
     - a job copies the NFS inputs it needs (embeddings, prompts) to local disk once at the start, rather than reading them repeatedly
     - no envs, uv cache, model weights, containers, vLLM caches or training checkpoints on NFS: they stay on local disk (final LoRA adapters are small and can go to NFS)

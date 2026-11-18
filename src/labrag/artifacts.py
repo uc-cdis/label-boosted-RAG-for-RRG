@@ -46,8 +46,23 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def sha256_tree(root: Path) -> tuple[str, int]:
+    """Digest of a directory's files: sha256 over each file's relative path and
+    sha256, in sorted path order. Returns (digest, number of files)."""
+    files = sorted(p for p in root.rglob("*") if p.is_file())
+    h = hashlib.sha256()
+    for p in files:
+        h.update(str(p.relative_to(root)).encode() + b"\0")
+        h.update(bytes.fromhex(sha256_file(p)))
+    return h.hexdigest(), len(files)
+
+
 def file_record(path: Path) -> dict:
-    """Provenance record of an input file."""
+    """Provenance record of an input file, or of a directory of files (MIMIC-CXR's
+    one report per study)."""
+    if path.is_dir():
+        digest, n = sha256_tree(path)
+        return {"path": str(path), "sha256_tree": digest, "n_files": n}
     return {"path": str(path), "sha256": sha256_file(path)}
 
 

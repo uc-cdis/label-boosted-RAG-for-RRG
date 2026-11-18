@@ -173,3 +173,16 @@ def test_read_table_keeps_digit_study_ids_as_text(tmp_path):
     )
     ids = artifacts.read_table(path).study_id.tolist()
     assert ids == ["216840111366964012373310883942009086102412934", "0012", "x-2"]
+
+
+def test_directory_record_covers_paths_and_contents(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "x.txt").write_text("one")
+    (tmp_path / "y.txt").write_text("two")
+    first = artifacts.file_record(tmp_path)
+    assert first["n_files"] == 2
+    (tmp_path / "y.txt").write_text("changed")
+    assert artifacts.file_record(tmp_path)["sha256_tree"] != first["sha256_tree"]
+    (tmp_path / "y.txt").write_text("two")
+    (tmp_path / "y.txt").rename(tmp_path / "z.txt")
+    assert artifacts.file_record(tmp_path)["sha256_tree"] != first["sha256_tree"]

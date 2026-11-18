@@ -4,7 +4,8 @@ Each adapter module provides:
 - ``load_studies(cxr_root)``: one row per study with a frontal image (study_id,
   subject_id, split, view, image_path, and one column per report section, or
   ``labels`` for a labels-only dataset); lateral images are never used;
-- ``SOURCE_FILES``: the author release files it reads, relative to cxr_root;
+- ``SOURCE_FILES``: the author release files (or directories of them) it reads,
+  relative to cxr_root;
 - ``IMAGE_ROOT``: the directory ``image_path`` is relative to, under cxr_root;
 - ``classifier_roles(studies, splits_dir)``: each study's role for the classifiers
   (``train``, ``val``, or a held-out role), from the frozen files ``SPLIT_FILES``;
@@ -18,9 +19,14 @@ Each adapter module provides:
 """
 
 from labrag import paths
-from labrag.data import chexpertplus, padchest
+from labrag.data import chexpertplus, mimic, padchest, rexgradient
 
-DATASETS = {"chexpertplus": chexpertplus, "padchest": padchest}
+DATASETS = {
+    "chexpertplus": chexpertplus,
+    "mimic": mimic,
+    "padchest": padchest,
+    "rexgradient": rexgradient,
+}
 
 
 SECTIONS = tuple(dict.fromkeys(s for a in DATASETS.values() for s in a.SECTIONS))

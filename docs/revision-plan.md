@@ -27,7 +27,7 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
 | Dataset | Role |
 |---|---|
 | **MIMIC-CXR** | Primary. RRG test (official split), classifiers, retrieval corpus, training data for fine-tuning |
-| **ReXGradient-160K** | Primary. RRG test (official patient-disjoint split, 67 sites; **full 10k test everywhere**), classifiers, retrieval corpus |
+| **ReXGradient-160K** | Primary. RRG test (official patient-disjoint split, 67 sites; **its 7,755 test studies with a labelled frontal image everywhere**: unlabelled views are never used, so 2,245 of the 10,000 drop out), classifiers, retrieval corpus |
 | **CheXpert Plus** | The **outside dataset**: never an RRG test. (1) **Pilot** (Appendix): every generation setting is chosen here, not on the evaluation datasets. (2) **Sole transfer source** for J (classifiers + corpus). Its official valid split has only 61 Findings studies (61 patients), so the preprint's CheXpert Plus test results are not re-run. |
 | **PadChest-GR** | Richer-labels test bed (§5). **Official split: 3,185 train / 455 val / 915 test.** English finding sentences; labels are in the PadChest vocabulary (all 154 verified) |
 | **PadChest** | Labels only (its reports are stemmed Spanish). Trains the rich-label and localized-label classifiers (§5). About 76% of its studies were labelled by the authors' RNN model, not by physicians. To state in the paper. |
@@ -338,11 +338,12 @@ Settled:
 
 Assumptions:
 - 1 seed.
-- Test sizes in studies (F = Findings, I = Impression, F+I = Findings+Impression):
-  - MIMIC test: F 2,347 · I 2,224 · F+I 1,624
-  - ReXGradient test: 10,000 per section
+- Test sizes in studies with a labelled frontal image (F = Findings, I = Impression, F+I = Findings+Impression):
+  - MIMIC test: F 2,210 · I 2,098 · F+I 1,549
+  - ReXGradient test: 7,755 per section
   - PadChest-GR test: 915
-- "Findings default" = MIMIC + ReXGradient full test, Findings only = 12,347 studies.
+- "Findings default" = MIMIC + ReXGradient test, Findings only = 9,965 studies.
+- The rows below were computed at the earlier, larger test sizes (12,347 Findings studies), so they run about 20% high.
 
 | Experiment | ≈ Generations |
 |---|---|

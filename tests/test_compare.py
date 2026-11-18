@@ -87,3 +87,33 @@ def test_blocks_do_not_change_the_resamples(monkeypatch):
     monkeypatch.setattr(compare, "BLOCK", 7)
     blocked = compare.resampled_means(values)
     assert all(np.array_equal(whole[g], blocked[g]) for g in values)
+
+
+def test_conditions_parse_pools_and_lone_artifacts():
+    pools = compare.conditions(["generations/x/a", "P=x/b,generations/x/c/"])
+    assert pools == {"x/a": ["x/a"], "P": ["x/b", "x/c"]}
+    with pytest.raises(SystemExit, match="twice or empty"):
+        compare.conditions(["P=x/b", "P=x/c"])
+    with pytest.raises(SystemExit, match="twice or empty"):
+        compare.conditions(["P="])
+
+
+def test_pool_is_the_mean_of_its_runs_and_lists_them():
+    values = {
+        "r1": np.array([[1.0], [2.0], [3.0]]),
+        "r2": np.array([[3.0], [4.0], [5.0]]),
+        "r3": np.array([[0.0], [0.0], [0.0]]),
+    }
+    rows = compare.pooled(values, {"P": ["r1", "r2"], "r3": ["r3"]}, ["x"], "m")
+    got = {(r["kind"], r["a"], r["b"]): r["estimate"] for r in rows}
+    assert got[("condition", "P", "")] == 3.0
+    assert got[("difference", "P", "r3")] == 3.0
+    assert got[("run", "r1", "P")] == 2.0 and got[("run", "r2", "P")] == 4.0
+    assert ("run", "r3", "r3") not in got  # a lone artifact is not a pool
+
+
+def test_lone_artifacts_give_the_plain_comparison():
+    rng = np.random.default_rng(0)
+    values = {g: rng.normal(size=(20, 1)) for g in ("a", "b")}
+    lone = compare.pooled(values, {"a": ["a"], "b": ["b"]}, ["x"], "m")
+    assert lone == compare.compare(values, ["x"], "m")

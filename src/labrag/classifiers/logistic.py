@@ -90,3 +90,10 @@ def f1_threshold(y: np.ndarray, p: np.ndarray) -> float:
         2 * precision * recall, denom, out=np.zeros_like(denom), where=denom > 0
     )
     return float(thresholds[np.argmax(f1)])
+
+
+def prevalence_threshold(y: np.ndarray, p: np.ndarray) -> float:
+    """The threshold predicting (``p >= t``) as many positives as ``y`` has: its k-th
+    highest probability, k = positives (more only on ties); inf if none."""
+    k = int(y.sum())
+    return float(np.sort(p)[::-1][k - 1]) if k else float("inf")

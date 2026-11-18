@@ -19,6 +19,7 @@ from labrag.stages import (
     generate,
     labels,
     predict,
+    threshold,
 )
 
 SUITE = ", ".join(evaluate.SUITE)
@@ -135,6 +136,23 @@ def add_classify(sub) -> None:
         "--folds",
         type=int,
         help="attn: also out-of-fold predictions for the train role, K folds by patient",
+    )
+
+
+def add_threshold(sub) -> None:
+    p = stage(sub, threshold)
+    p.add_argument(
+        "--classifier",
+        required=True,
+        help="classify artifact under classifiers/, e.g. "
+        "chexpertplus/raddino.attn-nvfp4-seed1/findings/chexbert14.u0",
+    )
+    p.add_argument(
+        "--rule",
+        required=True,
+        choices=threshold.RULES,
+        help="threshold rule on val; name suffix "
+        + ", ".join(f"{r} {s}" for r, s in threshold.RULES.items()),
     )
 
 
@@ -266,6 +284,7 @@ COMMANDS = (
     add_labels,
     add_embed,
     add_classify,
+    add_threshold,
     add_predict,
     add_build_prompts,
     add_generate,

@@ -32,6 +32,8 @@ def run(
     clf_dir = paths.SHARED_ROOT / "classifiers" / classifier
     clf_record = artifacts.artifact_record(clf_dir)
     clf_config = artifacts.read_manifest(clf_dir)["config"]
+    if clf_config["stage"] != "classify":
+        raise SystemExit("predict: --classifier must be a classify artifact (a model)")
     if clf_config["classifier"] not in ("attn", "attn-cls"):
         raise SystemExit("predict: only the attn classifiers (they read the tokens)")
     if "sections" in clf_config:

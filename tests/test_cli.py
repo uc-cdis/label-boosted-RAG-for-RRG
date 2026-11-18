@@ -14,6 +14,7 @@ from labrag.stages import (
     generate,
     labels,
     predict,
+    threshold,
 )
 
 CASES = [
@@ -116,6 +117,15 @@ CASES = [
             tokens="nvfp4",
             seed=1,
             folds=5,
+        ),
+    ),
+    (
+        threshold,
+        "threshold --classifier chexpertplus/raddino.attn-nvfp4-seed1-sections/"
+        "chexbert14.u0 --rule prevalence",
+        dict(
+            classifier="chexpertplus/raddino.attn-nvfp4-seed1-sections/chexbert14.u0",
+            rule="prevalence",
         ),
     ),
     (

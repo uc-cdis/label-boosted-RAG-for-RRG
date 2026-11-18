@@ -6,6 +6,11 @@ pair's difference (a − b, in the order given), with a percentile interval from
 bootstrap over studies (docs/revision-plan.md §3). Also ``generations/empty_report``
 and 1/RadCliQ-v1 = 1 / mean(RadCliQ-v1).
 
+A condition is one generations artifact, or a pool ``NAME=run1,run2,...`` (e.g.
+classifier seeds × sampling seeds): each study's scores averaged over the pool's runs,
+so its mean is the mean of the runs' means. Intervals still resample studies only, not
+the runs. Each pooled run's own mean is a ``run`` row (``b`` = its pool).
+
 Paired: a drawn study counts in every condition, so shared noise cancels in the
 differences. Fixed seed and single-threaded numpy means, so intervals don't depend on
 the machine. Scores are never missing; empty reports are scored as "EMPTY".
@@ -43,15 +48,21 @@ def run(
 ) -> Path:
     """Compare the conditions ``generations`` on ``metrics`` (default: the suite)."""
     metrics = metrics or evaluate.SUITE
-    generations = [g.strip("/").removeprefix("generations/") for g in generations]
-    if len(generations) < 2:
-        raise SystemExit("compare: give at least two generations artifacts")
-    if len(set(generations)) < len(generations):
+    pools = conditions(generations)
+    runs = [g for members in pools.values() for g in members]
+    if len(pools) < 2:
+        raise SystemExit("compare: give at least two conditions")
+    if len(set(runs)) < len(runs):
         raise SystemExit("compare: a generations artifact is given twice")
     relpath = f"comparisons/{out.strip('/').removeprefix('comparisons/')}"
+    listed = [
+        f"generations/{m[0]}" if c == m[0] else
+        {"name": c, "generations": [f"generations/{g}" for g in m]}
+        for c, m in pools.items()
+    ]  # fmt: skip
     config = {
         "stage": "compare",
-        "generations": [f"generations/{g}" for g in generations],
+        "generations": listed,
         "metrics": metrics,
         "method": METHOD,
         "resamples": RESAMPLES,
@@ -64,25 +75,53 @@ def run(
     inputs, tables = {}, []
     for metric in metrics:
         records = {}
-        for g in generations:
+        for g in runs:
             score_dir = paths.SHARED_ROOT / "scores" / g / metric
             inputs[f"{g}/{metric}"] = artifacts.artifact_record(score_dir)
             records[g] = _read_jsonl(score_dir / "scores.jsonl.gz")
         if not tables:  # every scores artifact has it; taken once, from the first
             empty = ["empty_report"]
-            tables += compare(align(records, empty), empty, "generations")
+            tables += pooled(align(records, empty), pools, empty, "generations")
         columns = evaluate.METRICS[metric]["scores"]
-        tables += compare(align(records, columns), columns, metric)
+        tables += pooled(align(records, columns), pools, columns, metric)
 
     def build(dest: Path) -> dict:
         with open(dest / "comparison.csv", "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=FIELDS, lineterminator="\n")
             w.writeheader()
             w.writerows(tables)
-        print_table(tables, generations)
-        return {"conditions": {str(i): g for i, g in enumerate(generations, 1)}}
+        print_table(tables, list(pools))
+        return {"conditions": {str(i): c for i, c in enumerate(pools, 1)}}
 
     return artifacts.publish(relpath, config, inputs, build, overwrite)
+
+
+def conditions(generations: list[str]) -> dict[str, list[str]]:
+    """Condition name -> its generations artifacts (a lone artifact names itself)."""
+    pools = {}
+    for item in generations:
+        name, sep, members = item.partition("=")
+        runs = members.split(",") if sep else [name]
+        runs = [g.strip("/").removeprefix("generations/") for g in runs]
+        name = name if sep else runs[0]
+        if name in pools or not all(runs):
+            raise SystemExit(f"compare: condition {name!r} given twice or empty")
+        pools[name] = runs
+    return pools
+
+
+def pooled(values, pools, columns: list[str], metric: str) -> list:
+    """``compare`` over the pools (per-study means over their runs), then each pooled
+    run's own mean as a ``run`` row."""
+    means = {c: np.mean([values[g] for g in m], axis=0) for c, m in pools.items()}
+    rows = compare(means, columns, metric)
+    for c, members in pools.items():
+        if len(members) > 1:
+            own = compare({g: values[g] for g in members}, columns, metric)
+            rows += [
+                r | {"kind": "run", "b": c} for r in own if r["kind"] == "condition"
+            ]
+    return rows
 
 
 def align(records: dict[str, list[dict]], columns: list[str]) -> dict[str, np.ndarray]:
@@ -159,11 +198,13 @@ def compare(values: dict[str, np.ndarray], columns: list[str], metric: str) -> l
     return rows
 
 
-def print_table(rows: list[dict], generations: list[str]) -> None:
-    label = {g: f"[{i}]" for i, g in enumerate(generations, 1)}
-    for g in generations:
+def print_table(rows: list[dict], names: list[str]) -> None:
+    label = {g: f"[{i}]" for i, g in enumerate(names, 1)}
+    for g in names:
         print(f"{label[g]} {g}")
     for r in rows:
+        if r["kind"] == "run":
+            continue
         who = (
             label[r["a"]]
             if r["kind"] == "condition"

@@ -321,7 +321,7 @@ Settled:
   - `evaluate`: per-study scores, on content-only text (no section header), as ReXrank's Findings board. Each metric runs in its own container with its upstream's code. GREEN's judge is served by a pinned vLLM, while GREEN's own image does all the text work; upstream's HF generate is kept as the reference. One job (one GPU) runs the whole suite at once: GREEN and RaTEScore share the GPU, while CXR-Report-Metric scores fixed-size chunks in parallel CPU containers, so `--cpus-per-task` sets the balance.
   - `compare`: each condition's mean and every pair's difference, with paired-bootstrap 95% CIs (§3, Statistics), from the conditions' scores artifacts. CPU only, about a second.
 - **Provenance:** each artifact's manifest records the output checksums of the artifacts it read and the checksums of the model files it loaded. If an upstream artifact now has other outputs, or a model's pins in `configs/weights.yaml` changed, the artifact is stale: it is refused (rebuilt only with `--overwrite`), and no stage reads it. `labrag provenance` lists every stale artifact on shared storage, through the whole chain.
-- **Hard cap: never more than 8 GPUs in use at once** across all our jobs. Of the cluster's 16 H200s, at most 8 are ours at any time. Steven enforces it when scheduling; the runner doesn't.
+- **At most 8 GPUs per job** (e.g. a large teacher or judge server). Across jobs there is no cap: we use as many GPUs as the data locations allow (kg35-nvl02 has no source data, so jobs that read data get the other 12).
 - **GPU wrapper** (`src/labrag/serving.py`; multi-node serving not built yet):
   - tensor-parallel size taken from `CUDA_VISIBLE_DEVICES`
   - free port, health check, teardown
@@ -375,7 +375,7 @@ Steven's preliminary runs show that Qwen's highest thinking modes are slow. The 
 - **Budgets are hard token caps** (e.g. ≈1k / 4k / 16k, set from the pilot), not the model's open-ended top mode. The top cap is where pilot quality levels off or where cost becomes prohibitive, whichever comes first.
 - **The default thinking setting for B** (and D–J) is a middle budget, not the top one.
 - **Rough sensitivity:** if the top-budget cells average ≈10k tokens, those ≈173k generations take ≈1.7B tokens, ≈1.3B more than the 2.5k-token assumption. The total would then be ≈6B output tokens, or ≈360–680 H200-hours (tokens from the 0.8B–9B models are far cheaper than the rest). Re-estimate after the pilot.
-- **Qwen3.5-397B in BF16 takes our whole 8-GPU cap:** 8 GPUs on one rail across all 4 nodes, so only one server runs at a time, and nothing else of ours can run alongside it. C's 397B cells (≈99k generations) can't overlap with any other run, including the §6 teacher. Very rough estimate: about two days; re-estimate after the pilot.
+- **Qwen3.5-397B in BF16 takes the 8-GPU per-job maximum:** 8 GPUs on one rail across all 4 nodes, so one server per rail; other runs use the remaining GPUs alongside it. Very rough estimate: about two days; re-estimate after the pilot.
 - **Cuts, in order, if the pilot says it's too slow:**
   1. No top budget at 397B.
   2. 3 thinking budgets → 2 (≈−173k: 7 Qwen3.5 sizes × 2 conditions).

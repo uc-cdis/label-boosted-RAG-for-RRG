@@ -38,6 +38,7 @@ import pandas as pd
 
 from labrag import artifacts, paths, prompts, retrieval
 from labrag.data import DATASETS
+from labrag.stages import threshold
 from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, POSITIVE, SECTIONS_SUFFIX
 
 # experiment -> dataset, target roles, corpus roles
@@ -147,7 +148,7 @@ def run(
         config["predictions"] = predictions
     elif predicted:
         inputs["classifier"] = artifacts.artifact_record(clf_dir)
-        clf_inputs = artifacts.read_manifest(clf_dir)["inputs"]
+        clf_inputs = threshold.trained_manifest(clf_dir)["inputs"]
         for name in ("embeddings", "labels"):  # the classifier saw these same inputs
             record = clf_inputs[name]
             if name == "labels" and clf_predictions != "predictions.csv":

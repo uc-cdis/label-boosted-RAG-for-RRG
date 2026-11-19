@@ -203,6 +203,18 @@ CASES = [
         ),
     ),
     (
+        build_prompts,
+        "build-prompts --experiment pilot --section findings --condition labrag "
+        "--predictions a/b/c/d --confidence",
+        dict(
+            experiment="pilot",
+            section="findings",
+            condition="labrag",
+            predictions="a/b/c/d",
+            confidence=True,
+        ),
+    ),
+    (
         sides,
         "sides --dataset chexpertplus --section findings",
         dict(dataset="chexpertplus", section="findings"),

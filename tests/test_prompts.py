@@ -66,3 +66,9 @@ def test_render_names_the_section(section):
     assert f"5. Write only the {name} section of the report" in message["content"]
     with pytest.raises(SystemExit):
         prompts.render(version, [("a", [])], None, "findings_impression")
+
+
+def test_probability_label_text_is_clamped():
+    assert prompts.with_probability("Atelectasis", 0.284) == "Atelectasis (28%)"
+    assert prompts.with_probability("Support Devices", 0.999) == "Support Devices (99%)"
+    assert prompts.with_probability("Pneumonia", 0.001) == "Pneumonia (1%)"

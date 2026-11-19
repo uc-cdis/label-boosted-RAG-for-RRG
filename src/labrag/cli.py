@@ -222,8 +222,13 @@ def add_build_prompts(sub) -> None:
         help="labrag-oracle: show each label with its side (sides stage)",
     )
     p.add_argument(
+        "--confidence",
+        action="store_true",
+        help="labrag: show each target label with the classifier's probability",
+    )
+    p.add_argument(
         "--predictions",
-        help="labrag: target labels from a predict artifact, its "
+        help="labrag and diagnostics: target labels from a predict artifact, its "
         "classifier <source>/<name>/<sections>/<labeler> "
         "(e.g. chexpertplus-mimic-rexgradient/raddino.ft-attn-seed1/"
         "findings-impression/chexbert14)",

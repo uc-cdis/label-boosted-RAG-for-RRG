@@ -101,6 +101,11 @@ def test_image_ranking_is_for_label_conditions():
         build_prompts.run("pilot", "findings", "retrieval-only", ranking="image")
 
 
+def test_confidence_is_for_labrag():
+    with pytest.raises(SystemExit, match="--confidence is for labrag"):
+        build_prompts.run("pilot", "findings", "labrag-oracle", confidence=True)
+
+
 def test_sides_are_for_the_oracle():
     with pytest.raises(SystemExit, match="--sides is for labrag-oracle"):
         build_prompts.run("pilot", "findings", "labrag", classifier=CLF, sides=True)

@@ -68,6 +68,12 @@ def clean_report(text: str) -> str:
     return " ".join(text.split())
 
 
+def with_probability(name: str, p: float) -> str:
+    """A predicted label with its probability: "Atelectasis (28%)". Clamped to 1-99%:
+    a classifier is never certain."""
+    return f"{name} ({min(99, max(1, round(100 * p)))}%)"
+
+
 def label_text(names: list[str]) -> str:
     return ", ".join(names) if names else NO_POSITIVE
 

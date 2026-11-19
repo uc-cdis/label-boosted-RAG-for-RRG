@@ -34,6 +34,9 @@ retrieval-only, the labels shown but not used to rank; directory suffix
 ``--sides`` (labrag-oracle): each label shown with its side from the ``sides`` stage,
 "Pleural Effusion (left)", for the target and the examples; ranking unchanged;
 directory suffix ``.sides``.
+``--confidence`` (labrag): each target label shown with the classifier's probability,
+"Atelectasis (28%)" (its probs file); example labels, label set and ranking unchanged;
+directory suffix ``.confidence``.
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``).
@@ -88,6 +91,7 @@ def run(
     predictions: str | None = None,
     ranking: str = "labels",
     sides: bool = False,
+    confidence: bool = False,
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:
@@ -123,6 +127,8 @@ def run(
         raise SystemExit("build-prompts: --ranking is for conditions with labels")
     if sides and condition != "labrag-oracle":
         raise SystemExit("build-prompts: --sides is for labrag-oracle")
+    if confidence and condition != "labrag":
+        raise SystemExit("build-prompts: --confidence is for labrag")
     transfer = predictions is not None
     if (prompts.uses_labels(version), prompts.uses_examples(version)) != (
         with_labels,
@@ -249,6 +255,9 @@ def run(
         if sides:
             config["sides"] = "reference, target and examples: label (side)"
             condition_dir += ".sides"
+        if confidence:
+            config["confidence"] = "target labels: label (probability, % rounded, 1-99)"
+            condition_dir += ".confidence"
     else:
         if with_examples:
             config["ranking"] = "cosine"
@@ -319,8 +328,22 @@ def run(
             table = artifacts.read_table(sides_dir / "sides.csv")
             side = dict(zip(zip(table.study_id, table.label), table.side))
 
-        def positives(row: np.ndarray, study_id: str) -> list[str]:
+        prob = None
+        if confidence:
+            probs_file = (
+                pred_dir / f"probs.{readout}.csv"
+                if transfer
+                else clf_dir / f"probs.{section}.csv"
+            )
+            prob = artifacts.read_table(probs_file).set_index("study_id")
+            prob = prob.loc[target.index, names]
+
+        def positives(row: np.ndarray, study_id: str, target=False) -> list[str]:
             shown = [n for n, v in zip(names, row) if v]
+            if target and prob is not None:
+                return [
+                    prompts.with_probability(n, prob.at[study_id, n]) for n in shown
+                ]
             return [radgraph_sides.sided(n, side.get((study_id, n))) for n in shown]
 
         reports = corpus[section].to_numpy()
@@ -341,7 +364,7 @@ def run(
             }
             if with_labels:
                 retrieved["retrieved_jaccard"] = overlap[i, idx].tolist()
-            labels_i = positives(target_y[i], study_id) if with_labels else None
+            labels_i = positives(target_y[i], study_id, True) if with_labels else None
             records.append(record(study_id, row, examples, labels_i, retrieved))
         summary = write(out, records)
         summary["n_corpus"] = len(corpus)

@@ -236,3 +236,32 @@ section-simple-image:
 
     Now generate the report for the current case using its label below. Always generate reports based on the examples shown.
     Label: {labels}
+
+# section-simple-image for --confidence: each current label carries the classifier's
+# probability (calibrated on CheXpert Plus val), the example labels don't.
+section-simple-image-confidence:
+  example: "Example: {index}\nLabel: {labels}\n{report}"
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given context information and the chest X-ray of the current case.
+    The context information contains examples of reports written for similar cases and their associated labels.
+    Use the examples and their associated labels to generate a report for the current case based on the current label.
+    Strictly follow the instructions below to generate the reports.
+
+    **Instructions**
+
+    1. The report must be based on the image of the current case, the information in the context and the current label.
+    2. The report must mimic the style of the reports shown in the context.
+    3. Do not generate blank reports.
+    4. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
+    5. Write only the {section} section of the report, without its header.
+    6. Each current label is shown with the probability, from an image classifier, that the finding is present, e.g. "Atelectasis (30%)". The probabilities are calibrated: a label at 30% is absent about 7 times in 10. Report a finding with a low probability only if the image supports it. The labels of the examples were read from their reports and carry no probability.
+
+    CONTEXT:
+    {examples}
+
+    CURRENT CASE:
+    {image}
+
+    Now generate the report for the current case using its label below. Always generate reports based on the examples shown.
+    Label: {labels}

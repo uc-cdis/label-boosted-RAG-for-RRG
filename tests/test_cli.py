@@ -14,6 +14,7 @@ from labrag.stages import (
     generate,
     labels,
     predict,
+    sides,
     threshold,
 )
 
@@ -189,6 +190,22 @@ CASES = [
             corpus_labels="predicted",
             ranking="image",
         ),
+    ),
+    (
+        build_prompts,
+        "build-prompts --experiment pilot --section findings --condition labrag-oracle "
+        "--sides",
+        dict(
+            experiment="pilot",
+            section="findings",
+            condition="labrag-oracle",
+            sides=True,
+        ),
+    ),
+    (
+        sides,
+        "sides --dataset chexpertplus --section findings",
+        dict(dataset="chexpertplus", section="findings"),
     ),
     (
         generate,

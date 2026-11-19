@@ -97,3 +97,8 @@ def test_corpus_studies_without_predictions_are_refused():
 def test_image_ranking_is_for_label_conditions():
     with pytest.raises(SystemExit, match="--ranking is for conditions with labels"):
         build_prompts.run("pilot", "findings", "retrieval-only", ranking="image")
+
+
+def test_sides_are_for_the_oracle():
+    with pytest.raises(SystemExit, match="--sides is for labrag-oracle"):
+        build_prompts.run("pilot", "findings", "labrag", classifier=CLF, sides=True)

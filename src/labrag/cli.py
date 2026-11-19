@@ -20,6 +20,7 @@ from labrag.stages import (
     generate,
     labels,
     predict,
+    sides,
     threshold,
 )
 
@@ -75,6 +76,10 @@ def add_labels(sub) -> None:
         "--section",
         "--labeler",
     )
+
+
+def add_sides(sub) -> None:
+    stage(sub, sides, "--dataset", "--section")
 
 
 def add_embed(sub) -> None:
@@ -212,6 +217,11 @@ def add_build_prompts(sub) -> None:
         "or by image only, as retrieval-only",
     )
     p.add_argument(
+        "--sides",
+        action="store_true",
+        help="labrag-oracle: show each label with its side (sides stage)",
+    )
+    p.add_argument(
         "--predictions",
         help="labrag: target labels from a predict artifact, its "
         "classifier <source>/<name>/<sections>/<labeler> "
@@ -296,6 +306,7 @@ def add_provenance(sub) -> None:
 COMMANDS = (
     add_splits,
     add_labels,
+    add_sides,
     add_embed,
     add_classify,
     add_finetune,

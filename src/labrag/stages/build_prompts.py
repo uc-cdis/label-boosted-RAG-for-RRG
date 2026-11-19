@@ -31,6 +31,9 @@ labeler has no reference labels here, e.g. PadChest-60).
 ``--ranking image`` (label conditions): the same top K by image similarity as
 retrieval-only, the labels shown but not used to rank; directory suffix
 ``.image-ranked``. It separates the label list in the prompt from label-based retrieval.
+``--sides`` (labrag-oracle): each label shown with its side from the ``sides`` stage,
+"Pleural Effusion (left)", for the target and the examples; ranking unchanged;
+directory suffix ``.sides``.
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``).
@@ -45,6 +48,7 @@ import pandas as pd
 
 from labrag import artifacts, paths, prompts, retrieval
 from labrag.data import DATASETS, JOIN
+from labrag.labelers import radgraph_sides
 from labrag.stages import threshold
 from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, POSITIVE
 
@@ -83,6 +87,7 @@ def run(
     corpus_labels: str = "reference",
     predictions: str | None = None,
     ranking: str = "labels",
+    sides: bool = False,
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:
@@ -114,6 +119,8 @@ def run(
         )
     if ranking != "labels" and not with_labels:
         raise SystemExit("build-prompts: --ranking is for conditions with labels")
+    if sides and condition != "labrag-oracle":
+        raise SystemExit("build-prompts: --sides is for labrag-oracle")
     transfer = predictions is not None
     if (prompts.uses_labels(version), prompts.uses_examples(version)) != (
         with_labels,
@@ -179,6 +186,11 @@ def run(
         image_root = cxr_root / adapter.IMAGE_ROOT
         inputs["images"] = {"root": str(image_root)}  # too many to hash
         config["image"] = "preferred per study (the embedded one)"
+    if sides:
+        sides_dir = paths.SHARED_ROOT / "sides" / dataset / section / LABELER
+        inputs["sides"] = artifacts.artifact_record(sides_dir)
+        if labeler != LABELER:
+            raise SystemExit(f"build-prompts: sides are for {LABELER} labels")
     if transfer:
         pred_dir = paths.SHARED_ROOT / "predictions" / dataset / predictions.strip("/")
         inputs["predictions"] = artifacts.artifact_record(pred_dir)
@@ -232,6 +244,9 @@ def run(
             condition_dir += ".corpus-predicted"
         if ranking == "image":
             condition_dir += ".image-ranked"
+        if sides:
+            config["sides"] = "reference, target and examples: label (side)"
+            condition_dir += ".sides"
     else:
         if with_examples:
             config["ranking"] = "cosine"
@@ -297,8 +312,14 @@ def run(
             overlap = None
         top = retrieval.top_k(K, sim, exclude, overlap if ranking == "labels" else None)
 
-        def positives(row: np.ndarray) -> list[str]:
-            return [n for n, v in zip(names, row) if v]
+        side = {}
+        if sides:
+            table = artifacts.read_table(sides_dir / "sides.csv")
+            side = dict(zip(zip(table.study_id, table.label), table.side))
+
+        def positives(row: np.ndarray, study_id: str) -> list[str]:
+            shown = [n for n, v in zip(names, row) if v]
+            return [radgraph_sides.sided(n, side.get((study_id, n))) for n in shown]
 
         reports = corpus[section].to_numpy()
         corpus_ids = corpus.index.to_numpy()
@@ -306,7 +327,11 @@ def run(
         for i, (study_id, row) in enumerate(target.iterrows()):
             idx = top[i]
             examples = [
-                (reports[j], positives(corpus_y[j]) if with_labels else []) for j in idx
+                (
+                    reports[j],
+                    positives(corpus_y[j], corpus_ids[j]) if with_labels else [],
+                )
+                for j in idx
             ]
             retrieved = {
                 "retrieved": corpus_ids[idx].tolist(),
@@ -314,7 +339,7 @@ def run(
             }
             if with_labels:
                 retrieved["retrieved_jaccard"] = overlap[i, idx].tolist()
-            labels_i = positives(target_y[i]) if with_labels else None
+            labels_i = positives(target_y[i], study_id) if with_labels else None
             records.append(record(study_id, row, examples, labels_i, retrieved))
         summary = write(out, records)
         summary["n_corpus"] = len(corpus)

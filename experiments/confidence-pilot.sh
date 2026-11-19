@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 s() { slurm/submit.sh --parsable --kill-on-invalid-dep=yes "$@"; }
-B="labrag build-prompts --experiment pilot --section findings"
+B="labrag build-prompts --experiment pilot --dataset chexpertplus --section findings"
 F=pilot/chexpertplus/findings
 SET=pilot
 P=section-simple-image

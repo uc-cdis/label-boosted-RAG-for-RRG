@@ -144,10 +144,11 @@ CASES = [
     ),
     (
         build_prompts,
-        "build-prompts --experiment pilot --section findings --condition labrag "
+        "build-prompts --experiment pilot --dataset chexpertplus --section findings --condition labrag "
         "--prompt preprint-simple",
         dict(
             experiment="pilot",
+            dataset="chexpertplus",
             section="findings",
             condition="labrag",
             prompt="preprint-simple",
@@ -155,10 +156,11 @@ CASES = [
     ),
     (
         build_prompts,
-        "build-prompts --experiment pilot --section findings --condition labrag "
+        "build-prompts --experiment pilot --dataset chexpertplus --section findings --condition labrag "
         "--classifier chexpertplus/raddino.attn-nvfp4-seed1/findings/chexbert14",
         dict(
             experiment="pilot",
+            dataset="chexpertplus",
             section="findings",
             condition="labrag",
             classifier="chexpertplus/raddino.attn-nvfp4-seed1/findings/chexbert14",
@@ -166,11 +168,12 @@ CASES = [
     ),
     (
         build_prompts,
-        "build-prompts --experiment pilot --section findings --condition labrag "
+        "build-prompts --experiment pilot --dataset chexpertplus --section findings --condition labrag "
         "--classifier chexpertplus/raddino.attn-nvfp4-seed1-oof5/findings/chexbert14 "
         "--corpus-labels predicted",
         dict(
             experiment="pilot",
+            dataset="chexpertplus",
             section="findings",
             condition="labrag",
             classifier="chexpertplus/raddino.attn-nvfp4-seed1-oof5/findings/chexbert14",
@@ -179,11 +182,12 @@ CASES = [
     ),
     (
         build_prompts,
-        "build-prompts --experiment pilot --section findings --condition labrag "
+        "build-prompts --experiment pilot --dataset chexpertplus --section findings --condition labrag "
         "--predictions padchest/raddino.attn-nvfp4-seed1/report/padchest60 "
         "--corpus-labels predicted --ranking image",
         dict(
             experiment="pilot",
+            dataset="chexpertplus",
             section="findings",
             condition="labrag",
             predictions="padchest/raddino.attn-nvfp4-seed1/report/padchest60",
@@ -193,10 +197,11 @@ CASES = [
     ),
     (
         build_prompts,
-        "build-prompts --experiment pilot --section findings --condition labrag-oracle "
+        "build-prompts --experiment pilot --dataset chexpertplus --section findings --condition labrag-oracle "
         "--sides",
         dict(
             experiment="pilot",
+            dataset="chexpertplus",
             section="findings",
             condition="labrag-oracle",
             sides=True,
@@ -204,10 +209,11 @@ CASES = [
     ),
     (
         build_prompts,
-        "build-prompts --experiment pilot --section findings --condition labrag "
+        "build-prompts --experiment pilot --dataset chexpertplus --section findings --condition labrag "
         "--predictions a/b/c/d --confidence",
         dict(
             experiment="pilot",
+            dataset="chexpertplus",
             section="findings",
             condition="labrag",
             predictions="a/b/c/d",

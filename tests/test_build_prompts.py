@@ -48,13 +48,33 @@ CLF = "chexpertplus/raddino.attn-nvfp4-seed1/findings-impression/chexbert14"
 def test_predicted_corpus_options_are_checked():
     run = build_prompts.run
     with pytest.raises(SystemExit, match="labrag only"):
-        run("pilot", "findings", "retrieval-only", corpus_labels="predicted")
+        run(
+            "pilot",
+            "chexpertplus",
+            "findings",
+            "retrieval-only",
+            corpus_labels="predicted",
+        )
     with pytest.raises(SystemExit, match="-oofK"):
-        run("pilot", "findings", "labrag", classifier=CLF, corpus_labels="predicted")
+        run(
+            "pilot",
+            "chexpertplus",
+            "findings",
+            "labrag",
+            classifier=CLF,
+            corpus_labels="predicted",
+        )
     with pytest.raises(SystemExit, match="its own labels"):
-        run("pilot", "findings", "labrag", classifier=CLF, predictions="a/b/c/d")
+        run(
+            "pilot",
+            "chexpertplus",
+            "findings",
+            "labrag",
+            classifier=CLF,
+            predictions="a/b/c/d",
+        )
     with pytest.raises(SystemExit, match="are for predicted labels"):
-        run("pilot", "findings", "labrag-oracle", predictions=CLF)
+        run("pilot", "chexpertplus", "findings", "labrag-oracle", predictions=CLF)
 
 
 @pytest.mark.parametrize(
@@ -68,7 +88,12 @@ def test_reference_corpus_needs_the_experiment_labeler(predictions, kwargs, matc
     # transferred labels come with no reference labels of their own for the corpus
     with pytest.raises(SystemExit, match=match):
         build_prompts.run(
-            "pilot", "findings", "labrag", predictions=predictions, **kwargs
+            "pilot",
+            "chexpertplus",
+            "findings",
+            "labrag",
+            predictions=predictions,
+            **kwargs,
         )
 
 
@@ -85,7 +110,12 @@ def test_reference_corpus_needs_the_experiment_labeler(predictions, kwargs, matc
 def test_classifier_path_is_checked(classifier, kwargs, match):
     with pytest.raises(SystemExit, match=match):
         build_prompts.run(
-            "pilot", "findings", "labrag", classifier=classifier, **kwargs
+            "pilot",
+            "chexpertplus",
+            "findings",
+            "labrag",
+            classifier=classifier,
+            **kwargs,
         )
 
 
@@ -98,14 +128,37 @@ def test_corpus_studies_without_predictions_are_refused():
 
 def test_image_ranking_is_for_label_conditions():
     with pytest.raises(SystemExit, match="--ranking is for conditions with labels"):
-        build_prompts.run("pilot", "findings", "retrieval-only", ranking="image")
+        build_prompts.run(
+            "pilot", "chexpertplus", "findings", "retrieval-only", ranking="image"
+        )
 
 
 def test_confidence_is_for_labrag():
     with pytest.raises(SystemExit, match="--confidence is for labrag"):
-        build_prompts.run("pilot", "findings", "labrag-oracle", confidence=True)
+        build_prompts.run(
+            "pilot", "chexpertplus", "findings", "labrag-oracle", confidence=True
+        )
 
 
 def test_sides_are_for_the_oracle():
     with pytest.raises(SystemExit, match="--sides is for labrag-oracle"):
-        build_prompts.run("pilot", "findings", "labrag", classifier=CLF, sides=True)
+        build_prompts.run(
+            "pilot", "chexpertplus", "findings", "labrag", classifier=CLF, sides=True
+        )
+
+
+def test_sample_takes_one_study_per_drawn_patient():
+    target = pd.DataFrame(
+        {"subject_id": ["p1", "p1", "p1", "p2", "p3"]},
+        index=["s3", "s1", "s2", "s4", "s5"],
+    )
+    picked = build_prompts.sample_targets(target, patients=2, seed=0)
+    assert picked.subject_id.is_unique and len(picked) == 2
+    assert list(picked.index) == sorted(picked.index)
+    again = build_prompts.sample_targets(target.sample(frac=1, random_state=1), 2, 0)
+    assert list(again.index) == list(picked.index)  # row order doesn't matter
+
+
+def test_experiment_dataset_is_checked():
+    with pytest.raises(SystemExit, match="smoke runs on"):
+        build_prompts.run("smoke", "chexpertplus", "findings", "retrieval-only")

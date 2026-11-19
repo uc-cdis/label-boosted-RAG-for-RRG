@@ -180,6 +180,7 @@ def add_build_prompts(sub) -> None:
     p = stage(
         sub,
         build_prompts,
+        "--dataset",
         "--section",
         "--uncertain",
     )

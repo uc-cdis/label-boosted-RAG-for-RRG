@@ -5,6 +5,11 @@ Writes ``prompts/<experiment>/<dataset>/<section>/<condition>/<prompt>/``
 best first, with image similarity and, for label ranking, Jaccard), labels (null
 without), reference (trimmed only).
 
+An experiment fixes, per dataset, the target and corpus roles (EXPERIMENTS): ``pilot``
+(CheXpert Plus pilot split), ``smoke`` (100 val patients of MIMIC-CXR and ReXGradient,
+one study each, corpus train only; their thresholds were set on val, so the labels are
+in-sample).
+
 Conditions: ``retrieval-only`` (top K by image similarity) and ``labrag.<labeler>``
 (Jaccard on positive labels, ties by image similarity; the target's predicted labels in
 the prompt; corpus studies carry reference labels, binarized like the classifier).
@@ -55,13 +60,21 @@ from labrag.labelers import radgraph_sides
 from labrag.stages import threshold
 from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, POSITIVE
 
-# experiment -> dataset, target roles, corpus roles
+# experiment -> dataset -> target roles, corpus roles and, optionally, a sample of the
+# targets: that many patients drawn with the seed, one study each
+SMOKE = {
+    "targets": ("val",),  # test stays unseen until the generation config is frozen
+    "corpus": ("train",),
+    "sample": {"patients": 100, "seed": 20261119},
+}
 EXPERIMENTS = {
     "pilot": {
-        "dataset": "chexpertplus",
-        "targets": ("pilot", "prompt_tuning"),
-        "corpus": ("train", "val"),
+        "chexpertplus": {
+            "targets": ("pilot", "prompt_tuning"),
+            "corpus": ("train", "val"),
+        },
     },
+    "smoke": {"mimic": SMOKE, "rexgradient": SMOKE},
 }
 # label diagnostics -> how the target's labels mix predicted and reference
 DIAGNOSTICS = {
@@ -82,6 +95,7 @@ LABELER = "chexbert14"
 
 def run(
     experiment: str,
+    dataset: str,
     section: str,
     condition: str,
     prompt: str | None = None,
@@ -96,8 +110,11 @@ def run(
     cxr_root: Path | None = None,
 ) -> Path:
     cxr_root = cxr_root or paths.CXR_ROOT
-    exp = EXPERIMENTS[experiment]
-    dataset = exp["dataset"]
+    if dataset not in EXPERIMENTS[experiment]:
+        raise SystemExit(
+            f"build-prompts: {experiment} runs on {sorted(EXPERIMENTS[experiment])}"
+        )
+    exp = EXPERIMENTS[experiment][dataset]
     adapter = DATASETS[dataset]
     prompt = prompt or DEFAULT_PROMPT[condition]
     version = prompts.load(prompt)
@@ -179,6 +196,7 @@ def run(
         "section": section,
         "targets": list(exp["targets"]),
         "corpus": list(exp["corpus"]),
+        **({"sample": exp["sample"]} if "sample" in exp else {}),
         "condition": condition,
         "prompt": {"name": prompt, **version},
     }
@@ -274,6 +292,8 @@ def run(
         studies["role"] = adapter.classifier_roles(studies, paths.SPLITS_DIR)
         studies = studies.loc[labels.index]  # the studies with this section
         target = studies[studies.role.isin(exp["targets"])]
+        if "sample" in exp:
+            target = sample_targets(target, **exp["sample"])
         corpus = studies[studies.role.isin(exp["corpus"])]
         if not with_examples:
             summary = write(out, [record(i, row) for i, row in target.iterrows()])
@@ -409,6 +429,16 @@ def run(
         build,
         overwrite,
     )
+
+
+def sample_targets(target: pd.DataFrame, patients: int, seed: int) -> pd.DataFrame:
+    """``patients`` patients drawn uniformly with ``seed``, one random study each, in
+    study order."""
+    rng = np.random.default_rng(seed)
+    picked = rng.choice(np.sort(target.subject_id.unique()), patients, replace=False)
+    by_patient = target.groupby("subject_id").groups
+    chosen = [rng.choice(np.sort(by_patient[p].to_numpy())) for p in picked]
+    return target.loc[sorted(chosen)]
 
 
 def parse_classifier(path: str) -> list[str]:

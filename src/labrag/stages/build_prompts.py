@@ -18,13 +18,15 @@ predicted labels without their false positives, and ``labrag-add-fn.<labeler>``,
 their misses added. ``no-context``: no retrieval and no labels, so its prompt must show
 the image. Retrieval never returns a study of the target's patient.
 
-Predicted corpus labels, for labrag only: ``--corpus-labels predicted`` takes them from
-the classifier's out-of-fold predictions (train role; a ``-oofK`` classifier) and its
-plain predictions (val role), directory suffix ``.corpus-predicted``.
-``--predictions <source>/<name>/<sections>/<labeler>`` takes target and corpus labels
-from a predict artifact (a classifier from another dataset, e.g. PadChest-60: its
+``--predictions <source>/<name>/<sections>/<labeler>`` takes the target's labels from a
+predict artifact (a classifier from another dataset or fine-tuned on images: its
 readout for the section, or its only one), written to
 ``labrag.<source>.<name>.<sections>.<labeler>``.
+Corpus labels are the reference by default. ``--corpus-labels predicted`` (labrag only,
+directory suffix ``.corpus-predicted``) takes them from the classifier: with
+``--classifier``, its out-of-fold predictions (train role; a ``-oofK`` classifier) and
+plain ones (val role); with ``--predictions``, the predict artifact (needed when the
+labeler has no reference labels here, e.g. PadChest-60).
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``).
@@ -94,14 +96,14 @@ def run(
         raise SystemExit("build-prompts: --classifier is for predicted labels")
     if (corpus_labels != "reference" or predictions) and condition != "labrag":
         raise SystemExit("build-prompts: predicted corpus labels are for labrag only")
-    if predictions and (classifier is not None or corpus_labels != "reference"):
+    if predictions and classifier is not None:
         raise SystemExit("build-prompts: --predictions brings its own labels")
     if predicted and not predictions and classifier is None:
         raise SystemExit(
             "build-prompts: predicted labels need --classifier "
             "<dataset>/<name>/<sections>/<labeler> or --predictions"
         )
-    if corpus_labels == "predicted" and "-oof" not in (classifier or ""):
+    if corpus_labels == "predicted" and classifier and "-oof" not in classifier:
         raise SystemExit(
             "build-prompts: --corpus-labels predicted needs a -oofK classifier"
         )
@@ -118,6 +120,14 @@ def run(
         readout = section if section in clf_sections.split(JOIN) else clf_sections
         if JOIN in readout:
             raise SystemExit(f"build-prompts: {predictions} has no {section} readout")
+        if (
+            corpus_labels == "reference"
+            and labeler != LABELER + LABELER_SUFFIX[uncertain]
+        ):
+            raise SystemExit(
+                f"build-prompts: no {labeler} reference labels for the corpus; "
+                "use --corpus-labels predicted"
+            )
     elif predicted:
         source, clf_name, clf_sections, clf_labeler = parse_classifier(classifier)
         if source != dataset:
@@ -187,15 +197,19 @@ def run(
                 "reference" if oracle else DIAGNOSTICS.get(condition, "predicted")
             ),
             "corpus_labels": (
-                f"predicted by {predictions}"
-                if transfer
+                "reference"
+                if corpus_labels == "reference"
                 else (
-                    "predicted: out of fold (train), plain (val)"
-                    if corpus_labels == "predicted"
-                    else "reference"
+                    f"predicted by {predictions}"
+                    if transfer
+                    else "predicted: out of fold (train), plain (val)"
                 )
             ),
-            "binarize": "predicted 0/1" if transfer else BINARIZE[uncertain],
+            "binarize": (
+                "predicted 0/1"
+                if transfer and corpus_labels == "predicted"
+                else BINARIZE[uncertain]
+            ),
             "ranking": "jaccard of positive labels (empty vs empty = 1), then cosine",
         }
         condition_dir = f"{condition}.{labeler}"
@@ -245,7 +259,9 @@ def run(
                 y = labels.loc[rows.index, names].isin(POSITIVE[uncertain])
                 return y.to_numpy(dtype=int)
 
-            if transfer:
+            if corpus_labels == "reference":
+                assert names == list(labels.columns), "classifier labels differ"
+            if transfer and corpus_labels == "predicted":
                 corpus_y = transferred.loc[predicted_rows(transferred, corpus)]
                 corpus_y = corpus_y.to_numpy(dtype=int)
             elif corpus_labels == "predicted":

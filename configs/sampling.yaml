@@ -16,7 +16,15 @@ qwen3.5-thinking-32k: &qwen35-thinking-32k
     max_tokens: 32768
   seed: 20261112
 
-# The same with a second seed: run-to-run noise of a setting.
+# The same with other seeds: run-to-run noise of a setting.
 qwen3.5-thinking-32k-seed2:
   <<: *qwen35-thinking-32k
   seed: 20261115
+
+qwen3.5-thinking-32k-seed3:
+  <<: *qwen35-thinking-32k
+  seed: 20261119
+
+qwen3.5-thinking-32k-seed4:
+  <<: *qwen35-thinking-32k
+  seed: 20261120

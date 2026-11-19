@@ -202,13 +202,15 @@ def add_build_prompts(sub) -> None:
     p.add_argument(
         "--corpus-labels",
         choices=("reference", "predicted"),
-        help="labrag: corpus labels from the reports (default) or the -oofK classifier",
+        help="labrag: corpus labels from the reports (default) or the classifier "
+        "(a -oofK classifier, or the --predictions artifact)",
     )
     p.add_argument(
         "--predictions",
-        help="labrag: target and corpus labels from a predict artifact, its "
+        help="labrag: target labels from a predict artifact, its "
         "classifier <source>/<name>/<sections>/<labeler> "
-        "(e.g. padchest/raddino.attn-nvfp4-seed1/report/padchest60)",
+        "(e.g. chexpertplus-mimic-rexgradient/raddino.ft-attn-seed1/"
+        "findings-impression/chexbert14)",
     )
 
 

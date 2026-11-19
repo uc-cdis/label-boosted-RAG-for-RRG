@@ -56,6 +56,21 @@ def test_predicted_corpus_options_are_checked():
 
 
 @pytest.mark.parametrize(
+    "predictions, kwargs, match",
+    [
+        ("padchest/raddino.attn-nvfp4-seed1/report/padchest60", {}, "no padchest60"),
+        (CLF, {"uncertain": "ones"}, "no chexbert14 reference"),
+    ],
+)
+def test_reference_corpus_needs_the_experiment_labeler(predictions, kwargs, match):
+    # transferred labels come with no reference labels of their own for the corpus
+    with pytest.raises(SystemExit, match=match):
+        build_prompts.run(
+            "pilot", "findings", "labrag", predictions=predictions, **kwargs
+        )
+
+
+@pytest.mark.parametrize(
     "classifier, kwargs, match",
     [
         (None, {}, "need --classifier"),

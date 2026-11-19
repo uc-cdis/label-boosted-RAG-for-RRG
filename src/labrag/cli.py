@@ -206,6 +206,12 @@ def add_build_prompts(sub) -> None:
         "(a -oofK classifier, or the --predictions artifact)",
     )
     p.add_argument(
+        "--ranking",
+        choices=("labels", "image"),
+        help="label conditions: rank examples by label overlap, then image (default), "
+        "or by image only, as retrieval-only",
+    )
+    p.add_argument(
         "--predictions",
         help="labrag: target labels from a predict artifact, its "
         "classifier <source>/<name>/<sections>/<labeler> "

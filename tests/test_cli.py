@@ -180,13 +180,14 @@ CASES = [
         build_prompts,
         "build-prompts --experiment pilot --section findings --condition labrag "
         "--predictions padchest/raddino.attn-nvfp4-seed1/report/padchest60 "
-        "--corpus-labels predicted",
+        "--corpus-labels predicted --ranking image",
         dict(
             experiment="pilot",
             section="findings",
             condition="labrag",
             predictions="padchest/raddino.attn-nvfp4-seed1/report/padchest60",
             corpus_labels="predicted",
+            ranking="image",
         ),
     ),
     (

@@ -28,6 +28,10 @@ directory suffix ``.corpus-predicted``) takes them from the classifier: with
 plain ones (val role); with ``--predictions``, the predict artifact (needed when the
 labeler has no reference labels here, e.g. PadChest-60).
 
+``--ranking image`` (label conditions): the same top K by image similarity as
+retrieval-only, the labels shown but not used to rank; directory suffix
+``.image-ranked``. It separates the label list in the prompt from label-based retrieval.
+
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``).
 """
@@ -78,6 +82,7 @@ def run(
     uncertain: str = "zeros",
     corpus_labels: str = "reference",
     predictions: str | None = None,
+    ranking: str = "labels",
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:
@@ -107,6 +112,8 @@ def run(
         raise SystemExit(
             "build-prompts: --corpus-labels predicted needs a -oofK classifier"
         )
+    if ranking != "labels" and not with_labels:
+        raise SystemExit("build-prompts: --ranking is for conditions with labels")
     transfer = predictions is not None
     if (prompts.uses_labels(version), prompts.uses_examples(version)) != (
         with_labels,
@@ -210,7 +217,11 @@ def run(
                 if transfer and corpus_labels == "predicted"
                 else BINARIZE[uncertain]
             ),
-            "ranking": "jaccard of positive labels (empty vs empty = 1), then cosine",
+            "ranking": (
+                "jaccard of positive labels (empty vs empty = 1), then cosine"
+                if ranking == "labels"
+                else "cosine (labels shown, not used to rank)"
+            ),
         }
         condition_dir = f"{condition}.{labeler}"
         if predicted:
@@ -219,6 +230,8 @@ def run(
             condition_dir = f"{condition}.{short}.{clf_sections}.{labeler}"
         if corpus_labels == "predicted":
             condition_dir += ".corpus-predicted"
+        if ranking == "image":
+            condition_dir += ".image-ranked"
     else:
         if with_examples:
             config["ranking"] = "cosine"
@@ -282,7 +295,7 @@ def run(
             overlap = retrieval.jaccard(target_y, corpus_y)
         else:
             overlap = None
-        top = retrieval.top_k(K, sim, exclude, overlap)
+        top = retrieval.top_k(K, sim, exclude, overlap if ranking == "labels" else None)
 
         def positives(row: np.ndarray) -> list[str]:
             return [n for n, v in zip(names, row) if v]

@@ -92,3 +92,8 @@ def test_corpus_studies_without_predictions_are_refused():
     corpus = pd.DataFrame({"role": ["train", "train"]}, index=["t1", "lateral"])
     with pytest.raises(SystemExit, match="1 corpus studies have no predicted"):
         build_prompts.predicted_rows(pred, corpus)
+
+
+def test_image_ranking_is_for_label_conditions():
+    with pytest.raises(SystemExit, match="--ranking is for conditions with labels"):
+        build_prompts.run("pilot", "findings", "retrieval-only", ranking="image")

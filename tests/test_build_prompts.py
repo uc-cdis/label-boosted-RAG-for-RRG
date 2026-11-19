@@ -53,6 +53,8 @@ def test_predicted_corpus_options_are_checked():
         run("pilot", "findings", "labrag", classifier=CLF, corpus_labels="predicted")
     with pytest.raises(SystemExit, match="its own labels"):
         run("pilot", "findings", "labrag", classifier=CLF, predictions="a/b/c/d")
+    with pytest.raises(SystemExit, match="are for predicted labels"):
+        run("pilot", "findings", "labrag-oracle", predictions=CLF)
 
 
 @pytest.mark.parametrize(

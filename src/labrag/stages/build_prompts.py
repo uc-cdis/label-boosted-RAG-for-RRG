@@ -102,9 +102,11 @@ def run(
     with_image = prompts.uses_image(version)
     oracle = condition == "labrag-oracle"
     predicted = condition == "labrag" or condition in DIAGNOSTICS
-    if classifier is not None and not predicted:
-        raise SystemExit("build-prompts: --classifier is for predicted labels")
-    if (corpus_labels != "reference" or predictions) and condition != "labrag":
+    if (classifier is not None or predictions) and not predicted:
+        raise SystemExit(
+            "build-prompts: --classifier/--predictions are for predicted labels"
+        )
+    if corpus_labels != "reference" and condition != "labrag":
         raise SystemExit("build-prompts: predicted corpus labels are for labrag only")
     if predictions and classifier is not None:
         raise SystemExit("build-prompts: --predictions brings its own labels")
@@ -305,8 +307,8 @@ def run(
                 pred = pred.set_index("study_id")
                 assert list(pred.columns) == names, "classifier labels differ"
                 target_y = pred.loc[target.index, names].to_numpy(dtype=int)
-                if condition in DIAGNOSTICS:
-                    target_y = mix_labels(condition, target_y, reference(target))
+            if condition in DIAGNOSTICS:
+                target_y = mix_labels(condition, target_y, reference(target))
             overlap = retrieval.jaccard(target_y, corpus_y)
         else:
             overlap = None

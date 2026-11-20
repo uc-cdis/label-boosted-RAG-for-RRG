@@ -16,13 +16,14 @@ _IMAGE_MARK = "\x00image\x00"  # never in report text
 SECTION_NAMES = {"findings": "Findings", "impression": "Impression"}
 
 
-# label_format: categories -> each label under its CheXbert value (1, 0, -1, blank)
+# label_categories: [...] -> each label under its CheXbert value (1, 0, -1, blank), one
+# line per category listed (in that order); labels of the other categories aren't shown
 CATEGORIES = {1.0: "Positive", 0.0: "Negative", -1.0: "Uncertain", None: "Unmentioned"}
 
 
 def load(name: str) -> dict:
     """One prompt version: {"user": str} plus "example" iff it shows examples, and
-    optionally "label_format" (categories)."""
+    optionally "label_categories" (a list of CATEGORIES names)."""
     versions = yaml.safe_load(PROMPTS_YAML.read_text())
     if name not in versions:
         raise SystemExit(f"unknown prompt {name!r}; known: {sorted(versions)}")
@@ -31,9 +32,12 @@ def load(name: str) -> dict:
     assert fields <= {"examples", "labels", "image", "section"}, f"{name}: {fields}"
     assert fields & {"examples", "image"}, f"{name}: no examples and no image"
     expected = {"user", "example"} if "examples" in fields else {"user"}
-    assert set(version) - {"label_format"} == expected, f"{name}: {sorted(version)}"
-    assert version.get("label_format", "categories") == "categories", name
-    assert "label_format" not in version or "labels" in fields, name
+    assert set(version) - {"label_categories"} == expected, f"{name}: {sorted(version)}"
+    shown = version.get("label_categories", [])
+    assert set(shown) <= set(CATEGORIES.values()) and len(set(shown)) == len(
+        shown
+    ), name
+    assert not shown or "labels" in fields, name
     assert version["user"].count("{image}") <= 1, f"{name}: more than one image"
     return version
 
@@ -51,15 +55,17 @@ def uses_image(version: dict) -> bool:
 
 
 def uses_categories(version: dict) -> bool:
-    return version.get("label_format") == "categories"
+    return "label_categories" in version
 
 
-def categories(codes, names: list[str]) -> dict[str, list[str]]:
-    """Label names under their CATEGORIES (CheXbert values; NaN = blank)."""
-    out = {c: [] for c in CATEGORIES.values()}
+def categories(codes, names: list[str], shown: list[str]) -> dict[str, list[str]]:
+    """Label names under their CATEGORIES (CheXbert values; NaN = blank), for the
+    ``shown`` categories only, in that order."""
+    out = {c: [] for c in shown}
     for name, code in zip(names, codes):
         key = None if code is None or code != code else float(code)
-        out[CATEGORIES[key]].append(name)
+        if CATEGORIES[key] in out:
+            out[CATEGORIES[key]].append(name)
     return out
 
 

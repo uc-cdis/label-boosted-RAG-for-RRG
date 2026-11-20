@@ -44,9 +44,9 @@ directory suffix ``.sides``.
 directory suffix ``.confidence``.
 Multiclass predictions (``--predictions .../chexbert14.mc``, finetune --multiclass)
 give CheXbert's four values per target label; their positives rank as usual. A prompt
-version with ``label_format: categories`` shows every label under Positive, Negative,
-Uncertain or Unmentioned, for the target (predicted) and the examples (their reference
-values); any other version shows the positives only.
+version with ``label_categories`` (e.g. [Positive, Negative, Uncertain, Unmentioned])
+shows the labels under those categories, for the target (predicted) and the examples
+(their reference values); any other version shows the positives only.
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``).
@@ -284,8 +284,8 @@ def run(
             ),
             **(
                 {
-                    "label_format": "categories: positive, negative, uncertain, "
-                    "unmentioned; target predicted, examples reference values"
+                    "label_categories": version["label_categories"],
+                    "label_values": "target predicted, examples reference",
                 }
                 if categories
                 else {}
@@ -394,6 +394,7 @@ def run(
 
         if categories:
             corpus_codes = labels.loc[corpus.index, names].to_numpy()
+            shown = version["label_categories"]
 
         def positives(row: np.ndarray, study_id: str, target=False) -> list[str]:
             shown = [n for n, v in zip(names, row) if v]
@@ -412,7 +413,7 @@ def run(
                 (
                     reports[j],
                     (
-                        prompts.categories(corpus_codes[j], names)
+                        prompts.categories(corpus_codes[j], names, shown)
                         if categories
                         else (
                             positives(corpus_y[j], corpus_ids[j]) if with_labels else []
@@ -428,7 +429,7 @@ def run(
             if with_labels:
                 retrieved["retrieved_jaccard"] = overlap[i, idx].tolist()
             if categories:
-                labels_i = prompts.categories(target_codes[i], names)
+                labels_i = prompts.categories(target_codes[i], names, shown)
             else:
                 labels_i = (
                     positives(target_y[i], study_id, True) if with_labels else None

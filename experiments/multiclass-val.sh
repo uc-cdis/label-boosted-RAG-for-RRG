@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Multiclass labels on all of MIMIC-CXR and ReXGradient val (build-prompts experiment
 # "val", corpus = train), Findings: the pooled fine-tune (seed 1) trained on CheXbert's
-# four values per label (positive, negative, uncertain, blank) and read by argmax,
-# shown by category (section-verbose-image), next to its positives alone (plain prompt:
-# separates the argmax positives from the categories), the binary pooled fine-tune
-# (max-F1 on the dataset's own val, in-sample here), retrieval-only and the oracle.
+# four values per label (positive, negative, uncertain, blank) and read by argmax, shown
+# as a ladder of categories: positives alone (plain prompt: the argmax positives without
+# categories), + uncertain, + negative, + unmentioned (all four), and all four with the
+# preprint's Instruct rules (unmentioned labels not mentioned); next to the binary
+# pooled fine-tune (max-F1 on the dataset's own val, in-sample here), retrieval-only
+# and the oracle.
 # Qwen3.5-27B with the image (518 px), 1 sampling seed, one generate and one evaluate
 # per condition. Labels, embeds, the binary fine-tune and its predicts already built are
 # skipped.
@@ -20,6 +22,7 @@ SEC=findings-impression
 POOL=chexpertplus-mimic-rexgradient
 FT=$POOL/raddino.ft-attn-seed1/$SEC/chexbert14
 MC=$FT.mc
+LADDER="section-pu-image section-pnu-image section-verbose-image section-instruct-image"
 
 labels=""
 declare -A lab
@@ -62,11 +65,14 @@ for dataset in mimic rexgradient; do
   }
   cell $lf:$emb $RO --condition retrieval-only --prompt section-naive-image
   cell $lf:$pr:$emb $FTL --condition labrag --predictions $FT --prompt $P
-  cell $lf:$prm:$emb $MCL/section-verbose-image --condition labrag --predictions $MC --prompt section-verbose-image
-  cell $lf:$prm:$emb $MCL/$P --condition labrag --predictions $MC --prompt $P
+  for mp in $P $LADDER; do
+    cell $lf:$prm:$emb $MCL/$mp --condition labrag --predictions $MC --prompt $mp
+  done
   cell $lf:$emb $OR --condition labrag-oracle --prompt $P
   cells="retrieval-only=$(run $RO) ft-pooled=$(run $FTL)"
-  cells+=" ft-pooled.mc=$(run $MCL/section-verbose-image) ft-pooled.mc.positives=$(run $MCL/$P)"
+  cells+=" ft-pooled.mc.positives=$(run $MCL/$P) ft-pooled.mc.pu=$(run $MCL/section-pu-image)"
+  cells+=" ft-pooled.mc.pnu=$(run $MCL/section-pnu-image) ft-pooled.mc.verbose=$(run $MCL/section-verbose-image)"
+  cells+=" ft-pooled.mc.instruct=$(run $MCL/section-instruct-image)"
   cells+=" oracle=$(run $OR)"
   cmp=$(s -d afterok$dep -- labrag compare --generations $cells --out $F/qwen3.5-27b.multiclass/$SET)
   ids+=" compare $cmp"

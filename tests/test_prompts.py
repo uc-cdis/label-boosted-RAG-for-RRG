@@ -76,11 +76,19 @@ def test_probability_label_text_is_clamped():
 
 def test_categories_render_one_line_each():
     names = ["Edema", "Pneumothorax", "Atelectasis", "No Finding"]
-    cats = prompts.categories([1.0, 0.0, float("nan"), None], names)
-    assert prompts.label_text(cats) == (
+    codes = [1.0, 0.0, float("nan"), None]
+    every = ["Positive", "Negative", "Uncertain", "Unmentioned"]
+    assert prompts.label_text(prompts.categories(codes, names, every)) == (
         "Positive: Edema\nNegative: Pneumothorax\nUncertain: None\n"
         "Unmentioned: Atelectasis, No Finding"
     )
-    version = prompts.load("section-verbose-image")
-    assert prompts.uses_categories(version)
+    some = prompts.categories(codes, names, ["Positive", "Uncertain"])
+    assert prompts.label_text(some) == "Positive: Edema\nUncertain: None"
+    for name, shown in [
+        ("section-pu-image", ["Positive", "Uncertain"]),
+        ("section-pnu-image", ["Positive", "Negative", "Uncertain"]),
+        ("section-verbose-image", every),
+        ("section-instruct-image", every),
+    ]:
+        assert prompts.load(name)["label_categories"] == shown
     assert not prompts.uses_categories(prompts.load("section-simple-image"))

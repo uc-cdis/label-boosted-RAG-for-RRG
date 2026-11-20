@@ -266,8 +266,69 @@ section-simple-image-confidence:
     Now generate the report for the current case using its label below. Always generate reports based on the examples shown.
     Label: {labels}
 
+section-pu-image:
+  label_categories: [Positive, Uncertain]
+  example: "Example: {index}\n{labels}\n{report}"
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given context information and the chest X-ray of the current case.
+    The context information contains examples of reports written for similar cases and their associated labels.
+    Use the examples and their associated labels to generate a report for the current case based on the current labels.
+    The labels are common chest radiographic observations. Only those in the following two categories, which describe how the report mentions them, are listed:
+    - Positive: the observation is stated as present, e.g. "moderate bilateral effusions".
+    - Uncertain: the report is ambiguous about the observation, e.g. "pneumonia cannot be excluded".
+    Strictly follow the instructions below to generate the reports.
+
+    **Instructions**
+
+    1. The report must be based on the image of the current case, the information in the context and the current labels.
+    2. The report must mimic the style of the reports shown in the context.
+    3. Do not generate blank reports.
+    4. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
+    5. Write only the {section} section of the report, without its header.
+
+    CONTEXT:
+    {examples}
+
+    CURRENT CASE:
+    {image}
+
+    Now generate the report for the current case using its labels below. Always generate reports based on the examples shown.
+    {labels}
+
+section-pnu-image:
+  label_categories: [Positive, Negative, Uncertain]
+  example: "Example: {index}\n{labels}\n{report}"
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given context information and the chest X-ray of the current case.
+    The context information contains examples of reports written for similar cases and their associated labels.
+    Use the examples and their associated labels to generate a report for the current case based on the current labels.
+    The labels are common chest radiographic observations. Only those in the following three categories, which describe how the report mentions them, are listed:
+    - Positive: the observation is stated as present, e.g. "moderate bilateral effusions".
+    - Negative: the observation is stated as absent, e.g. "no evidence of pulmonary edema".
+    - Uncertain: the report is ambiguous about the observation, e.g. "pneumonia cannot be excluded".
+    Strictly follow the instructions below to generate the reports.
+
+    **Instructions**
+
+    1. The report must be based on the image of the current case, the information in the context and the current labels.
+    2. The report must mimic the style of the reports shown in the context.
+    3. Do not generate blank reports.
+    4. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
+    5. Write only the {section} section of the report, without its header.
+
+    CONTEXT:
+    {examples}
+
+    CURRENT CASE:
+    {image}
+
+    Now generate the report for the current case using its labels below. Always generate reports based on the examples shown.
+    {labels}
+
 section-verbose-image:
-  label_format: categories
+  label_categories: [Positive, Negative, Uncertain, Unmentioned]
   example: "Example: {index}\n{labels}\n{report}"
   user: |
     You are an expert radiological assistant.
@@ -288,6 +349,42 @@ section-verbose-image:
     3. Do not generate blank reports.
     4. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
     5. Write only the {section} section of the report, without its header.
+
+    CONTEXT:
+    {examples}
+
+    CURRENT CASE:
+    {image}
+
+    Now generate the report for the current case using its labels below. Always generate reports based on the examples shown.
+    {labels}
+
+section-instruct-image:
+  label_categories: [Positive, Negative, Uncertain, Unmentioned]
+  example: "Example: {index}\n{labels}\n{report}"
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given context information and the chest X-ray of the current case.
+    The context information contains examples of reports written for similar cases and their associated labels.
+    Use the examples and their associated labels to generate a report for the current case based on the current labels.
+    The labels are common chest radiographic observations, each in one of four categories that describe how the report mentions it:
+    - Positive: the observation is stated as present, e.g. "moderate bilateral effusions".
+    - Negative: the observation is stated as absent, e.g. "no evidence of pulmonary edema".
+    - Uncertain: the report is ambiguous about the observation, e.g. "pneumonia cannot be excluded".
+    - Unmentioned: the report does not mention the observation.
+    Strictly follow the instructions below to generate the reports.
+
+    **Instructions**
+
+    1. The report must be based on the image of the current case, the information in the context and the current labels.
+    2. The report must mimic the style of the reports shown in the context.
+    3. Do not generate blank reports.
+    4. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
+    5. Write only the {section} section of the report, without its header.
+    6. Ensure that the positive labels are clearly described as being present in the report, using example language from the context.
+    7. Ensure that the negative labels are clearly described as being absent in the report, using example language from the context.
+    8. Describe the uncertain labels as necessary.
+    9. Ensure that the unmentioned labels are not mentioned in the report.
 
     CONTEXT:
     {examples}

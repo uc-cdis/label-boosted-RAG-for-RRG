@@ -11,6 +11,10 @@ section s of the classifier, probs.<s>.csv (study_id, role, one column per label
 predictions.<s>.csv (0/1, the classifier's thresholds and its source's consistency
 rule) for every study of the dataset's frontal token store, read in the format the
 classifier was trained on.
+
+A multiclass fine-tune (``chexbert14.mc``): predictions.<s>.csv holds the most
+probable CheXbert value per label (1, 0, -1, blank; labels.csv's coding), and
+probs.<s>.<class>.csv each class's probability; no thresholds.
 """
 
 import os
@@ -130,8 +134,12 @@ def _finetuned(
     adapter = DATASETS[dataset]
     sections, labeler = clf_config["sections"], clf_config["labeler"]
     model_dir, weights_record = weights.resolve(finetune_stage.embed_weights())
-    binarize = clf_config["binarize"]
-    positive = {v: k for k, v in classify.BINARIZE.items()}[binarize]
+    multiclass = "classes" in clf_config
+    positive = (
+        "zeros"
+        if multiclass
+        else {v: k for k, v in classify.BINARIZE.items()}[clf_config["binarize"]]
+    )
     lab_dirs = {
         s: paths.SHARED_ROOT / "labels" / dataset / s / labeler
         for s in sections
@@ -163,6 +171,9 @@ def _finetuned(
         },
         "consistency": clf_config["consistency"],
     }
+    if multiclass:
+        config["threshold"] = clf_config["threshold"]
+        config["classes"] = clf_config["classes"]
 
     def build(out: Path) -> dict:
         studies = adapter.load_studies(cxr_root)
@@ -174,8 +185,13 @@ def _finetuned(
         attention.deterministic()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         backbone = finetune.load_backbone(model_dir)
+        classes = len(saved["classes"]) if multiclass else 1
         model = finetune.build(
-            backbone, len(names), len(sections), clf_config["classifier"] == "attn-cls"
+            backbone,
+            len(names),
+            len(sections),
+            clf_config["classifier"] == "attn-cls",
+            classes,
         )
         model.load_state_dict(saved["state_dict"])
         model.to(device)
@@ -186,12 +202,17 @@ def _finetuned(
         workers = min(
             finetune_stage.MAX_WORKERS, max(0, len(os.sched_getaffinity(0)) - 1)
         )
-        P = finetune.predict_proba(model, images, device, workers)
+        P_full = finetune.predict_proba(model, images, device, workers)
+        P = finetune.positive_probs(P_full, len(sections), classes)
         n, summary, metrics = len(names), {}, []
         val = role == "val"
         for i, s in enumerate(sections):
             Ps = P[:, i * n : (i + 1) * n]
-            t = stored[i]
+            codes = None
+            if multiclass:
+                codes = classify.argmax_codes(P_full, i, len(sections), names)
+            else:
+                t = stored[i]
             if s in lab_dirs:
                 labels = artifacts.read_table(lab_dirs[s] / "labels.csv").set_index(
                     "study_id"
@@ -200,32 +221,52 @@ def _finetuned(
                 Y = labels.reindex(ids)[names].isin(classify.POSITIVE[positive])
                 Y = Y.to_numpy(dtype=int)
                 v = val & has
-                t = np.array(
-                    [logistic.f1_threshold(y, p) for y, p in zip(Y[v].T, Ps[v].T)]
-                )
-                pred_v = classify.predict_labels(Ps[v], t, names, False)
+                if multiclass:
+                    pred_v = classify.codes_positive(codes[v])
+                    extra = {}
+                else:
+                    t = np.array(
+                        [logistic.f1_threshold(y, p) for y, p in zip(Y[v].T, Ps[v].T)]
+                    )
+                    pred_v = classify.predict_labels(Ps[v], t, names, False)
+                    extra = {"threshold": t}
                 metrics.append(
                     pd.DataFrame(
                         {
                             "section": s,
                             "label": names,
-                            "threshold": t,
+                            **extra,
                             **classify._scores("val", Y[v], Ps[v], pred_v),
                         }
                     )
                 )
-            pred = classify.predict_labels(Ps, t, names, False)
-            probs = pd.DataFrame(Ps, columns=names)
-            probs.insert(0, "role", role)
-            probs.insert(0, "study_id", ids)
-            probs.to_csv(out / f"probs.{s}.csv", index=False)
-            preds = pd.DataFrame(pred, columns=names)
+            if multiclass:
+                pred = classify.codes_positive(codes)
+                block = P_full.reshape(len(P_full), len(sections), classes, n)[:, i]
+                for c, name in enumerate(saved["classes"]):
+                    probs = pd.DataFrame(block[:, c], columns=names)
+                    probs.insert(0, "role", role)
+                    probs.insert(0, "study_id", ids)
+                    probs.to_csv(out / f"probs.{s}.{name}.csv", index=False)
+                preds = pd.DataFrame(codes, columns=names)
+            else:
+                pred = classify.predict_labels(Ps, t, names, False)
+                probs = pd.DataFrame(Ps, columns=names)
+                probs.insert(0, "role", role)
+                probs.insert(0, "study_id", ids)
+                probs.to_csv(out / f"probs.{s}.csv", index=False)
+                preds = pd.DataFrame(pred, columns=names)
             preds.insert(0, "study_id", ids)
             preds.to_csv(out / f"predictions.{s}.csv", index=False)
             summary[s] = {
                 "labels_per_study": float(pred.sum(1).mean()),
                 "empty_label_sets": int((pred.sum(1) == 0).sum()),
             }
+            if multiclass:
+                summary[s] |= {
+                    f"{name}_per_study": float((codes == code).sum(1).mean())
+                    for name, code in (("negative", 0), ("uncertain", -1))
+                }
         if metrics:
             pd.concat(metrics, ignore_index=True).to_csv(
                 out / "metrics.csv", index=False

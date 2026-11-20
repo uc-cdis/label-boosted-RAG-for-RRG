@@ -162,3 +162,27 @@ def test_sample_takes_one_study_per_drawn_patient():
 def test_experiment_dataset_is_checked():
     with pytest.raises(SystemExit, match="smoke runs on"):
         build_prompts.run("smoke", "chexpertplus", "findings", "retrieval-only")
+
+
+FT = "chexpertplus-mimic-rexgradient/raddino.ft-attn-seed1/findings-impression/chexbert14"
+
+
+def test_category_prompts_need_multiclass_predictions():
+    with pytest.raises(SystemExit, match="shows label categories"):
+        build_prompts.run(
+            "val",
+            "mimic",
+            "findings",
+            "labrag",
+            predictions=FT,
+            prompt="section-verbose-image",
+        )
+    with pytest.raises(SystemExit, match="multiclass predictions are for labrag"):
+        build_prompts.run(
+            "val",
+            "mimic",
+            "findings",
+            "labrag",
+            predictions=FT + ".mc",
+            confidence=True,
+        )

@@ -148,6 +148,12 @@ def add_finetune(sub) -> None:
     )
     p.add_argument("--classifier", choices=finetune.CLASSIFIERS)
     p.add_argument("--seed", type=int, help="training seed (default 0)")
+    p.add_argument(
+        "--multiclass",
+        action="store_true",
+        help="predict CheXbert's four values per label (positive, negative, uncertain, "
+        "blank), not positive vs the rest",
+    )
 
 
 def add_threshold(sub) -> None:

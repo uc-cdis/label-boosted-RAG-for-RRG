@@ -60,6 +60,9 @@ BINARIZE = {
 }
 RELEASE_BINARIZE = "release labels: 1 present, 0 absent"
 LABELER_SUFFIX = {"zeros": "", "ones": ".u1"}
+# Multiclass classifiers (finetune --multiclass) predict CheXbert's own values.
+MULTICLASS_SUFFIX = ".mc"
+MULTICLASS_CLASSES = "positive 1, negative 0, uncertain -1, blank (unmentioned)"
 PARAMS = {
     "lr": logistic.PARAMS,
     "lr-tuned": logistic.TUNED_PARAMS,
@@ -327,6 +330,28 @@ def predict_labels(
     if release:
         return consistent(pred, names, padchest.NO_FINDING, ())
     return consistent(pred, names)
+
+
+def argmax_codes(
+    P: np.ndarray, section: int, sections: int, names: list[str]
+) -> np.ndarray:
+    """A multiclass model's most probable CheXbert value (1, 0, -1, NaN for blank)
+    per label for section number ``section`` of its outputs P (N, sections * classes
+    * labels); No Finding is blank wherever a pathology is positive (CONSISTENCY)."""
+    from labrag.classifiers.finetune import MULTICLASS_CODES
+
+    classes = len(MULTICLASS_CODES)
+    block = P.reshape(len(P), sections, classes, len(names))[:, section]
+    codes = np.array([np.nan if c is None else c for c in MULTICLASS_CODES])
+    out = codes[block.argmax(1)]
+    pathology = [j for j, n in enumerate(names) if n not in NOT_PATHOLOGY]
+    out[(out[:, pathology] == 1).any(axis=1), names.index(NO_FINDING)] = np.nan
+    return out
+
+
+def codes_positive(codes: np.ndarray) -> np.ndarray:
+    """0/1: CheXbert value positive."""
+    return (codes == 1).astype(int)
 
 
 def _load_tokens(

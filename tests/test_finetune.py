@@ -222,3 +222,82 @@ def test_finetune_then_predict(tmp_path, monkeypatch):
     assert config["threshold"]["findings"] == "max F1 on this dataset's val"
     target = pd.read_csv(out / "metrics.csv")
     assert set(target.section) == {"findings", "impression"}
+
+
+def test_class_index_and_positive_probs():
+    codes = np.array([[1.0, 0.0], [-1.0, np.nan]])
+    assert finetune.class_index(codes).tolist() == [[0, 1], [2, 3]]
+    # 2 readouts x 4 classes x 3 labels: the positive class is index 0 of each block
+    P = np.arange(24.0).reshape(1, 24)
+    assert finetune.positive_probs(P, 2, 4).tolist() == [[0, 1, 2, 12, 13, 14]]
+
+
+def test_multiclass_training_is_deterministic(tmp_path):
+    paths_ = images(tmp_path / "img", 40)
+    Y = np.random.default_rng(1).integers(0, 4, (40, 6))
+    mask = np.ones(Y.shape, dtype=bool)
+    mask[::3, 3:] = False
+    train, group = np.arange(40) < 24, np.array(["a", "b"] * 20)
+    runs = []
+    for _ in range(2):
+        state, P, _ = finetune.train(
+            None,
+            paths_,
+            Y,
+            mask,
+            train,
+            ~train,
+            group,
+            2,
+            7,
+            tmp_path,
+            world=1,
+            backbone=tiny_backbone(),
+            processor=tiny_processor(),
+            params=TINY,
+            classes=4,
+        )
+        runs.append((state, P))
+    (s1, p1), (s2, p2) = runs
+    assert all(torch.equal(s1[k], s2[k]) for k in s1)
+    assert np.array_equal(p1, p2) and p1.shape == (16, 2 * 4 * 3)
+    # softmax over the classes of each section and label
+    assert np.allclose(p1.reshape(16, 2, 4, 3).sum(2), 1)
+
+
+def test_multiclass_finetune_then_predict(tmp_path, monkeypatch):
+    cxr_root = tmp_path / "cxr"
+    monkeypatch.setattr(paths, "SHARED_ROOT", tmp_path / "shared")
+    for name, n, seed in (("fakea", 30, 0), ("fakeb", 20, 1)):
+        monkeypatch.setitem(data.DATASETS, name, fake_dataset(cxr_root, name, n, seed))
+    monkeypatch.setattr(weights, "resolve", lambda name: (tmp_path, {"fake": name}))
+    monkeypatch.setattr(finetune, "load_backbone", lambda d: tiny_backbone())
+    monkeypatch.setattr(finetune, "load_processor", lambda d: tiny_processor())
+    for k, v in TINY.items():
+        monkeypatch.setitem(finetune.PARAMS, k, v)
+
+    with pytest.raises(SystemExit, match="own class"):
+        finetune_stage.run(
+            "fakea-fakeb", "findings", seed=3, multiclass=True, uncertain="ones"
+        )
+    clf = finetune_stage.run(
+        "fakea-fakeb", "findings-impression", seed=3, multiclass=True, cxr_root=cxr_root
+    )
+    rel = "fakea-fakeb/raddino.ft-attn-seed3/findings-impression/chexbert14.mc"
+    assert clf == paths.SHARED_ROOT / "classifiers" / rel
+    saved = torch.load(clf / "model.pt", weights_only=False)
+    assert saved["threshold"] is None and saved["classes"] == list(finetune.MULTICLASS)
+    assert "threshold" not in pd.read_csv(clf / "metrics.csv")
+
+    out = predict.run("fakeb", rel, cxr_root=cxr_root)
+    pred = artifacts.read_table(out / "predictions.findings.csv")
+    assert len(pred) == 20 and list(pred.columns[1:]) == NAMES
+    values = pred[NAMES].to_numpy()
+    assert set(values[~np.isnan(values)]) <= {1.0, 0.0, -1.0}
+    total = sum(
+        artifacts.read_table(out / f"probs.findings.{c}.csv")[NAMES].to_numpy()
+        for c in finetune.MULTICLASS
+    )
+    assert np.allclose(total, 1)
+    config = artifacts.read_manifest(out)["config"]
+    assert config["threshold"] == "none: the most probable class"

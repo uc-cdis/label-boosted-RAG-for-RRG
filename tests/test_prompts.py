@@ -72,3 +72,15 @@ def test_probability_label_text_is_clamped():
     assert prompts.with_probability("Atelectasis", 0.284) == "Atelectasis (28%)"
     assert prompts.with_probability("Support Devices", 0.999) == "Support Devices (99%)"
     assert prompts.with_probability("Pneumonia", 0.001) == "Pneumonia (1%)"
+
+
+def test_categories_render_one_line_each():
+    names = ["Edema", "Pneumothorax", "Atelectasis", "No Finding"]
+    cats = prompts.categories([1.0, 0.0, float("nan"), None], names)
+    assert prompts.label_text(cats) == (
+        "Positive: Edema\nNegative: Pneumothorax\nUncertain: None\n"
+        "Unmentioned: Atelectasis, No Finding"
+    )
+    version = prompts.load("section-verbose-image")
+    assert prompts.uses_categories(version)
+    assert not prompts.uses_categories(prompts.load("section-simple-image"))

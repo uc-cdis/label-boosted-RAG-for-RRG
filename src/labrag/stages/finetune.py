@@ -15,6 +15,11 @@ CLS + patch tokens) and ``attn-cls`` (CLS only, the control).
 
 Only report-labelled datasets (CheXbert-14 on report text): every dataset's labels
 are then the same labeler on the same section.
+
+``--multiclass``: each label is one of CheXbert's four values (positive, negative,
+uncertain, blank) instead of positive vs the rest, softmax cross-entropy; the predicted
+value is the most probable class, so there are no thresholds. Labeler directory
+``chexbert14.mc``.
 """
 
 import os
@@ -53,10 +58,13 @@ def run(
     classifier: str = "attn",
     uncertain: str = "zeros",
     seed: int | None = None,
+    multiclass: bool = False,
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:
     datasets = split_datasets("finetune", dataset)
+    if multiclass and uncertain != "zeros":
+        raise SystemExit("finetune: --multiclass keeps uncertain as its own class")
     sections = None
     for d in datasets:
         if labels_only(d):
@@ -110,10 +118,23 @@ def run(
     }
     if classifier == "attn-cls":
         config["input"] = "CLS token only"
+    classes = 1
+    suffix = classify.LABELER_SUFFIX[uncertain]
+    if multiclass:
+        classes, suffix = len(finetune.MULTICLASS), classify.MULTICLASS_SUFFIX
+        del config["binarize"]
+        config |= {
+            "classes": classify.MULTICLASS_CLASSES,
+            "loss": "softmax cross-entropy over the classes, each study's labelled "
+            "entries",
+            "select": "epoch with the best mean over datasets of their mean val AUROC "
+            "of the positive class (one vs rest)",
+            "threshold": "none: the most probable class",
+        }
     name = f"{ENCODER}.ft-{classifier}-seed{seed}"
     relpath = (
         f"classifiers/{JOIN.join(datasets)}/{name}/{JOIN.join(sections)}/"
-        f"{labeler}{classify.LABELER_SUFFIX[uncertain]}"
+        f"{labeler}{suffix}"
     )
 
     def build(out: Path) -> dict:
@@ -152,12 +173,12 @@ def run(
             mask = np.zeros(Y.shape, dtype=bool)
             for i, s in enumerate(sections):
                 has = studies.index.isin(labels[s].index)
-                y = (
-                    labels[s]
-                    .loc[studies.index[has], names]
-                    .isin(classify.POSITIVE[uncertain])
-                )
-                Y[has, i * n : (i + 1) * n] = y.to_numpy(dtype=int)
+                codes = labels[s].loc[studies.index[has], names]
+                if multiclass:
+                    y = finetune.class_index(codes.to_numpy())
+                else:
+                    y = codes.isin(classify.POSITIVE[uncertain]).to_numpy(dtype=int)
+                Y[has, i * n : (i + 1) * n] = y
                 mask[has, i * n : (i + 1) * n] = True
             Y_parts.append(Y)
             mask_parts.append(mask)
@@ -182,21 +203,33 @@ def run(
             cls_only=classifier == "attn-cls",
             world=world,
             workers=workers,
+            classes=classes,
         )
 
         Yv, mv, gv = Y[val], mask[val], group[val]
+        P_full = P_val
+        if multiclass:
+            positive = finetune.MULTICLASS.index("positive")
+            P_val = finetune.positive_probs(P_full, len(sections), classes)
+            Yv = (Yv == positive).astype(int)
+            Y = (Y == positive).astype(int)  # train_pos below counts positives
         threshold, metrics = [], []
         for i, s in enumerate(sections):
             b = slice(i * n, (i + 1) * n)
             lab = mv[:, i * n]  # a section's labels are all present or all absent
-            t = np.array(
-                [
-                    logistic.f1_threshold(y, p)
-                    for y, p in zip(Yv[lab, b].T, P_val[lab, b].T)
-                ]
-            )
-            threshold.append(t)
-            pred = classify.predict_labels(P_val[:, b], t, names, False)
+            if multiclass:
+                pred = classify.codes_positive(
+                    classify.argmax_codes(P_full, i, len(sections), names)
+                )
+            else:
+                t = np.array(
+                    [
+                        logistic.f1_threshold(y, p)
+                        for y, p in zip(Yv[lab, b].T, P_val[lab, b].T)
+                    ]
+                )
+                threshold.append(t)
+                pred = classify.predict_labels(P_val[:, b], t, names, False)
             for d in datasets:
                 r = lab & (gv == d)
                 metrics.append(
@@ -208,7 +241,7 @@ def run(
                             "train_pos": Y[
                                 train & (group == d) & mask[:, i * n], b
                             ].sum(0),
-                            "threshold": t,
+                            **({} if multiclass else {"threshold": t}),
                             **classify._scores("val", Yv[r, b], P_val[r, b], pred[r]),
                         }
                     )
@@ -223,7 +256,8 @@ def run(
                 "sections": sections,
                 "datasets": datasets,
                 "state_dict": state,
-                "threshold": np.stack(threshold),
+                "threshold": None if multiclass else np.stack(threshold),
+                "classes": list(finetune.MULTICLASS) if multiclass else None,
             },
             out / "model.pt",
         )

@@ -16,8 +16,13 @@ _IMAGE_MARK = "\x00image\x00"  # never in report text
 SECTION_NAMES = {"findings": "Findings", "impression": "Impression"}
 
 
+# label_format: categories -> each label under its CheXbert value (1, 0, -1, blank)
+CATEGORIES = {1.0: "Positive", 0.0: "Negative", -1.0: "Uncertain", None: "Unmentioned"}
+
+
 def load(name: str) -> dict:
-    """One prompt version: {"user": str} plus "example" iff it shows examples."""
+    """One prompt version: {"user": str} plus "example" iff it shows examples, and
+    optionally "label_format" (categories)."""
     versions = yaml.safe_load(PROMPTS_YAML.read_text())
     if name not in versions:
         raise SystemExit(f"unknown prompt {name!r}; known: {sorted(versions)}")
@@ -26,7 +31,9 @@ def load(name: str) -> dict:
     assert fields <= {"examples", "labels", "image", "section"}, f"{name}: {fields}"
     assert fields & {"examples", "image"}, f"{name}: no examples and no image"
     expected = {"user", "example"} if "examples" in fields else {"user"}
-    assert set(version) == expected, f"{name}: fields {sorted(version)}"
+    assert set(version) - {"label_format"} == expected, f"{name}: {sorted(version)}"
+    assert version.get("label_format", "categories") == "categories", name
+    assert "label_format" not in version or "labels" in fields, name
     assert version["user"].count("{image}") <= 1, f"{name}: more than one image"
     return version
 
@@ -41,6 +48,19 @@ def uses_examples(version: dict) -> bool:
 
 def uses_image(version: dict) -> bool:
     return "{image}" in version["user"]
+
+
+def uses_categories(version: dict) -> bool:
+    return version.get("label_format") == "categories"
+
+
+def categories(codes, names: list[str]) -> dict[str, list[str]]:
+    """Label names under their CATEGORIES (CheXbert values; NaN = blank)."""
+    out = {c: [] for c in CATEGORIES.values()}
+    for name, code in zip(names, codes):
+        key = None if code is None or code != code else float(code)
+        out[CATEGORIES[key]].append(name)
+    return out
 
 
 def uses_section(version: dict) -> bool:
@@ -74,7 +94,10 @@ def with_probability(name: str, p: float) -> str:
     return f"{name} ({min(99, max(1, round(100 * p)))}%)"
 
 
-def label_text(names: list[str]) -> str:
+def label_text(names: list[str] | dict[str, list[str]]) -> str:
+    """Positive names joined; or, given categories, one line per category."""
+    if isinstance(names, dict):
+        return "\n".join(f"{c}: {', '.join(n) or 'None'}" for c, n in names.items())
     return ", ".join(names) if names else NO_POSITIVE
 
 
@@ -88,6 +111,7 @@ def render(
 
     ``examples``: (report text, positive label names) per retrieved study, best first.
     ``labels``: the target's positive label names (None for a version without labels).
+    Either can instead be categories (a ``categories`` dict).
     ``section``: the section generated (a SECTION_NAMES key), for a version with
     {section}. With {image}, the content is a list of parts: text, IMAGE_PART, text.
     """

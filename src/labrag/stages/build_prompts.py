@@ -6,9 +6,9 @@ best first, with image similarity and, for label ranking, Jaccard), labels (null
 without), reference (trimmed only).
 
 An experiment fixes, per dataset, the target and corpus roles (EXPERIMENTS): ``pilot``
-(CheXpert Plus pilot split), ``smoke`` (100 val patients of MIMIC-CXR and ReXGradient,
-one study each, corpus train only; their thresholds were set on val, so the labels are
-in-sample).
+(CheXpert Plus pilot split), ``val`` (every val study of MIMIC-CXR and ReXGradient,
+corpus train only; their thresholds were set on val, so max-F1 labels are in-sample),
+``smoke`` (100 of those val patients, one study each).
 
 Conditions: ``retrieval-only`` (top K by image similarity) and ``labrag.<labeler>``
 (Jaccard on positive labels, ties by image similarity; the target's predicted labels in
@@ -42,6 +42,11 @@ directory suffix ``.sides``.
 ``--confidence`` (labrag): each target label shown with the classifier's probability,
 "Atelectasis (28%)" (its probs file); example labels, label set and ranking unchanged;
 directory suffix ``.confidence``.
+Multiclass predictions (``--predictions .../chexbert14.mc``, finetune --multiclass)
+give CheXbert's four values per target label; their positives rank as usual. A prompt
+version with ``label_format: categories`` shows every label under Positive, Negative,
+Uncertain or Unmentioned, for the target (predicted) and the examples (their reference
+values); any other version shows the positives only.
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``).
@@ -58,15 +63,15 @@ from labrag import artifacts, paths, prompts, retrieval
 from labrag.data import DATASETS, JOIN
 from labrag.labelers import radgraph_sides
 from labrag.stages import threshold
-from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, POSITIVE
+from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, MULTICLASS_SUFFIX, POSITIVE
 
 # experiment -> dataset -> target roles, corpus roles and, optionally, a sample of the
 # targets: that many patients drawn with the seed, one study each
-SMOKE = {
+VAL = {
     "targets": ("val",),  # test stays unseen until the generation config is frozen
     "corpus": ("train",),
-    "sample": {"patients": 100, "seed": 20261119},
 }
+SMOKE = VAL | {"sample": {"patients": 100, "seed": 20261119}}
 EXPERIMENTS = {
     "pilot": {
         "chexpertplus": {
@@ -75,6 +80,7 @@ EXPERIMENTS = {
         },
     },
     "smoke": {"mimic": SMOKE, "rexgradient": SMOKE},
+    "val": {"mimic": VAL, "rexgradient": VAL},
 }
 # label diagnostics -> how the target's labels mix predicted and reference
 DIAGNOSTICS = {
@@ -147,6 +153,7 @@ def run(
     if confidence and condition != "labrag":
         raise SystemExit("build-prompts: --confidence is for labrag")
     transfer = predictions is not None
+    categories = prompts.uses_categories(version)
     if (prompts.uses_labels(version), prompts.uses_examples(version)) != (
         with_labels,
         with_examples,
@@ -154,14 +161,24 @@ def run(
         raise SystemExit(f"prompt {prompt!r} does not fit condition {condition!r}")
 
     labeler = LABELER + LABELER_SUFFIX[uncertain]
+    multiclass = False
     if transfer:
         source, clf_name, clf_sections, labeler = parse_classifier(predictions)
         readout = section if section in clf_sections.split(JOIN) else clf_sections
         if JOIN in readout:
             raise SystemExit(f"build-prompts: {predictions} has no {section} readout")
+        multiclass = labeler.endswith(MULTICLASS_SUFFIX)
+        if multiclass and (
+            condition != "labrag" or confidence or corpus_labels != "reference"
+        ):
+            raise SystemExit(
+                "build-prompts: multiclass predictions are for labrag with reference "
+                "corpus labels"
+            )
         if (
             corpus_labels == "reference"
-            and labeler != LABELER + LABELER_SUFFIX[uncertain]
+            and labeler.removesuffix(MULTICLASS_SUFFIX)
+            != LABELER + LABELER_SUFFIX[uncertain]
         ):
             raise SystemExit(
                 f"build-prompts: no {labeler} reference labels for the corpus; "
@@ -180,6 +197,11 @@ def run(
             )
         if section not in clf_sections.split(JOIN):
             raise SystemExit(f"build-prompts: {classifier} has no {section} readout")
+    if categories and not multiclass:
+        raise SystemExit(
+            f"build-prompts: prompt {prompt!r} shows label categories: it needs "
+            "multiclass --predictions (chexbert14.mc)"
+        )
     emb_dir = paths.SHARED_ROOT / "embeddings" / dataset / ENCODER
     lab_dir = paths.SHARED_ROOT / "labels" / dataset / section / LABELER
     inputs = {
@@ -260,6 +282,14 @@ def run(
                 if ranking == "labels"
                 else "cosine (labels shown, not used to rank)"
             ),
+            **(
+                {
+                    "label_format": "categories: positive, negative, uncertain, "
+                    "unmentioned; target predicted, examples reference values"
+                }
+                if categories
+                else {}
+            ),
         }
         condition_dir = f"{condition}.{labeler}"
         if predicted:
@@ -327,7 +357,11 @@ def run(
                 corpus_y = predicted_corpus(clf_dir, section, corpus, names)
             else:
                 corpus_y = reference(corpus)
-            if transfer:
+            target_codes = None
+            if transfer and multiclass:
+                target_codes = transferred.loc[target.index, names].to_numpy()
+                target_y = (target_codes == 1).astype(int)
+            elif transfer:
                 target_y = transferred.loc[target.index].to_numpy(dtype=int)
             elif oracle:
                 target_y = reference(target)
@@ -358,6 +392,9 @@ def run(
             prob = artifacts.read_table(probs_file).set_index("study_id")
             prob = prob.loc[target.index, names]
 
+        if categories:
+            corpus_codes = labels.loc[corpus.index, names].to_numpy()
+
         def positives(row: np.ndarray, study_id: str, target=False) -> list[str]:
             shown = [n for n, v in zip(names, row) if v]
             if target and prob is not None:
@@ -374,7 +411,13 @@ def run(
             examples = [
                 (
                     reports[j],
-                    positives(corpus_y[j], corpus_ids[j]) if with_labels else [],
+                    (
+                        prompts.categories(corpus_codes[j], names)
+                        if categories
+                        else (
+                            positives(corpus_y[j], corpus_ids[j]) if with_labels else []
+                        )
+                    ),
                 )
                 for j in idx
             ]
@@ -384,7 +427,12 @@ def run(
             }
             if with_labels:
                 retrieved["retrieved_jaccard"] = overlap[i, idx].tolist()
-            labels_i = positives(target_y[i], study_id, True) if with_labels else None
+            if categories:
+                labels_i = prompts.categories(target_codes[i], names)
+            else:
+                labels_i = (
+                    positives(target_y[i], study_id, True) if with_labels else None
+                )
             records.append(record(study_id, row, examples, labels_i, retrieved))
         summary = write(out, records)
         summary["n_corpus"] = len(corpus)

@@ -394,3 +394,91 @@ section-instruct-image:
 
     Now generate the report for the current case using its labels below. Always generate reports based on the examples shown.
     {labels}
+
+# Track B, stating negatives. *-negatives-image: section-naive-image (retrieval-only) and
+# section-simple-image (labrag) plus one instruction to state pertinent negatives.
+# section-simple-absent-image: section-simple-negatives-image plus the target's labels
+# predicted absent (multiclass negative class) and an instruction to state each as
+# absent; the examples show their positives as before.
+
+section-naive-negatives-image:
+  example: "Example: {index}\n{report}"
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given context information and the chest X-ray of the current case.
+    The context information contains examples of reports written for similar cases.
+    Use the examples to generate a report for the current case.
+    Strictly follow the instructions below to generate the reports.
+
+    **Instructions**
+
+    1. The report must be based on the image of the current case and the information in the context.
+    2. The report must mimic the style of the reports shown in the context.
+    3. Do not generate blank reports.
+    4. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
+    5. Write only the {section} section of the report, without its header.
+    6. State the pertinent negatives: the relevant findings that are absent, as the examples do.
+
+    CONTEXT:
+    {examples}
+
+    CURRENT CASE:
+    {image}
+
+    Now generate the report for the current case. Always generate reports based on the examples shown.
+
+section-simple-negatives-image:
+  example: "Example: {index}\nLabel: {labels}\n{report}"
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given context information and the chest X-ray of the current case.
+    The context information contains examples of reports written for similar cases and their associated labels.
+    Use the examples and their associated labels to generate a report for the current case based on the current label.
+    Strictly follow the instructions below to generate the reports.
+
+    **Instructions**
+
+    1. The report must be based on the image of the current case, the information in the context and the current label.
+    2. The report must mimic the style of the reports shown in the context.
+    3. Do not generate blank reports.
+    4. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
+    5. Write only the {section} section of the report, without its header.
+    6. State the pertinent negatives: the relevant findings that are absent, as the examples do.
+
+    CONTEXT:
+    {examples}
+
+    CURRENT CASE:
+    {image}
+
+    Now generate the report for the current case using its label below. Always generate reports based on the examples shown.
+    Label: {labels}
+
+section-simple-absent-image:
+  example: "Example: {index}\nLabel: {labels}\n{report}"
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given context information and the chest X-ray of the current case.
+    The context information contains examples of reports written for similar cases and their associated labels.
+    Use the examples and their associated labels to generate a report for the current case based on the current label.
+    Strictly follow the instructions below to generate the reports.
+
+    **Instructions**
+
+    1. The report must be based on the image of the current case, the information in the context and the current label.
+    2. The report must mimic the style of the reports shown in the context.
+    3. Do not generate blank reports.
+    4. Describe only the current study. No prior study is available: do not refer to prior examinations (e.g. "unchanged", "stable", "interval", "again seen", "compared with"), and do not include dates, times or names.
+    5. Write only the {section} section of the report, without its header.
+    6. State the pertinent negatives: the relevant findings that are absent, as the examples do.
+    7. The findings listed under "Absent" below are absent in the current case: state each of them as absent in the report.
+
+    CONTEXT:
+    {examples}
+
+    CURRENT CASE:
+    {image}
+
+    Now generate the report for the current case using its label below. Always generate reports based on the examples shown.
+    Label: {labels}
+    Absent: {absent}

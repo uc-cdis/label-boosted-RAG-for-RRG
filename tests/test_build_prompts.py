@@ -186,3 +186,15 @@ def test_category_prompts_need_multiclass_predictions():
             predictions=FT + ".mc",
             confidence=True,
         )
+
+
+def test_absent_prompts_need_multiclass_predictions():
+    with pytest.raises(SystemExit, match="lists absent labels"):
+        build_prompts.run(
+            "val",
+            "mimic",
+            "findings",
+            "labrag",
+            predictions=FT,
+            prompt="section-simple-absent-image",
+        )

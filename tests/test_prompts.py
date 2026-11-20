@@ -92,3 +92,21 @@ def test_categories_render_one_line_each():
     ]:
         assert prompts.load(name)["label_categories"] == shown
     assert not prompts.uses_categories(prompts.load("section-simple-image"))
+
+
+def test_render_absent_lists_predicted_negatives():
+    version = prompts.load("section-simple-absent-image")
+    assert prompts.uses_absent(version) and not prompts.uses_categories(version)
+    [message] = prompts.render(
+        version, [("a", ["Edema"])], ["Edema"], "findings", ["Pneumothorax", "Fracture"]
+    )
+    assert message["content"][-1]["text"].endswith(
+        "Label: Edema\nAbsent: Pneumothorax, Fracture"
+    )
+    [message] = prompts.render(version, [("a", [])], [], "findings", [])
+    assert message["content"][-1]["text"].endswith("Label: Other\nAbsent: None")
+    with pytest.raises(AssertionError):
+        prompts.render(version, [("a", [])], [], "findings")
+    plain = prompts.load("section-simple-negatives-image")
+    with pytest.raises(AssertionError):
+        prompts.render(plain, [("a", [])], [], "findings", [])

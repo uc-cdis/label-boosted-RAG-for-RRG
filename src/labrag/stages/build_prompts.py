@@ -46,7 +46,9 @@ Multiclass predictions (``--predictions .../chexbert14.mc``, finetune --multicla
 give CheXbert's four values per target label; their positives rank as usual. A prompt
 version with ``label_categories`` (e.g. [Positive, Negative, Uncertain, Unmentioned])
 shows the labels under those categories, for the target (predicted) and the examples
-(their reference values); any other version shows the positives only.
+(their reference values); any other version shows the positives only. A version with
+{absent} also lists the target's labels predicted negative (multiclass only; examples
+show their positives as usual).
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``).
@@ -154,6 +156,7 @@ def run(
         raise SystemExit("build-prompts: --confidence is for labrag")
     transfer = predictions is not None
     categories = prompts.uses_categories(version)
+    absent = prompts.uses_absent(version)
     if (prompts.uses_labels(version), prompts.uses_examples(version)) != (
         with_labels,
         with_examples,
@@ -200,6 +203,11 @@ def run(
     if categories and not multiclass:
         raise SystemExit(
             f"build-prompts: prompt {prompt!r} shows label categories: it needs "
+            "multiclass --predictions (chexbert14.mc)"
+        )
+    if absent and not multiclass:
+        raise SystemExit(
+            f"build-prompts: prompt {prompt!r} lists absent labels: it needs "
             "multiclass --predictions (chexbert14.mc)"
         )
     emb_dir = paths.SHARED_ROOT / "embeddings" / dataset / ENCODER
@@ -288,6 +296,11 @@ def run(
                     "label_values": "target predicted, examples reference",
                 }
                 if categories
+                else {}
+            ),
+            **(
+                {"absent": "target: labels predicted negative; examples: none"}
+                if absent
                 else {}
             ),
         }
@@ -434,7 +447,14 @@ def run(
                 labels_i = (
                     positives(target_y[i], study_id, True) if with_labels else None
                 )
-            records.append(record(study_id, row, examples, labels_i, retrieved))
+            absent_i = (
+                [n for n, c in zip(names, target_codes[i]) if c == 0]
+                if absent
+                else None
+            )
+            records.append(
+                record(study_id, row, examples, labels_i, retrieved, absent_i)
+            )
         summary = write(out, records)
         summary["n_corpus"] = len(corpus)
         if with_labels:
@@ -446,15 +466,20 @@ def run(
         print(json.dumps(summary, indent=2))
         return summary
 
-    def record(study_id, row, examples=(), labels_i=None, retrieved=None) -> dict:
+    def record(
+        study_id, row, examples=(), labels_i=None, retrieved=None, absent_i=None
+    ) -> dict:
         r = {
             "study_id": study_id,
             "set": row.role,
-            "messages": prompts.render(version, list(examples), labels_i, section),
+            "messages": prompts.render(
+                version, list(examples), labels_i, section, absent_i
+            ),
         }
         if with_image:
             r["image"] = f"{adapter.IMAGE_ROOT}/{row.image_path}"
-        return r | (retrieved or {}) | {"labels": labels_i, "reference": row[section]}
+        shown = {"labels": labels_i} | ({"absent": absent_i} if absent else {})
+        return r | (retrieved or {}) | shown | {"reference": row[section]}
 
     def write(out: Path, records: list[dict]) -> dict:
         # mtime=0 and no file name in the gzip header: reruns are byte-identical.

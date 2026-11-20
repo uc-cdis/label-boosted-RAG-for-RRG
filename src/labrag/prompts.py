@@ -29,7 +29,13 @@ def load(name: str) -> dict:
         raise SystemExit(f"unknown prompt {name!r}; known: {sorted(versions)}")
     version = versions[name]
     fields = {f for _, f, _, _ in string.Formatter().parse(version["user"]) if f}
-    assert fields <= {"examples", "labels", "image", "section"}, f"{name}: {fields}"
+    assert fields <= {
+        "examples",
+        "labels",
+        "absent",
+        "image",
+        "section",
+    }, f"{name}: {fields}"
     assert fields & {"examples", "image"}, f"{name}: no examples and no image"
     expected = {"user", "example"} if "examples" in fields else {"user"}
     assert set(version) - {"label_categories"} == expected, f"{name}: {sorted(version)}"
@@ -38,6 +44,7 @@ def load(name: str) -> dict:
         shown
     ), name
     assert not shown or "labels" in fields, name
+    assert "absent" not in fields or ("labels" in fields and not shown), name
     assert version["user"].count("{image}") <= 1, f"{name}: more than one image"
     return version
 
@@ -52,6 +59,12 @@ def uses_examples(version: dict) -> bool:
 
 def uses_image(version: dict) -> bool:
     return "{image}" in version["user"]
+
+
+def uses_absent(version: dict) -> bool:
+    """{absent}: the target's labels predicted absent (the multiclass negative class),
+    next to its positives; the examples show positives only."""
+    return "{absent}" in version["user"]
 
 
 def uses_categories(version: dict) -> bool:
@@ -112,6 +125,7 @@ def render(
     examples: list[tuple[str, list[str]]],
     labels: list[str] | None,
     section: str | None = None,
+    absent: list[str] | None = None,
 ) -> list[dict]:
     """Chat messages for one target.
 
@@ -119,11 +133,14 @@ def render(
     ``labels``: the target's positive label names (None for a version without labels).
     Either can instead be categories (a ``categories`` dict).
     ``section``: the section generated (a SECTION_NAMES key), for a version with
-    {section}. With {image}, the content is a list of parts: text, IMAGE_PART, text.
+    {section}. ``absent``: the target's label names predicted absent, for a version
+    with {absent} ("None" if empty). With {image}, the content is a list of parts:
+    text, IMAGE_PART, text.
     """
     with_labels = uses_labels(version)
     assert with_labels == (labels is not None), "labels given iff the version uses them"
     assert uses_examples(version) == bool(examples), "examples given iff it shows them"
+    assert uses_absent(version) == (absent is not None), "absent given iff it uses it"
     blocks = [
         version["example"].format(
             index=i,
@@ -139,6 +156,8 @@ def render(
         fields["section"] = SECTION_NAMES[section]
     if with_labels:
         fields["labels"] = label_text(labels)
+    if absent is not None:
+        fields["absent"] = ", ".join(absent) or "None"
     text = version["user"].format(**fields).strip()
     if not uses_image(version):
         return [{"role": "user", "content": text}]

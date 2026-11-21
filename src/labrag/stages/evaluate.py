@@ -17,10 +17,13 @@ threads are half the job's CPUs: 8 RaTEScore + 4 GREEN client + 4 per CXR contai
 the GPU. Chunk size and threads change CXR scores in the last bit, so both are in its
 config, and a job too small for them is refused. A failed metric doesn't stop others.
 
-Input format (Findings only so far; deviations from ReXrank: docs/revision-plan.md §7):
-no section header (a leading "Findings:" is removed), whitespace collapsed, study ids
-0..n-1; an empty report is scored as "EMPTY" and stays in every mean. Empty references
-are refused.
+Input format (deviations from ReXrank: docs/revision-plan.md §7): no section header (a
+leading "Findings:" is removed), whitespace collapsed, study ids 0..n-1; an empty report
+is scored as "EMPTY" and stays in every mean. Empty references are refused.
+Findings+Impression (JOINT) is scored as one text, both headers removed. A strict
+parser (split_joint) needs exactly one "Findings:" at the start and one "Impression:"
+after it, both sections non-empty (optional ** around a header); a report that fails
+is still scored, every header removed, and flagged ``unparsed``.
 """
 
 import concurrent.futures
@@ -42,10 +45,15 @@ import pandas as pd
 import yaml
 
 from labrag import artifacts, paths, serving, weights
+from labrag.data import JOINT
 
 COMPOSE_FILE = paths.REPO_ROOT / "eval" / "compose.yaml"
-SECTIONS = ["findings"]  # the sections whose scoring format is decided
 FINDINGS_HEADER = re.compile(r"^findings\s*:\s*", re.IGNORECASE)
+# A JOINT header, optionally in markdown bold: "Impression:", "**Impression:**", ...
+_HEADER = r"(?:\*\*)?{}(?:\*\*)?\s*:(?:\*\*)?\s*"
+JOINT_HEADERS = [
+    re.compile(_HEADER.format(name), re.IGNORECASE) for name in JOINT.split("+")
+]
 # Every metric scores an empty report as this text (the preprint did too, as "EMTPY").
 EMPTY_REPORT = "EMPTY"
 FORMAT = {
@@ -54,6 +62,11 @@ FORMAT = {
     "study_ids": "0..n-1 in generation order",
     "empty_report": f"scored as the text {EMPTY_REPORT!r}",
 }
+JOINT_FORMAT = FORMAT | {
+    "section_header": "none; both headers removed (a report the strict parser can't "
+    "split: every header removed, flagged unparsed)",
+}
+FORMATS = {"findings": FORMAT, JOINT: JOINT_FORMAT}  # the sections we know how to score
 
 # Optional keys: ``build`` (the service that builds the image, default the service),
 # ``judge`` (the service serving the LLM judge), ``chunk`` (studies per container run;
@@ -118,6 +131,8 @@ METRICS["green-native"] = {  # the reference: upstream's HF generate
     **{k: v for k, v in METRICS["green"].items() if k not in ("build", "judge")},
     "service": "green-native",
 }
+# Per-study flags kept with the scores (unparsed: JOINT only).
+FLAGS = ["empty_report", "unparsed"]
 # The default of `labrag evaluate`: every metric of the suite, in one job.
 SUITE = ["cxr-report-metric", "ratescore", "green"]
 # artifacts.publish reads the umask by setting it, which isn't thread-safe.
@@ -127,6 +142,41 @@ _PUBLISH = threading.Lock()
 def format_report(text: str) -> str:
     """Findings text as scored: whitespace collapsed, a leading "Findings:" removed."""
     return FINDINGS_HEADER.sub("", " ".join(text.split()), count=1)
+
+
+def split_joint(text: str) -> tuple[str, str] | None:
+    """(findings, impression) of a generated JOINT report, whitespace collapsed; None
+    unless exactly one Findings header starts it, exactly one Impression header follows
+    it, and neither section is empty."""
+    text = " ".join(text.split())
+    found = [list(h.finditer(text)) for h in JOINT_HEADERS]
+    if [len(f) for f in found] != [1, 1]:
+        return None
+    (f,), (i,) = found
+    if f.start() != 0 or i.start() < f.end():
+        return None
+    parts = text[f.end() : i.start()].strip(), text[i.end() :].strip()
+    return parts if all(parts) else None
+
+
+def format_joint(text: str) -> tuple[str, bool]:
+    """A generated JOINT report as scored, and whether the strict parser failed."""
+    parts = split_joint(text)
+    if parts:
+        return " ".join(parts), False
+    for h in JOINT_HEADERS:
+        text = h.sub(" ", text)
+    return " ".join(text.split()), True
+
+
+def scoring_format(gen_rel: str) -> dict:
+    """The input format a generations artifact is scored in (by its prompts' section)."""
+    gen_config = artifacts.read_manifest(paths.SHARED_ROOT / gen_rel)["config"]
+    prompt_dir = paths.SHARED_ROOT / gen_config["prompts"]
+    section = artifacts.read_manifest(prompt_dir)["config"]["section"]
+    if section not in FORMATS:
+        raise SystemExit(f"{gen_rel}: how to score {section} is not decided yet")
+    return FORMATS[section]
 
 
 def run(
@@ -205,7 +255,7 @@ def prepare(
             "metric": metric,
             # Not all of eval/compose.yaml: it also holds the other services.
             "image": image_source(spec),
-            "format": FORMAT,
+            "format": scoring_format(f"generations/{rel}"),
         }
         if "judge" in spec:
             config["judge"] = judge_definition(spec)
@@ -333,9 +383,10 @@ def publish_scores(
 ) -> Path:
     """Publish one set's scores artifact (``s``: an entry of the plan's sets)."""
     spec, image = plan["spec"], plan["image"]
+    flags = s["pairs"][[c for c in FLAGS if c in s["pairs"]]].to_dict("records")
     records = [
-        {"study_id": r["study_id"], "set": r["set"], "empty_report": e, **x}
-        for r, e, x in zip(s["rows"], s["pairs"]["empty_report"].tolist(), scores)
+        {"study_id": r["study_id"], "set": r["set"], **f, **x}
+        for r, f, x in zip(s["rows"], flags, scores)
     ]
     extra = {
         "image": image,
@@ -366,7 +417,7 @@ def pair_reports(
     rows: list[dict], references: dict[str, str], section: str, name: str
 ) -> pd.DataFrame:
     """Integer id, formatted reference and formatted report per generation, in order."""
-    if section not in SECTIONS:
+    if section not in FORMATS:
         raise SystemExit(f"{name}: how to score {section} is not decided yet")
     missing = [r["study_id"] for r in rows if r["study_id"] not in references]
     if missing:
@@ -374,10 +425,14 @@ def pair_reports(
     reference = [format_report(references[r["study_id"]]) for r in rows]
     if not all(reference):
         raise SystemExit(f"{name}: empty reference texts")
-    generated = [format_report(r["report"] or "") for r in rows]
+    if section == JOINT:  # the reference is content only; generations have headers
+        reference = [" ".join(references[r["study_id"]].split()) for r in rows]
+        generated, unparsed = zip(*(format_joint(r["report"] or "") for r in rows))
+    else:
+        generated = [format_report(r["report"] or "") for r in rows]
     if len({r["study_id"] for r in rows}) != len(rows):
         raise SystemExit(f"{name}: duplicate study ids")
-    return pd.DataFrame(
+    pairs = pd.DataFrame(
         {
             "study_id": range(len(rows)),
             "reference": reference,
@@ -385,6 +440,9 @@ def pair_reports(
             "empty_report": [not text for text in generated],
         }
     )
+    if section == JOINT:
+        pairs["unparsed"] = [u and bool(t) for u, t in zip(unparsed, generated)]
+    return pairs
 
 
 def score(
@@ -663,6 +721,7 @@ def summarize(records: list[dict], columns: list[str]) -> dict:
     summary = {
         "n": len(df),
         "empty_reports": int(df["empty_report"].sum()),
+        **({"unparsed": int(df["unparsed"].sum())} if "unparsed" in df else {}),
         "mean": {c: float(df[c].mean()) for c in columns},
     }
     if "RadCliQ-v1" in columns:

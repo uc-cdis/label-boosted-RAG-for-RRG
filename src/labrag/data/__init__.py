@@ -18,6 +18,8 @@ Each adapter module provides:
 - ``FRONTAL_VIEWS``: the ``view`` values of a frontal image.
 """
 
+import pandas as pd
+
 from labrag import paths
 from labrag.data import chexpertplus, mimic, padchest, rexgradient
 
@@ -29,8 +31,15 @@ DATASETS = {
 }
 
 
-SECTIONS = tuple(dict.fromkeys(s for a in DATASETS.values() for s in a.SECTIONS))
 JOIN = "-"  # findings-impression: one classifier over several sections' labels
+# Findings+Impression generated, labelled and scored as one text: a section of every
+# dataset with both. Not JOIN, which names a classifier's readouts, one per section.
+JOINT = "findings+impression"
+JOINT_PARTS = ("findings", "impression")
+SECTIONS = (
+    *dict.fromkeys(s for a in DATASETS.values() for s in a.SECTIONS),
+    JOINT,
+)
 
 
 def labels_only(dataset: str) -> bool:
@@ -38,12 +47,26 @@ def labels_only(dataset: str) -> bool:
     return getattr(DATASETS[dataset], "LABELS_ONLY", False)
 
 
-def check_section(stage: str, dataset: str, section: str) -> None:
-    """``section`` must be one of the dataset's sections."""
-    if section not in DATASETS[dataset].SECTIONS:
-        raise SystemExit(
-            f"{stage}: {dataset} sections are {list(DATASETS[dataset].SECTIONS)}"
-        )
+def has_joint(dataset: str) -> bool:
+    """True for a dataset with both JOINT_PARTS."""
+    return set(JOINT_PARTS) <= set(DATASETS[dataset].SECTIONS)
+
+
+def check_section(stage: str, dataset: str, section: str, joint=False) -> None:
+    """``section`` must be one of the dataset's sections, or JOINT if ``joint`` (a
+    stage that handles it) and the dataset has both its parts."""
+    known = list(DATASETS[dataset].SECTIONS)
+    if joint and has_joint(dataset):
+        known.append(JOINT)
+    if section not in known:
+        raise SystemExit(f"{stage}: {dataset} sections are {known}")
+
+
+def add_joint(studies: pd.DataFrame) -> pd.DataFrame:
+    """``studies`` with a JOINT column: the parts' texts, stripped, joined by a space
+    (NaN unless the study has both)."""
+    parts = [studies[p].str.strip() for p in JOINT_PARTS]
+    return studies.assign(**{JOINT: parts[0] + " " + parts[1]})
 
 
 def split_sections(stage: str, dataset: str, section: str) -> list[str]:

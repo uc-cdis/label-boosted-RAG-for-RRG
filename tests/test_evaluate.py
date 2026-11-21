@@ -63,6 +63,59 @@ def test_pair_reports_scores_empty_reports_as_placeholder(report):
     assert pairs["empty_report"].tolist() == [False, True]
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Findings: Lungs clear. Impression: Normal.",
+        "FINDINGS:\nLungs  clear.\n\nIMPRESSION:\nNormal.",
+        "**Findings:** Lungs clear. **Impression:** Normal.",
+        "**Findings**: Lungs clear. **Impression**: Normal.",
+    ],
+)
+def test_split_joint_takes_both_headers(text):
+    assert evaluate.split_joint(text) == ("Lungs clear.", "Normal.")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Lungs clear. Impression: Normal.",  # no Findings header
+        "Findings: Lungs clear. Normal.",  # no Impression header
+        "Impression: Normal. Findings: Lungs clear.",  # wrong order
+        "Findings: Lungs clear. Impression: Normal. Impression: Normal.",  # twice
+        "Findings: Impression: Normal.",  # empty Findings
+        "Findings: Lungs clear. Impression:",  # empty Impression
+        "Report. Findings: Lungs clear. Impression: Normal.",  # text before Findings
+    ],
+)
+def test_split_joint_is_strict(text):
+    assert evaluate.split_joint(text) is None
+
+
+def test_pair_reports_joint_scores_content_and_flags_unparsed():
+    gen = rows(
+        "Findings: Lungs\nclear. Impression: Normal.",
+        "Lungs clear. Impression: Normal.",
+        "",
+    )
+    refs = {f"patient{i}_study1": "Lungs  clear. No acute process." for i in range(3)}
+    pairs = evaluate.pair_reports(gen, refs, "findings+impression", "x")
+    assert pairs["reference"].tolist() == ["Lungs clear. No acute process."] * 3
+    assert pairs["generated"].tolist() == [
+        "Lungs clear. Normal.",
+        "Lungs clear. Normal.",  # unparsed: every header removed, still scored
+        "EMPTY",
+    ]
+    assert pairs["unparsed"].tolist() == [False, True, False]
+    assert pairs["empty_report"].tolist() == [False, False, True]
+
+
+def test_findings_format_is_unchanged_and_joint_has_its_own():
+    assert evaluate.FORMATS["findings"] is evaluate.FORMAT
+    assert evaluate.FORMAT["section_header"] == "none; a leading 'Findings:' is removed"
+    assert evaluate.FORMATS["findings+impression"] != evaluate.FORMAT
+
+
 def test_pair_reports_refuses_empty_reference():
     with pytest.raises(SystemExit, match="empty reference"):
         evaluate.pair_reports(rows("a."), {"patient0_study1": " \n"}, "findings", "x")
@@ -425,6 +478,7 @@ def test_chunked_metric_config_records_its_container_layout(monkeypatch):
         "is_built",
         lambda out, config, overwrite: configs.append(config) or True,
     )
+    monkeypatch.setattr(evaluate, "scoring_format", lambda rel: evaluate.FORMAT)
     plan, built = evaluate.prepare("cxr-report-metric", ["g"], False)
     assert plan is None and len(built) == 1
     assert configs[0]["chunk_studies"] == 250

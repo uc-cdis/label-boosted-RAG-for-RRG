@@ -198,3 +198,22 @@ def test_absent_prompts_need_multiclass_predictions():
             predictions=FT,
             prompt="section-simple-absent-image",
         )
+
+
+def test_joint_takes_only_joint_prompts_and_back():
+    with pytest.raises(SystemExit, match="joint-"):
+        build_prompts.run("val", "mimic", "findings+impression", "retrieval-only",
+                          prompt="section-naive-negatives-indication-image")  # fmt: skip
+    with pytest.raises(SystemExit, match="joint-"):
+        build_prompts.run("val", "mimic", "findings", "retrieval-only",
+                          prompt="joint-naive-negatives-indication-image")  # fmt: skip
+
+
+def test_joint_needs_both_readouts():
+    with pytest.raises(SystemExit, match="no findings\\+impression readouts"):
+        build_prompts.run(
+            "val", "mimic", "findings+impression", "labrag",
+            prompt="joint-simple-negatives-indication-image",
+            predictions="chexpertplus-mimic-rexgradient/raddino.ft-attn-seed1/"
+            "findings/chexbert14.mc",
+        )  # fmt: skip

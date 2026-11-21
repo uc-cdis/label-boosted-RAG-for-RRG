@@ -50,6 +50,13 @@ shows the labels under those categories, for the target (predicted) and the exam
 {absent} also lists the target's labels predicted negative (multiclass only; examples
 show their positives as usual); for labrag-oracle, its reference negated labels.
 
+Section ``findings+impression`` (JOINT; only with a ``joint-*`` prompt version, which
+asks for both headers): the studies with both sections; examples show "Findings: …
+Impression: …"; the reference is the two texts joined, as labelled and scored.
+Predicted target labels combine the predict artifact's findings and impression readouts
+the way the labels stage combines the reference labels (labels.combine), so predicted,
+example and oracle labels share one definition.
+
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``). A version with {indication}
 shows the target's indication (the adapter's ``indication``; also in the record), any
@@ -64,10 +71,11 @@ import numpy as np
 import pandas as pd
 
 from labrag import artifacts, paths, prompts, retrieval
-from labrag.data import DATASETS, JOIN
+from labrag.data import DATASETS, JOIN, JOINT, JOINT_PARTS, add_joint, check_section
 from labrag.labelers import radgraph_sides
 from labrag.stages import threshold
 from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, MULTICLASS_SUFFIX, POSITIVE
+from labrag.stages.labels import COMBINE_RULE, combine
 
 # experiment -> dataset -> target roles, corpus roles and, optionally, a sample of the
 # targets: that many patients drawn with the seed, one study each
@@ -99,6 +107,7 @@ DEFAULT_PROMPT = {
     "labrag-oracle": "preprint-simple",
 } | {c: "preprint-simple" for c in DIAGNOSTICS}
 K = 5
+JOINT_PROMPTS = "joint-"  # prompt versions for JOINT, and only those
 ENCODER = "raddino"
 LABELER = "chexbert14"
 
@@ -127,6 +136,15 @@ def run(
     exp = EXPERIMENTS[experiment][dataset]
     adapter = DATASETS[dataset]
     prompt = prompt or DEFAULT_PROMPT[condition]
+    check_section("build-prompts", dataset, section, joint=True)
+    joint = section == JOINT
+    if joint != prompt.startswith(JOINT_PROMPTS):
+        raise SystemExit(
+            f"build-prompts: {JOINT} takes the {JOINT_PROMPTS}* prompt versions, "
+            "and only it does"
+        )
+    if joint and (sides or confidence):
+        raise SystemExit(f"build-prompts: no --sides or --confidence for {JOINT}")
     version = prompts.load(prompt)
     with_labels = condition.startswith("labrag")
     with_examples = condition != "no-context"
@@ -171,9 +189,18 @@ def run(
     multiclass = False
     if transfer:
         source, clf_name, clf_sections, labeler = parse_classifier(predictions)
-        readout = section if section in clf_sections.split(JOIN) else clf_sections
-        if JOIN in readout:
+        readouts = clf_sections.split(JOIN)
+        if joint:
+            if not set(JOINT_PARTS) <= set(readouts):
+                raise SystemExit(
+                    f"build-prompts: {predictions} has no {JOINT} readouts"
+                )
+            readouts = list(JOINT_PARTS)
+        elif section in readouts or len(readouts) == 1:
+            readouts = [section if section in readouts else readouts[0]]
+        else:
             raise SystemExit(f"build-prompts: {predictions} has no {section} readout")
+        readout = readouts[0]
         multiclass = labeler.endswith(MULTICLASS_SUFFIX)
         if multiclass and (
             condition != "labrag" or confidence or corpus_labels != "reference"
@@ -242,6 +269,8 @@ def run(
             "similarity": "cosine",
             "report_text": "whitespace runs collapsed to one space",
         }
+        if joint:
+            config["example_text"] = "Findings: <findings> Impression: <impression>"
     if indication:
         shown_for = "target and examples" if example_indications else "target only"
         config["indication"] = (
@@ -260,6 +289,11 @@ def run(
         pred_dir = paths.SHARED_ROOT / "predictions" / dataset / predictions.strip("/")
         inputs["predictions"] = artifacts.artifact_record(pred_dir)
         config["predictions"] = predictions
+        if joint:
+            config["readouts"] = {
+                "combined": list(JOINT_PARTS),
+                "rule": COMBINE_RULE,
+            }
     elif predicted:
         clf_dir = paths.SHARED_ROOT / "classifiers" / classifier.strip("/")
         inputs["classifier"] = artifacts.artifact_record(clf_dir)
@@ -344,10 +378,19 @@ def run(
         labels = artifacts.read_table(lab_dir / "labels.csv").set_index("study_id")
         names = list(labels.columns)
         if transfer:
-            transferred = artifacts.read_table(pred_dir / f"predictions.{readout}.csv")
-            transferred = transferred.set_index("study_id")
+            tables = [
+                artifacts.read_table(pred_dir / f"predictions.{r}.csv")
+                for r in readouts
+            ]
+            transferred = (
+                combine(tables, multiclass)
+                if joint
+                else tables[0].set_index("study_id")
+            )
             names = list(transferred.columns)
         studies = adapter.load_studies(cxr_root).set_index("study_id")
+        if joint:
+            studies = add_joint(studies)
         if indication and "indication" not in studies:
             raise SystemExit(f"build-prompts: no indication in {dataset}'s adapter")
         studies["role"] = adapter.classifier_roles(studies, paths.SPLITS_DIR)
@@ -437,7 +480,11 @@ def run(
                 ]
             return [radgraph_sides.sided(n, side.get((study_id, n))) for n in shown]
 
-        reports = corpus[section].to_numpy()
+        reports = (
+            ("Findings: " + corpus.findings + " Impression: " + corpus.impression)
+            if joint
+            else corpus[section]
+        ).to_numpy()
         if example_indications:
             corpus_indications = corpus.indication.fillna("").to_numpy()
         corpus_ids = corpus.index.to_numpy()

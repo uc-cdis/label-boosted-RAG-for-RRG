@@ -4,7 +4,7 @@ Reads the scores artifacts of two or more conditions scored on the same studies;
 ``comparisons/<out>/comparison.csv``: per score column, each condition's mean and each
 pair's difference (a − b, in the order given), with a percentile interval from a paired
 bootstrap over studies (docs/revision-plan.md §3). Also ``generations/empty_report``
-and 1/RadCliQ-v1 = 1 / mean(RadCliQ-v1).
+(and ``generations/unparsed`` for Findings+Impression) and 1/RadCliQ-v1 = 1 / mean(RadCliQ-v1).
 
 A condition is one generations artifact, or a pool ``NAME=run1,run2,...`` (e.g.
 classifier seeds × sampling seeds): each study's scores averaged over the pool's runs,
@@ -79,9 +79,10 @@ def run(
             score_dir = paths.SHARED_ROOT / "scores" / g / metric
             inputs[f"{g}/{metric}"] = artifacts.artifact_record(score_dir)
             records[g] = _read_jsonl(score_dir / "scores.jsonl.gz")
-        if not tables:  # every scores artifact has it; taken once, from the first
-            empty = ["empty_report"]
-            tables += pooled(align(records, empty), pools, empty, "generations")
+        if not tables:  # per-study flags, the same in every metric: from the first
+            first = records[runs[0]][0]
+            flags = [c for c in evaluate.FLAGS if c in first]
+            tables += pooled(align(records, flags), pools, flags, "generations")
         columns = evaluate.METRICS[metric]["scores"]
         tables += pooled(align(records, columns), pools, columns, metric)
 

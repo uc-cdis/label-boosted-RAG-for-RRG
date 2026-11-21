@@ -53,7 +53,7 @@ show their positives as usual).
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``). A version with {indication}
 shows the target's indication (the adapter's ``indication``; also in the record), any
-condition; the examples show none.
+condition; if its example template has {indication} too, each example shows its own.
 """
 
 import gzip
@@ -160,6 +160,7 @@ def run(
     categories = prompts.uses_categories(version)
     absent = prompts.uses_absent(version)
     indication = prompts.uses_indication(version)
+    example_indications = prompts.uses_example_indications(version)
     if (prompts.uses_labels(version), prompts.uses_examples(version)) != (
         with_labels,
         with_examples,
@@ -242,8 +243,9 @@ def run(
             "report_text": "whitespace runs collapsed to one space",
         }
     if indication:
+        shown_for = "target and examples" if example_indications else "target only"
         config["indication"] = (
-            f"target only: the adapter's indication, {prompts.NO_INDICATION!r} if none"
+            f"{shown_for}: the adapter's indication, {prompts.NO_INDICATION!r} if none"
         )
     if with_image:
         image_root = cxr_root / adapter.IMAGE_ROOT
@@ -427,6 +429,8 @@ def run(
             return [radgraph_sides.sided(n, side.get((study_id, n))) for n in shown]
 
         reports = corpus[section].to_numpy()
+        if example_indications:
+            corpus_indications = corpus.indication.fillna("").to_numpy()
         corpus_ids = corpus.index.to_numpy()
         records = []
         for i, (study_id, row) in enumerate(target.iterrows()):
@@ -461,8 +465,19 @@ def run(
                 if absent
                 else None
             )
+            shown_indications = (
+                [corpus_indications[j] for j in idx] if example_indications else None
+            )
             records.append(
-                record(study_id, row, examples, labels_i, retrieved, absent_i)
+                record(
+                    study_id,
+                    row,
+                    examples,
+                    labels_i,
+                    retrieved,
+                    absent_i,
+                    shown_indications,
+                )
             )
         summary = write(out, records)
         summary["n_corpus"] = len(corpus)
@@ -476,7 +491,13 @@ def run(
         return summary
 
     def record(
-        study_id, row, examples=(), labels_i=None, retrieved=None, absent_i=None
+        study_id,
+        row,
+        examples=(),
+        labels_i=None,
+        retrieved=None,
+        absent_i=None,
+        example_indications_i=None,
     ) -> dict:
         indication_i = None
         if indication:
@@ -485,7 +506,13 @@ def run(
             "study_id": study_id,
             "set": row.role,
             "messages": prompts.render(
-                version, list(examples), labels_i, section, absent_i, indication_i
+                version,
+                list(examples),
+                labels_i,
+                section,
+                absent_i,
+                indication_i,
+                example_indications_i,
             ),
         }
         if with_image:

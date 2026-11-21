@@ -56,6 +56,35 @@ def test_render_indication_for_the_target_only():
         prompts.render(plain, [("a", [])], [], "findings", indication="x")
 
 
+def test_render_example_indications():
+    version = prompts.load("section-simple-absent-indication-examples-image")
+    assert prompts.uses_indication(version)
+    assert prompts.uses_example_indications(version)
+    [message] = prompts.render(
+        version,
+        [("r1", ["Edema"]), ("r2", [])],
+        ["Edema"],
+        "findings",
+        ["Pneumothorax"],
+        indication="Fall.",
+        example_indications=["Cough.\n", ""],
+    )
+    text = message["content"][0]["text"]
+    assert (
+        "Example: 1\nIndication: Cough.\nLabel: Edema\nr1\n\n"
+        "Example: 2\nIndication: Not provided\nLabel: Other\nr2\n\n"
+        "CURRENT CASE:\nIndication: Fall.\n" in text
+    )
+    with pytest.raises(AssertionError):
+        prompts.render(version, [("r1", [])], [], "findings", [], indication="Fall.")
+    target_only = prompts.load("section-simple-absent-indication-image")
+    assert not prompts.uses_example_indications(target_only)
+    with pytest.raises(AssertionError):
+        prompts.render(
+            target_only, [("r1", [])], [], "findings", [], "Fall.", ["Cough."]
+        )
+
+
 def test_every_version_loads():
     for name in prompts.yaml.safe_load(prompts.PROMPTS_YAML.read_text()):
         prompts.load(name)

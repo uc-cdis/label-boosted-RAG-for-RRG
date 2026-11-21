@@ -41,6 +41,11 @@ def load(name: str) -> dict:
     assert fields & {"examples", "image"}, f"{name}: no examples and no image"
     expected = {"user", "example"} if "examples" in fields else {"user"}
     assert set(version) - {"label_categories"} == expected, f"{name}: {sorted(version)}"
+    if "example" in version:
+        parsed = string.Formatter().parse(version["example"])
+        example_fields = {f for _, f, _, _ in parsed if f}
+        assert example_fields <= {"index", "report", "labels", "indication"}, name
+        assert "indication" not in example_fields or "indication" in fields, name
     shown = version.get("label_categories", [])
     assert set(shown) <= set(CATEGORIES.values()) and len(set(shown)) == len(
         shown
@@ -70,8 +75,14 @@ def uses_absent(version: dict) -> bool:
 
 
 def uses_indication(version: dict) -> bool:
-    """{indication}: the target's reason for the exam (the examples show none)."""
+    """{indication}: the target's reason for the exam."""
     return "{indication}" in version["user"]
+
+
+def uses_example_indications(version: dict) -> bool:
+    """{indication} in the example template: each example shows its own indication
+    (only with the target's)."""
+    return "{indication}" in version.get("example", "")
 
 
 def uses_categories(version: dict) -> bool:
@@ -120,6 +131,11 @@ def with_probability(name: str, p: float) -> str:
     return f"{name} ({min(99, max(1, round(100 * p)))}%)"
 
 
+def indication_text(text: str) -> str:
+    """An indication as shown: whitespace runs collapsed, NO_INDICATION if empty."""
+    return clean_report(text) or NO_INDICATION
+
+
 def label_text(names: list[str] | dict[str, list[str]]) -> str:
     """Positive names joined; or, given categories, one line per category."""
     if isinstance(names, dict):
@@ -134,6 +150,7 @@ def render(
     section: str | None = None,
     absent: list[str] | None = None,
     indication: str | None = None,
+    example_indications: list[str] | None = None,
 ) -> list[dict]:
     """Chat messages for one target.
 
@@ -144,7 +161,8 @@ def render(
     {section}. ``absent``: the target's label names predicted absent, for a version
     with {absent} ("None" if empty). ``indication``: the target's indication text, for a
     version with {indication} ("" if the study has none: NO_INDICATION; whitespace runs
-    collapsed like report text). With {image}, the content is a list of parts: text,
+    collapsed like report text). ``example_indications``: the same per example, for a
+    version whose example template has {indication}. With {image}, the content is a list of parts: text,
     IMAGE_PART, text.
     """
     with_labels = uses_labels(version)
@@ -154,11 +172,20 @@ def render(
     assert uses_indication(version) == (
         indication is not None
     ), "indication given iff it uses it"
+    assert uses_example_indications(version) == (
+        example_indications is not None
+    ), "example indications given iff the examples show them"
+    assert example_indications is None or len(example_indications) == len(examples)
     blocks = [
         version["example"].format(
             index=i,
             report=clean_report(report),
             **({"labels": label_text(names)} if with_labels else {}),
+            **(
+                {"indication": indication_text(example_indications[i - 1])}
+                if example_indications is not None
+                else {}
+            ),
         )
         for i, (report, names) in enumerate(examples, start=1)
     ]
@@ -172,7 +199,7 @@ def render(
     if absent is not None:
         fields["absent"] = ", ".join(absent) or "None"
     if indication is not None:
-        fields["indication"] = clean_report(indication) or NO_INDICATION
+        fields["indication"] = indication_text(indication)
     text = version["user"].format(**fields).strip()
     if not uses_image(version):
         return [{"role": "user", "content": text}]

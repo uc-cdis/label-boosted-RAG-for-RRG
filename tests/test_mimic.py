@@ -33,18 +33,31 @@ REPORT = """                                 FINAL REPORT
 
 def test_last_section_of_each_name():
     out = mimic.section(REPORT, "1")
-    assert out == {"findings": "Last findings.", "impression": "First impression."}
+    assert out == {
+        "findings": "Last findings.",
+        "impression": "First impression.",
+        "indication": None,
+    }
 
 
 def test_missing_section_is_none():
     out = mimic.section(" EXAMINATION:  CHEST\n\n IMPRESSION:  Only this.\n", "1")
-    assert out == {"findings": None, "impression": "Only this."}
+    assert out == {"findings": None, "impression": "Only this.", "indication": None}
+
+
+def test_indication_joins_history_then_indication():
+    report = (
+        " INDICATION:  Eval for PNA.\n\n HISTORY:  Cough.\n\n"
+        " REASON FOR EXAM:  Fever.\n\n FINDINGS:  Clear.\n"
+    )
+    assert mimic.section(report, "1")["indication"] == "Cough. Fever."
 
 
 def test_custom_rule_reports_have_no_sections():
     names, indices = mimic._parser().custom_mimic_cxr_rules()
     for stem in (next(iter(names)), next(iter(indices))):
-        assert mimic.section(REPORT, stem[1:]) == {"findings": None, "impression": None}
+        out = mimic.section(REPORT, stem[1:])
+        assert out == {"findings": None, "impression": None, "indication": None}
 
 
 def test_view_preference_and_laterals():

@@ -2,7 +2,9 @@
 free-text reports (one file per study), and the JPGs. Sections come from the authors'
 own parser (MIT-LCP mimic-cxr, external/mimic-cxr/txt/section_parser.py), applied as
 its create_section_files.py builds mimic_cxr_sectioned.csv: the last section of each
-name. Thresholds are set on the official validate split."""
+name. The indication is the last "history" then the last "indication" section (the
+parser's names for INDICATION, HISTORY, REASON FOR EXAM, ...). Thresholds are set on the
+official validate split."""
 
 import importlib.util
 from pathlib import Path
@@ -18,6 +20,7 @@ REPORTS_DIR = "mimic-cxr/notes"  # notes/p10/p10000032/s50414267.txt
 SOURCE_FILES = (METADATA_CSV, SPLIT_CSV, REPORTS_DIR)  # the reports dir as a tree
 IMAGE_ROOT = "mimic-cxr/files"  # image_path is relative to this
 SECTIONS = ("findings", "impression")
+INDICATION = ("history", "indication")  # both in 0.04% of reports: joined in this order
 
 PARSER = paths.REPO_ROOT / "external" / "mimic-cxr" / "txt" / "section_parser.py"
 
@@ -44,20 +47,27 @@ def report_path(subject_id: str, study_id: str) -> str:
 
 
 def section(text: str, study_id: str, parser=None) -> dict[str, str | None]:
-    """Findings and impression of one report, as upstream's mimic_cxr_sectioned.csv
-    has them: the last section of that name, stripped. Upstream writes no sectioned row
-    for the 54 reports its custom rules cover (it only extracts their conclusion), so
-    those have neither section here either."""
+    """Findings, impression and indication of one report. Findings and impression as
+    upstream's mimic_cxr_sectioned.csv has them: the last section of that name,
+    stripped. Upstream writes no sectioned row for the 54 reports its custom rules
+    cover (it only extracts their conclusion), so those have none of the three here."""
     sp = parser or _parser()
     names, indices = sp.custom_mimic_cxr_rules()
-    out = dict.fromkeys(SECTIONS)
+    out = dict.fromkeys((*SECTIONS, "indication"))
     if f"s{study_id}" in names or f"s{study_id}" in indices:
         return out
     sections, section_names, _ = sp.section_text(text)
+
+    def last(name: str) -> str | None:
+        if name not in section_names:
+            return None
+        i = len(section_names) - 1 - section_names[::-1].index(name)
+        return sections[i].strip() or None
+
     for name in SECTIONS:
-        if name in section_names:
-            i = len(section_names) - 1 - section_names[::-1].index(name)
-            out[name] = sections[i].strip() or None
+        out[name] = last(name)
+    parts = [p for p in map(last, INDICATION) if p]
+    out["indication"] = " ".join(parts) or None
     return out
 
 
@@ -89,7 +99,7 @@ def load_images(cxr_root: Path) -> pd.DataFrame:
 
 def load_studies(cxr_root: Path) -> pd.DataFrame:
     """One row per study with a frontal image (see canonical_studies), with its
-    findings and impression (NaN where the report has none)."""
+    findings, impression and indication (NaN where the report has none)."""
     studies = canonical_studies(load_images(cxr_root))
     sp = _parser()
     reports = cxr_root / REPORTS_DIR
@@ -97,7 +107,7 @@ def load_studies(cxr_root: Path) -> pd.DataFrame:
         section((reports / report_path(p, s)).read_text(), s, sp)
         for p, s in zip(studies.subject_id, studies.study_id)
     ]
-    for name in SECTIONS:
+    for name in (*SECTIONS, "indication"):
         studies[name] = [r[name] for r in rows]
     return studies
 

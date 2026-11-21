@@ -51,7 +51,9 @@ shows the labels under those categories, for the target (predicted) and the exam
 show their positives as usual).
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
-path relative to the CXR root in the record's ``image``).
+path relative to the CXR root in the record's ``image``). A version with {indication}
+shows the target's indication (the adapter's ``indication``; also in the record), any
+condition; the examples show none.
 """
 
 import gzip
@@ -157,6 +159,7 @@ def run(
     transfer = predictions is not None
     categories = prompts.uses_categories(version)
     absent = prompts.uses_absent(version)
+    indication = prompts.uses_indication(version)
     if (prompts.uses_labels(version), prompts.uses_examples(version)) != (
         with_labels,
         with_examples,
@@ -238,6 +241,10 @@ def run(
             "similarity": "cosine",
             "report_text": "whitespace runs collapsed to one space",
         }
+    if indication:
+        config["indication"] = (
+            f"target only: the adapter's indication, {prompts.NO_INDICATION!r} if none"
+        )
     if with_image:
         image_root = cxr_root / adapter.IMAGE_ROOT
         inputs["images"] = {"root": str(image_root)}  # too many to hash
@@ -332,6 +339,8 @@ def run(
             transferred = transferred.set_index("study_id")
             names = list(transferred.columns)
         studies = adapter.load_studies(cxr_root).set_index("study_id")
+        if indication and "indication" not in studies:
+            raise SystemExit(f"build-prompts: no indication in {dataset}'s adapter")
         studies["role"] = adapter.classifier_roles(studies, paths.SPLITS_DIR)
         studies = studies.loc[labels.index]  # the studies with this section
         target = studies[studies.role.isin(exp["targets"])]
@@ -469,16 +478,21 @@ def run(
     def record(
         study_id, row, examples=(), labels_i=None, retrieved=None, absent_i=None
     ) -> dict:
+        indication_i = None
+        if indication:
+            indication_i = "" if pd.isna(row.indication) else row.indication
         r = {
             "study_id": study_id,
             "set": row.role,
             "messages": prompts.render(
-                version, list(examples), labels_i, section, absent_i
+                version, list(examples), labels_i, section, absent_i, indication_i
             ),
         }
         if with_image:
             r["image"] = f"{adapter.IMAGE_ROOT}/{row.image_path}"
         shown = {"labels": labels_i} | ({"absent": absent_i} if absent else {})
+        if indication:
+            shown["indication"] = indication_i or None
         return r | (retrieved or {}) | shown | {"reference": row[section]}
 
     def write(out: Path, records: list[dict]) -> dict:

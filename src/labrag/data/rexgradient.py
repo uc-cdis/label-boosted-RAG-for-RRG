@@ -1,6 +1,6 @@
 """ReXGradient-160K adapter: the per-split metadata JSONs with the authors' view
-positions (one record per study: patient, Findings, Impression, and per-image paths and
-views) and the released PNGs. Official patient-disjoint train/valid/test split;
+positions (one record per study: patient, Indication, Findings, Impression, and
+per-image paths and views) and the released PNGs. Official patient-disjoint train/valid/test split;
 thresholds are set on valid."""
 
 import json
@@ -28,7 +28,7 @@ SPLIT_FILES = ()  # official splits only
 
 def load_images(cxr_root: Path) -> pd.DataFrame:
     """One row per image: subject_id, study_id, image_path, split, view, findings,
-    impression. ``image_path`` is relative to ``cxr_root / IMAGE_ROOT`` (the JSONs give
+    impression, indication. ``image_path`` is relative to ``cxr_root / IMAGE_ROOT`` (the JSONs give
     it relative to metadata/)."""
     rows = []
     for split, source in zip(SPLITS, SOURCE_FILES):
@@ -47,6 +47,7 @@ def load_images(cxr_root: Path) -> pd.DataFrame:
                         view,
                         r["Findings"],
                         r["Impression"],
+                        r["Indication"],
                     )
                 )
     df = pd.DataFrame(
@@ -59,6 +60,7 @@ def load_images(cxr_root: Path) -> pd.DataFrame:
             "view",
             "findings",
             "impression",
+            "indication",
         ],
     )
     assert (df.groupby("subject_id").split.nunique() == 1).all(), "patient in 2 splits"
@@ -73,14 +75,16 @@ def load_studies(cxr_root: Path) -> pd.DataFrame:
 
 def canonical_studies(images: pd.DataFrame) -> pd.DataFrame:
     """One row per study with a labelled frontal image: the preferred one (VIEW_RANK,
-    then path). Text is stripped; blank is NaN."""
+    then path). Text is stripped; blank is NaN, and so is an indication of "None" (the
+    release writes missing metadata as that string)."""
     images = images[images.view.isin(FRONTAL_VIEWS)]
     rank = images.view.map(VIEW_RANK)
     order = np.lexsort((images.image_path.to_numpy(), rank.to_numpy()))
     studies = images.iloc[order].drop_duplicates("study_id").sort_values("study_id")
-    for section in SECTIONS:
-        text = studies[section].fillna("").astype(str).str.strip()
-        studies[section] = text.where(text.ne(""))
+    for column in (*SECTIONS, "indication"):
+        text = studies[column].fillna("").astype(str).str.strip()
+        blank = text.eq("") | (text.eq("None") if column == "indication" else False)
+        studies[column] = text.where(~blank)
     return studies.reset_index(drop=True)
 
 

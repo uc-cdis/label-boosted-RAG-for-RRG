@@ -34,6 +34,28 @@ def test_render_naive_has_no_labels():
         prompts.render(version, [("a", [])], ["Edema"])
 
 
+def test_render_indication_for_the_target_only():
+    version = prompts.load("section-simple-negatives-indication-image")
+    assert prompts.uses_indication(version)
+    [message] = prompts.render(
+        version,
+        [("a", ["Edema"])],
+        ["Edema"],
+        "findings",
+        indication=" Fall,\n rib pain ",
+    )
+    first, _, _ = message["content"]
+    assert first["text"].endswith("CURRENT CASE:\nIndication: Fall, rib pain\n")
+    assert "Indication" not in first["text"].split("CONTEXT:")[1].split("CURRENT")[0]
+    [message] = prompts.render(version, [("a", [])], [], "findings", indication="")
+    assert message["content"][0]["text"].endswith("Indication: Not provided\n")
+    with pytest.raises(AssertionError):
+        prompts.render(version, [("a", [])], [], "findings")
+    plain = prompts.load("section-simple-negatives-image")
+    with pytest.raises(AssertionError):
+        prompts.render(plain, [("a", [])], [], "findings", indication="x")
+
+
 def test_every_version_loads():
     for name in prompts.yaml.safe_load(prompts.PROMPTS_YAML.read_text()):
         prompts.load(name)

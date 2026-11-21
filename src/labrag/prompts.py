@@ -8,6 +8,7 @@ from labrag import paths
 
 PROMPTS_YAML = paths.CONFIGS_DIR / "prompts.yaml"
 NO_POSITIVE = "Other"  # the preprint's implicit label for "no positive label"
+NO_INDICATION = "Not provided"
 # Where {image} was: generate swaps in the study's image (the record's "image" path).
 IMAGE_PART = {"type": "image"}
 _IMAGE_MARK = "\x00image\x00"  # never in report text
@@ -33,6 +34,7 @@ def load(name: str) -> dict:
         "examples",
         "labels",
         "absent",
+        "indication",
         "image",
         "section",
     }, f"{name}: {fields}"
@@ -65,6 +67,11 @@ def uses_absent(version: dict) -> bool:
     """{absent}: the target's labels predicted absent (the multiclass negative class),
     next to its positives; the examples show positives only."""
     return "{absent}" in version["user"]
+
+
+def uses_indication(version: dict) -> bool:
+    """{indication}: the target's reason for the exam (the examples show none)."""
+    return "{indication}" in version["user"]
 
 
 def uses_categories(version: dict) -> bool:
@@ -126,6 +133,7 @@ def render(
     labels: list[str] | None,
     section: str | None = None,
     absent: list[str] | None = None,
+    indication: str | None = None,
 ) -> list[dict]:
     """Chat messages for one target.
 
@@ -134,13 +142,18 @@ def render(
     Either can instead be categories (a ``categories`` dict).
     ``section``: the section generated (a SECTION_NAMES key), for a version with
     {section}. ``absent``: the target's label names predicted absent, for a version
-    with {absent} ("None" if empty). With {image}, the content is a list of parts:
-    text, IMAGE_PART, text.
+    with {absent} ("None" if empty). ``indication``: the target's indication text, for a
+    version with {indication} ("" if the study has none: NO_INDICATION; whitespace runs
+    collapsed like report text). With {image}, the content is a list of parts: text,
+    IMAGE_PART, text.
     """
     with_labels = uses_labels(version)
     assert with_labels == (labels is not None), "labels given iff the version uses them"
     assert uses_examples(version) == bool(examples), "examples given iff it shows them"
     assert uses_absent(version) == (absent is not None), "absent given iff it uses it"
+    assert uses_indication(version) == (
+        indication is not None
+    ), "indication given iff it uses it"
     blocks = [
         version["example"].format(
             index=i,
@@ -158,6 +171,8 @@ def render(
         fields["labels"] = label_text(labels)
     if absent is not None:
         fields["absent"] = ", ".join(absent) or "None"
+    if indication is not None:
+        fields["indication"] = clean_report(indication) or NO_INDICATION
     text = version["user"].format(**fields).strip()
     if not uses_image(version):
         return [{"role": "user", "content": text}]

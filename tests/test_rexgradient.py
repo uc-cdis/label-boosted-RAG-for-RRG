@@ -17,6 +17,7 @@ def _images(rows):
     df["subject_id"] = "p" + df.study_id
     df["split"] = "train"
     df["impression"] = "imp"
+    df["indication"] = "Cough"
     return df
 
 
@@ -42,6 +43,13 @@ def test_blank_text_is_nan():
     studies = rexgradient.canonical_studies(_images([("1", "a.png", "PA", "  ")]))
     assert pd.isna(studies.findings.iloc[0])
     assert studies.impression.iloc[0] == "imp"
+
+
+def test_indication_none_string_is_nan():
+    images = _images([("1", "a.png", "PA", "f1"), ("2", "a.png", "PA", "f2")])
+    images.loc[images.study_id == "1", "indication"] = " None "
+    studies = rexgradient.canonical_studies(images).set_index("study_id")
+    assert pd.isna(studies.indication["1"]) and studies.indication["2"] == "Cough"
 
 
 @needs_data

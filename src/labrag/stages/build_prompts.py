@@ -48,7 +48,7 @@ version with ``label_categories`` (e.g. [Positive, Negative, Uncertain, Unmentio
 shows the labels under those categories, for the target (predicted) and the examples
 (their reference values); any other version shows the positives only. A version with
 {absent} also lists the target's labels predicted negative (multiclass only; examples
-show their positives as usual).
+show their positives as usual); for labrag-oracle, its reference negated labels.
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``). A version with {indication}
@@ -209,10 +209,10 @@ def run(
             f"build-prompts: prompt {prompt!r} shows label categories: it needs "
             "multiclass --predictions (chexbert14.mc)"
         )
-    if absent and not multiclass:
+    if absent and not (multiclass or oracle):
         raise SystemExit(
             f"build-prompts: prompt {prompt!r} lists absent labels: it needs "
-            "multiclass --predictions (chexbert14.mc)"
+            "multiclass --predictions (chexbert14.mc) or labrag-oracle"
         )
     emb_dir = paths.SHARED_ROOT / "embeddings" / dataset / ENCODER
     lab_dir = paths.SHARED_ROOT / "labels" / dataset / section / LABELER
@@ -308,7 +308,14 @@ def run(
                 else {}
             ),
             **(
-                {"absent": "target: labels predicted negative; examples: none"}
+                {
+                    "absent": (
+                        "target: reference labels negated"
+                        if oracle
+                        else "target: labels predicted negative"
+                    )
+                    + "; examples: none"
+                }
                 if absent
                 else {}
             ),
@@ -389,6 +396,8 @@ def run(
                 target_y = transferred.loc[target.index].to_numpy(dtype=int)
             elif oracle:
                 target_y = reference(target)
+                if absent:
+                    target_codes = labels.loc[target.index, names].to_numpy()
             else:
                 pred = artifacts.read_table(clf_dir / f"predictions.{section}.csv")
                 pred = pred.set_index("study_id")

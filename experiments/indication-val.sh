@@ -6,7 +6,9 @@
 # indication (*-indication-image) and with every example's indication as well
 # (*-indication-examples-image). Retrieval, labels and examples are the same as without
 # it; only the prompt differs. Compared pooled over both sampling seeds with
-# negatives-val's cells, plain retrieval-only, positives only and the oracle.
+# negatives-val's cells, plain retrieval-only, positives only and the oracle, which
+# also gets the negatives instruction and, as the ceiling for absent lists, its
+# reference negated labels listed as absent (no indication in either).
 # Qwen3.5-27B with the image (518 px). Labels, embeds, the fine-tune, predicts and every
 # cell negatives-val built are skipped.
 set -euo pipefail
@@ -48,7 +50,6 @@ for dataset in mimic rexgradient; do
   ids+=" $dataset: embed $emb predict $prm"
   RO=$F/retrieval-only
   MCL=$F/labrag.$POOL.ft-attn-seed1.$SEC.chexbert14.mc
-  OR=$F/labrag-oracle.chexbert14/$P
   dep=""
   # cell <after> <prompt dir> <build-prompts args>: prompts, then generate + evaluate
   # per sampling seed
@@ -74,7 +75,10 @@ for dataset in mimic rexgradient; do
     section-simple-absent-indication-image section-simple-absent-indication-examples-image; do
     cell $lf:$prm:$emb $MCL/$p --condition labrag --predictions $MC --prompt $p
   done
-  cell $lf:$emb $OR --condition labrag-oracle --prompt $P
+  ORD=$F/labrag-oracle.chexbert14
+  for p in $P section-simple-negatives-image section-simple-absent-image; do
+    cell $lf:$emb $ORD/$p --condition labrag-oracle --prompt $p
+  done
   cells="$(pool retrieval-only $RO/section-naive-image)"
   cells+="$(pool retrieval-only.negatives $RO/section-naive-negatives-image)"
   cells+="$(pool retrieval-only.negatives.indication $RO/section-naive-negatives-indication-image)"
@@ -86,7 +90,9 @@ for dataset in mimic rexgradient; do
   cells+="$(pool mc.positives.absent $MCL/section-simple-absent-image)"
   cells+="$(pool mc.positives.absent.indication $MCL/section-simple-absent-indication-image)"
   cells+="$(pool mc.positives.absent.indication-examples $MCL/section-simple-absent-indication-examples-image)"
-  cells+="$(pool oracle $OR)"
+  cells+="$(pool oracle $ORD/$P)"
+  cells+="$(pool oracle.negatives $ORD/section-simple-negatives-image)"
+  cells+="$(pool oracle.absent $ORD/section-simple-absent-image)"
   cmp=$(s -d afterok$dep -- labrag compare --generations $cells --out $F/qwen3.5-27b.indication/$SET)
   ids+=" compare $cmp"
 done

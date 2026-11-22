@@ -9,7 +9,7 @@ import argparse
 
 from labrag import artifacts, data, serving
 from labrag.classifiers import quant
-from labrag.data import DATASETS, GROUPS
+from labrag.data import DATASETS
 from labrag.stages import (
     build_prompts,
     classify,
@@ -21,6 +21,7 @@ from labrag.stages import (
     labels,
     predict,
     sides,
+    styles,
     threshold,
 )
 
@@ -80,6 +81,10 @@ def add_labels(sub) -> None:
 
 def add_sides(sub) -> None:
     stage(sub, sides, "--dataset", "--section")
+
+
+def add_styles(sub) -> None:
+    stage(sub, styles, "--dataset", "--section")
 
 
 def add_embed(sub) -> None:
@@ -235,9 +240,10 @@ def add_build_prompts(sub) -> None:
     )
     p.add_argument(
         "--same",
-        choices=GROUPS,
+        choices=build_prompts.SAME,
         help="examples only from studies with the target's reader (the radiologist on "
-        "the report) or site (the institution); datasets that give it",
+        "the report) or site (the institution), datasets that give it, or report-style "
+        "cluster (a styles artifact; a style oracle)",
     )
     p.add_argument(
         "--predictions",
@@ -325,6 +331,7 @@ COMMANDS = (
     add_splits,
     add_labels,
     add_sides,
+    add_styles,
     add_embed,
     add_classify,
     add_finetune,

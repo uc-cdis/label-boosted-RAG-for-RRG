@@ -57,10 +57,11 @@ Predicted target labels combine the predict artifact's findings and impression r
 the way the labels stage combines the reference labels (labels.combine), so predicted,
 example and oracle labels share one definition.
 
-``--same reader|site`` (any condition with examples; a dataset that gives that group):
-examples only from corpus studies with the target's reader (the radiologist on the
-report) or site (the institution), ranking otherwise unchanged; directory suffix
-``.same-reader`` / ``.same-site``.
+``--same reader|site|style`` (any condition with examples): examples only from corpus
+studies with the target's reader (the radiologist on the report) or site (the
+institution), for a dataset that gives that group, or report-style cluster (the
+``styles`` artifact; the target's comes from its own reference report, so this is a
+style oracle), ranking otherwise unchanged; directory suffix ``.same-<group>``.
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``). A version with {indication}
@@ -89,6 +90,7 @@ from labrag.data import (
     has_group,
 )
 from labrag.labelers import radgraph_sides
+from labrag.stages import styles as styles_stage
 from labrag.stages import threshold
 from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, MULTICLASS_SUFFIX, POSITIVE
 from labrag.stages.labels import COMBINE_RULE, combine
@@ -123,6 +125,8 @@ DEFAULT_PROMPT = {
     "labrag-oracle": "preprint-simple",
 } | {c: "preprint-simple" for c in DIAGNOSTICS}
 K = 5
+STYLE = "style"  # report-style clusters (the styles stage), not an adapter group
+SAME = (*GROUPS, STYLE)
 JOINT_PROMPTS = "joint-"  # prompt versions for JOINT, and only those
 ENCODER = "raddino"
 LABELER = "chexbert14"
@@ -191,13 +195,13 @@ def run(
         raise SystemExit("build-prompts: --sides is for labrag-oracle")
     if confidence and condition != "labrag":
         raise SystemExit("build-prompts: --confidence is for labrag")
-    if same is not None and same not in GROUPS:
-        raise SystemExit(f"build-prompts: --same is one of {GROUPS}")
+    if same is not None and same not in SAME:
+        raise SystemExit(f"build-prompts: --same is one of {SAME}")
     if same and not with_examples:
         raise SystemExit(
             f"build-prompts: --same {same} is for conditions with examples"
         )
-    if same and not has_group(dataset, same):
+    if same in GROUPS and not has_group(dataset, same):
         raise SystemExit(f"build-prompts: {dataset} has no {same}s")
     transfer = predictions is not None
     categories = prompts.uses_categories(version)
@@ -305,7 +309,14 @@ def run(
         image_root = cxr_root / adapter.IMAGE_ROOT
         inputs["images"] = {"root": str(image_root)}  # too many to hash
         config["image"] = "preferred per study (the embedded one)"
-    if same:
+    if same == STYLE:
+        styles_dir = paths.SHARED_ROOT / styles_stage.relpath(dataset, section)
+        inputs["styles"] = artifacts.artifact_record(styles_dir)
+        config["same_style"] = (
+            "examples only from studies in the target's report-style cluster (the "
+            "target's from its own reference report: a style oracle)"
+        )
+    elif same:
         inputs[f"{same}s"] = [
             artifacts.file_record(cxr_root / f) for f in group_files(dataset, same)
         ]
@@ -448,8 +459,12 @@ def run(
 
         sim = retrieval.cosine(embeddings(target), embeddings(corpus))
         exclude = target.subject_id.to_numpy()[:, None] == corpus.subject_id.to_numpy()
-        if same:
+        if same == STYLE:
+            table = artifacts.read_table(styles_dir / "styles.csv")
+            group = table.set_index("study_id")["style"]
+        elif same:
             group = groups(dataset, same, cxr_root)
+        if same:
             t, c = group.reindex(target.index), group.reindex(corpus.index)
             assert t.notna().all(), f"a target study has no {same}"
             exclude |= t.to_numpy()[:, None] != c.to_numpy()[None, :]

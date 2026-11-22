@@ -11,7 +11,10 @@ every dataset's ``train`` role together; the epoch is picked on their ``val`` ro
 each dataset counting equally (classifiers/finetune.py). Thresholds for use come from
 the target dataset's own val in ``predict``; the pooled-val max-F1 thresholds stored
 here are the fallback for a target without labels. Classifiers: ``attn`` (the head on
-CLS + patch tokens) and ``attn-cls`` (CLS only, the control).
+CLS + patch tokens), ``attn-cls`` (CLS only, the control) and ``attn-reader`` (attn
+conditioned on the report's reader: a learned vector per radiologist with at least
+MIN_READER_STUDIES train studies, the rest and datasets without readers sharing an
+"unknown" one; model.pt's ``readers`` lists them, "unknown" first).
 
 Only report-labelled datasets (CheXbert-14 on report text): every dataset's labels
 are then the same labeler on the same section.
@@ -31,10 +34,12 @@ import torch
 
 from labrag import artifacts, paths, weights
 from labrag.classifiers import attention, finetune, logistic
-from labrag.data import DATASETS, JOIN, labels_only, split_sections
+from labrag.data import DATASETS, JOIN, labels_only, readers, split_sections
 from labrag.stages import classify
 
-CLASSIFIERS = ("attn", "attn-cls")
+CLASSIFIERS = ("attn", "attn-cls", "attn-reader")
+UNKNOWN_READER = "unknown"
+MIN_READER_STUDIES = 200  # covers 99.5% of MIMIC test studies
 ENCODER = "raddino"
 MAX_WORKERS = 128  # decoding + augmentation is the bottleneck; split over the GPUs
 
@@ -76,6 +81,10 @@ def run(
         raise SystemExit(f"finetune: --classifier {list(CLASSIFIERS)}")
     seed = 0 if seed is None else seed
     cxr_root = cxr_root or paths.CXR_ROOT
+    with_readers = classifier == "attn-reader"
+    reader_sets = [d for d in datasets if hasattr(DATASETS[d], "load_readers")]
+    if with_readers and not reader_sets:
+        raise SystemExit("finetune: attn-reader needs a dataset with readers")
     model_dir, weights_record = weights.resolve(embed_weights())
     lab_dirs = {
         (d, s): paths.SHARED_ROOT / "labels" / d / s / labeler
@@ -100,6 +109,11 @@ def run(
         "images": {d: str(cxr_root / DATASETS[d].IMAGE_ROOT) for d in datasets},
         "weights": weights_record,
     }
+    if with_readers:
+        inputs["readers"] = {
+            d: [artifacts.file_record(cxr_root / f) for f in DATASETS[d].READER_FILES]
+            for d in reader_sets
+        }
     config = {
         "stage": "finetune",
         "datasets": datasets,
@@ -118,6 +132,14 @@ def run(
     }
     if classifier == "attn-cls":
         config["input"] = "CLS token only"
+    if with_readers:
+        config["reader"] = {
+            "source": "the radiologist on the report (adapter load_readers)",
+            "vocabulary": f"readers with >= {MIN_READER_STUDIES} train studies; the "
+            f"rest and datasets without readers: {UNKNOWN_READER!r}",
+            "conditioning": "a learned vector per reader added to every label's pooled "
+            "feature, zero at init",
+        }
     classes = 1
     suffix = classify.LABELER_SUFFIX[uncertain]
     if multiclass:
@@ -161,7 +183,7 @@ def run(
             rows.append((d, studies, labels))
 
         n = len(names)
-        ids, group, role, image_paths, blocks = [], [], [], [], []
+        ids, group, role, image_paths, reader = [], [], [], [], []
         Y_parts, mask_parts = [], []
         for d, studies, labels in rows:
             root = cxr_root / DATASETS[d].IMAGE_ROOT
@@ -169,6 +191,13 @@ def run(
             group += [d] * len(studies)
             role += list(studies.role)
             image_paths += [root / p for p in studies.image_path]
+            if with_readers:
+                r = readers(d, cxr_root)
+                reader += (
+                    [None] * len(studies)
+                    if r is None
+                    else list(r.reindex(studies.index))
+                )
             Y = np.zeros((len(studies), n * len(sections)), dtype=int)
             mask = np.zeros(Y.shape, dtype=bool)
             for i, s in enumerate(sections):
@@ -185,6 +214,9 @@ def run(
         Y, mask = np.concatenate(Y_parts), np.concatenate(mask_parts)
         group, role = np.array(group), np.array(role)
         train, val = role == "train", role == "val"
+        vocab, condition = None, None
+        if with_readers:
+            vocab, condition = reader_index(np.array(reader, dtype=object), train)
 
         world = max(1, torch.cuda.device_count())
         cpus = len(os.sched_getaffinity(0))
@@ -204,6 +236,8 @@ def run(
             world=world,
             workers=workers,
             classes=classes,
+            condition=condition,
+            conditions=0 if vocab is None else len(vocab),
         )
 
         Yv, mv, gv = Y[val], mask[val], group[val]
@@ -258,6 +292,7 @@ def run(
                 "state_dict": state,
                 "threshold": None if multiclass else np.stack(threshold),
                 "classes": list(finetune.MULTICLASS) if multiclass else None,
+                **({"readers": vocab} if with_readers else {}),
             },
             out / "model.pt",
         )
@@ -277,6 +312,7 @@ def run(
                 for k, v in best.items()
                 if k.startswith("val_auroc.")
             },
+            **({"n_readers": len(vocab) - 1} if with_readers else {}),
             "gpus": world,
             "workers_per_gpu": workers,
             "device": (
@@ -285,6 +321,16 @@ def run(
         }
 
     return artifacts.publish(relpath, config, inputs, build, overwrite)
+
+
+def reader_index(reader: np.ndarray, train: np.ndarray) -> tuple[list[str], np.ndarray]:
+    """The reader vocabulary (UNKNOWN_READER first, then each reader with at least
+    MIN_READER_STUDIES ``train`` rows, sorted) and each row's index in it (None or a
+    rarer reader: 0)."""
+    known = pd.Series(reader[train]).dropna().value_counts()
+    vocab = [UNKNOWN_READER, *sorted(known.index[known >= MIN_READER_STUDIES])]
+    at = {r: i for i, r in enumerate(vocab) if i}
+    return vocab, np.array([at.get(r, 0) for r in reader], dtype=np.int64)
 
 
 def embed_weights() -> str:

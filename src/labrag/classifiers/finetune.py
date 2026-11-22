@@ -19,6 +19,9 @@ The epoch (of either phase) with the best ``select_metric`` on val is kept.
 (MULTICLASS: CheXbert's positive, negative, uncertain, blank), softmax cross-entropy
 over the classes instead of BCE; the epoch is still picked on the positive class's
 AUROC (one vs rest).
+
+``condition`` (per row, an index < ``conditions``): the head's vector for it, e.g. the
+report's reader (attention.Head).
 """
 
 import copy
@@ -82,9 +85,11 @@ class Model(nn.Module):
         self.backbone, self.head, self.cls_only = backbone, head, cls_only
         self.classes = classes
 
-    def forward(self, pixels: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, pixels: torch.Tensor, condition: torch.Tensor | None = None
+    ) -> torch.Tensor:
         hidden = self.backbone(pixel_values=pixels).last_hidden_state
-        return self.head(hidden[:, :1] if self.cls_only else hidden)
+        return self.head(hidden[:, :1] if self.cls_only else hidden, condition)
 
 
 def build(
@@ -93,11 +98,18 @@ def build(
     readouts: int,
     cls_only: bool,
     classes: int = 1,
+    conditions: int = 0,
 ) -> Model:
     h = PARAMS["head"]
     dim = backbone.config.hidden_size
     head = attention.Head(
-        n_labels, dim, h["heads"], h["ffn"], h["dropout"], readouts * classes
+        n_labels,
+        dim,
+        h["heads"],
+        h["ffn"],
+        h["dropout"],
+        readouts * classes,
+        conditions,
     )
     return Model(backbone, head, cls_only, classes)
 
@@ -247,6 +259,8 @@ def train(
     processor=None,
     params: dict | None = None,
     classes: int = 1,
+    condition: np.ndarray | None = None,
+    conditions: int = 0,
 ) -> tuple[dict, np.ndarray, list[dict]]:
     """Fine-tune on ``train_rows``, keep the epoch with the best ``select_metric`` on
     ``val_rows`` (boolean masks over the rows of paths, Y and mask; ``group`` = each
@@ -254,6 +268,7 @@ def train(
     process on CPU). Returns the kept state dict (CPU), its val probabilities (the
     val_rows in order; multiclass: every class, as predict_proba) and one history row
     per epoch. Multiclass (``classes`` > 1): Y holds MULTICLASS indices.
+    ``condition``: each row's index into the head's ``conditions`` vectors.
     ``backbone``/``processor`` replace RAD-DINO's and ``params`` overrides PARAMS
     entries (tests)."""
     world = world or max(1, torch.cuda.device_count())
@@ -261,7 +276,7 @@ def train(
     os.environ["MASTER_PORT"] = str(_free_port())
     args = (world, model_dir, list(paths), Y, mask, train_rows, val_rows, group)
     args += (readouts, seed, workdir, cls_only, workers, backbone, processor)
-    args += ({**PARAMS, **(params or {})}, classes)
+    args += ({**PARAMS, **(params or {})}, classes, condition, conditions)
     if world == 1:
         _worker(0, *args)
     else:
@@ -296,6 +311,8 @@ def _worker(
     processor,
     params,
     classes,
+    condition,
+    conditions,
 ):
     defaults = dict(PARAMS)
     PARAMS.update(params)  # spawned workers start from the module's PARAMS
@@ -325,6 +342,8 @@ def _worker(
             backbone,
             processor,
             classes,
+            condition,
+            conditions,
         )
         dist.barrier()
     finally:
@@ -352,6 +371,8 @@ def _fit(
     backbone,
     processor,
     classes,
+    condition,
+    conditions,
 ):
     cuda = device.type == "cuda"
     torch.manual_seed(seed)  # the head's init, the same on every rank
@@ -361,7 +382,9 @@ def _fit(
     )
     processor = processor if processor is not None else load_processor(model_dir)
     n_labels = Y.shape[1] // readouts
-    model = build(backbone, n_labels, readouts, cls_only, classes).to(device)
+    model = build(backbone, n_labels, readouts, cls_only, classes, conditions)
+    model = model.to(device)
+    cond = None if condition is None else torch.as_tensor(condition, dtype=torch.long)
     if classes == 1:
         targets = torch.as_tensor(Y, dtype=torch.float32)
         Y_auroc = Y
@@ -379,6 +402,7 @@ def _fit(
     data = Images([paths[i] for i in train_idx], processor, seed)
     shards = np.array_split(val_idx, world)
     val_data = Images([paths[i] for i in shards[rank]], processor)
+    val_cond = None if cond is None else cond[shards[rank]]
     autocast = torch.autocast(device.type, dtype=torch.bfloat16)
 
     history, best, best_state, best_P, epoch = [], -np.inf, None, None, 0
@@ -418,8 +442,9 @@ def _fit(
                 y, w = targets[rows].to(device), weights[rows].to(device)
                 denom = w.sum()
                 dist.all_reduce(denom)  # labelled entries of the global batch
+                c = None if cond is None else cond[rows].to(device)
                 with autocast:
-                    logits = ddp(pixels.to(device))
+                    logits = ddp(pixels.to(device), c)
                 if classes == 1:
                     each = nn.functional.binary_cross_entropy_with_logits(
                         logits.float(), y, reduction="none"
@@ -439,7 +464,8 @@ def _fit(
                 opt.step()
                 loss_sum += loss.detach().double() / world
             dist.all_reduce(loss_sum)
-            P = _gather(predict_proba(model, val_data, device, workers), shards, device)
+            P = predict_proba(model, val_data, device, workers, val_cond)
+            P = _gather(P, shards, device)
             row = {
                 "epoch": epoch,
                 "phase": phase,
@@ -489,18 +515,30 @@ def _gather(P: np.ndarray, shards: list, device) -> np.ndarray | None:
 
 @torch.no_grad()
 def predict_proba(
-    model: Model, images: Images, device: torch.device, workers: int = 0
+    model: Model,
+    images: Images,
+    device: torch.device,
+    workers: int = 0,
+    condition: torch.Tensor | np.ndarray | None = None,
 ) -> np.ndarray:
     """Probabilities (len(images), readouts * labels), float64, in order, under the
     training's bfloat16 autocast. Multiclass: (len(images), readouts * classes *
-    labels), section-major then class, softmax over the classes."""
+    labels), section-major then class, softmax over the classes. ``condition``: each
+    image's index into the head's vectors."""
     model.eval()
     loader = DataLoader(images, batch_size=PREDICT_BATCH, num_workers=workers)
     out = [np.zeros((0, model.head.bias.shape[0]))]
     c = model.classes
+    if condition is not None:
+        condition = torch.as_tensor(condition, dtype=torch.long)
+    start = 0
     for pixels in loader:
+        cond = None
+        if condition is not None:
+            cond = condition[start : start + len(pixels)].to(device)
+        start += len(pixels)
         with torch.autocast(device.type, dtype=torch.bfloat16):
-            logits = model(pixels.to(device)).float()
+            logits = model(pixels.to(device), cond).float()
         if c == 1:
             p = torch.sigmoid(logits)
         else:

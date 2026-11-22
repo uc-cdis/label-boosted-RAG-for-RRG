@@ -15,6 +15,10 @@ classifier was trained on.
 A multiclass fine-tune (``chexbert14.mc``): predictions.<s>.csv holds the most
 probable CheXbert value per label (1, 0, -1, blank; labels.csv's coding), and
 probs.<s>.<class>.csv each class's probability; no thresholds.
+
+A reader-conditioned fine-tune (``attn-reader``) reads each study's reader: its vector
+if in the classifier's vocabulary, else the "unknown" one (every study of a dataset
+without readers).
 """
 
 import os
@@ -26,7 +30,7 @@ import torch
 
 from labrag import artifacts, paths, weights
 from labrag.classifiers import attention, quant
-from labrag.data import DATASETS
+from labrag.data import DATASETS, readers
 from labrag.stages import classify
 
 
@@ -174,6 +178,19 @@ def _finetuned(
     if multiclass:
         config["threshold"] = clf_config["threshold"]
         config["classes"] = clf_config["classes"]
+    with_readers = clf_config["classifier"] == "attn-reader"
+    if with_readers:
+        has_readers = hasattr(adapter, "load_readers")
+        if has_readers:
+            inputs["readers"] = [
+                artifacts.file_record(cxr_root / f) for f in adapter.READER_FILES
+            ]
+        config["reader"] = (
+            "the study's reader: its vector if in the classifier's vocabulary, else "
+            "unknown"
+            if has_readers
+            else "unknown for every study (no readers in this dataset)"
+        )
 
     def build(out: Path) -> dict:
         studies = adapter.load_studies(cxr_root)
@@ -186,12 +203,20 @@ def _finetuned(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         backbone = finetune.load_backbone(model_dir)
         classes = len(saved["classes"]) if multiclass else 1
+        condition = None
+        if with_readers:
+            vocab = saved["readers"]
+            at = {r: i for i, r in enumerate(vocab) if i}
+            r = readers(dataset, cxr_root)
+            r = [None] * len(ids) if r is None else list(r.reindex(ids))
+            condition = np.array([at.get(x, 0) for x in r], dtype=np.int64)
         model = finetune.build(
             backbone,
             len(names),
             len(sections),
             clf_config["classifier"] == "attn-cls",
             classes,
+            len(saved["readers"]) if with_readers else 0,
         )
         model.load_state_dict(saved["state_dict"])
         model.to(device)
@@ -202,7 +227,7 @@ def _finetuned(
         workers = min(
             finetune_stage.MAX_WORKERS, max(0, len(os.sched_getaffinity(0)) - 1)
         )
-        P_full = finetune.predict_proba(model, images, device, workers)
+        P_full = finetune.predict_proba(model, images, device, workers, condition)
         P = finetune.positive_probs(P_full, len(sections), classes)
         n, summary, metrics = len(names), {}, []
         val = role == "val"
@@ -271,6 +296,8 @@ def _finetuned(
             pd.concat(metrics, ignore_index=True).to_csv(
                 out / "metrics.csv", index=False
             )
+        if with_readers:
+            summary["known_reader_studies"] = int((condition > 0).sum())
         return {"n_studies": len(ids), **summary, "device": str(device)}
 
     relpath = f"predictions/{dataset}/{classifier}"

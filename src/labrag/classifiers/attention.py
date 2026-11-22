@@ -9,7 +9,8 @@ AUROC.
 
 ``readouts`` > 1 gives each label several logits (one per report section) from the same
 query: the sections share where to look, and only the last linear layer learns what
-each section reports. Logits are readout-major; a mask leaves out each study's
+each section reports. ``conditions`` > 0 adds a learned vector per condition (e.g. the
+report's reader) to every label's pooled feature. Logits are readout-major; a mask leaves out each study's
 sections without labels, in the loss and in the val AUROC. Deterministic for a given seed and device: deterministic torch algorithms, the
 attention written out (no fused kernels), a seeded generator for the batch order.
 """
@@ -49,6 +50,7 @@ class Head(nn.Module):
         ffn: int,
         dropout: float,
         readouts: int = 1,
+        conditions: int = 0,
     ):
         super().__init__()
         assert dim % heads == 0
@@ -62,6 +64,8 @@ class Head(nn.Module):
         self.drop = nn.Dropout(dropout)
         self.weight = nn.Parameter(torch.zeros(readouts * n_labels, dim))
         self.bias = nn.Parameter(torch.zeros(readouts * n_labels))
+        if conditions:  # zero at init: starts as the unconditioned head
+            self.condition = nn.Parameter(torch.zeros(conditions, dim))
 
     def attention(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Pooled features (B, labels, dim) and weights (B, heads, labels, tokens)."""
@@ -74,10 +78,16 @@ class Head(nn.Module):
         pooled = torch.einsum("bhlt,bthe->blhe", self.drop(weights), v).flatten(-2)
         return self.o(pooled), weights
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Logits (B, readouts * labels) for tokens x (B, tokens, dim)."""
+    def forward(
+        self, x: torch.Tensor, condition: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Logits (B, readouts * labels) for tokens x (B, tokens, dim); ``condition``
+        (B,) indexes a learned vector added to every label's pooled feature."""
         pooled, _ = self.attention(x)
-        z = self.norm1(self.query + self.drop(pooled))
+        z = self.query + self.drop(pooled)
+        if condition is not None:
+            z = z + self.condition[condition][:, None]
+        z = self.norm1(z)
         z = self.norm2(z + self.drop(self.ffn(z)))
         if self.readouts == 1:  # the single-readout heads' exact arithmetic
             return (z * self.weight).sum(-1) + self.bias

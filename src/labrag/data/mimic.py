@@ -18,6 +18,8 @@ METADATA_CSV = "mimic-cxr/mimic-cxr-2.0.0-metadata.csv.gz"
 SPLIT_CSV = "mimic-cxr/mimic-cxr-2.0.0-split.csv.gz"
 REPORTS_DIR = "mimic-cxr/notes"  # notes/p10/p10000032/s50414267.txt
 SOURCE_FILES = (METADATA_CSV, SPLIT_CSV, REPORTS_DIR)  # the reports dir as a tree
+PROVIDERS_CSV = "mimic-cxr/mimic-cxr-2.1.0-metadata/cxr-provider-list.csv.gz"
+READER_FILES = (PROVIDERS_CSV,)
 IMAGE_ROOT = "mimic-cxr/files"  # image_path is relative to this
 SECTIONS = ("findings", "impression")
 INDICATION = ("history", "indication")  # both in 0.04% of reports: joined in this order
@@ -110,6 +112,13 @@ def load_studies(cxr_root: Path) -> pd.DataFrame:
     for name in (*SECTIONS, "indication"):
         studies[name] = [r[name] for r in rows]
     return studies
+
+
+def load_readers(cxr_root: Path) -> pd.Series:
+    """Each study's reader by study_id: the attending radiologist on its report
+    (MIMIC-CXR 2.1.0 provider list; every study has one)."""
+    providers = pd.read_csv(cxr_root / PROVIDERS_CSV, dtype=str)
+    return providers.set_index("study_id").attending_provider_id
 
 
 def canonical_studies(images: pd.DataFrame) -> pd.DataFrame:

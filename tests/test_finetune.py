@@ -152,6 +152,27 @@ def test_training_is_deterministic(tmp_path, world):
     assert finetune.PARAMS["ft_epochs"] == 10  # the override doesn't leak
 
 
+@pytest.mark.parametrize("world", [1, 2])
+def test_reader_training_is_deterministic(tmp_path, world):
+    paths_ = images(tmp_path / "img", 40)
+    Y = np.random.default_rng(1).integers(0, 4, (40, 6))
+    mask = np.ones(Y.shape, dtype=bool)
+    train, group = np.arange(40) < 24, np.array(["a", "b"] * 20)
+    condition = np.arange(40) % 3
+    runs = []
+    for _ in range(2):
+        state, P, _ = finetune.train(
+            None, paths_, Y, mask, train, ~train, group, 2, 7, tmp_path,
+            world=world, backbone=tiny_backbone(), processor=tiny_processor(),
+            params=TINY, classes=4, condition=condition, conditions=3,
+        )  # fmt: skip
+        runs.append((state, P))
+    (s1, p1), (s2, p2) = runs
+    assert all(torch.equal(s1[k], s2[k]) for k in s1)
+    assert np.array_equal(p1, p2)
+    assert s1["head.condition"].abs().sum() > 0  # the reader vectors trained
+
+
 def fake_dataset(cxr_root, name, n, seed):
     """An adapter over n fake studies: 60% train, 40% val; Findings for all,
     Impression for every other study."""
@@ -301,3 +322,61 @@ def test_multiclass_finetune_then_predict(tmp_path, monkeypatch):
     assert np.allclose(total, 1)
     config = artifacts.read_manifest(out)["config"]
     assert config["threshold"] == "none: the most probable class"
+
+
+def test_reader_index_keeps_frequent_train_readers():
+    reader = np.array(["r1", "r1", "r2", None, "r1", "r3", "r2"], dtype=object)
+    train = np.array([True, True, True, True, False, True, False])
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(finetune_stage, "MIN_READER_STUDIES", 2)
+        vocab, index = finetune_stage.reader_index(reader, train)
+    assert vocab == ["unknown", "r1"]  # r2 has 1 train study, r3 1
+    assert index.tolist() == [1, 1, 0, 0, 1, 0, 0]
+
+
+def test_reader_vectors_start_at_zero():
+    torch.manual_seed(0)
+    plain = finetune.attention.Head(3, 32, 2, 64, 0.0, 2)
+    torch.manual_seed(0)
+    cond = finetune.attention.Head(3, 32, 2, 64, 0.0, 2, conditions=4)
+    x = torch.randn(5, 7, 32)
+    assert torch.equal(plain(x), cond(x, torch.tensor([0, 1, 2, 3, 1])))
+
+
+def test_reader_finetune_then_predict(tmp_path, monkeypatch):
+    cxr_root = tmp_path / "cxr"
+    monkeypatch.setattr(paths, "SHARED_ROOT", tmp_path / "shared")
+    adapters = {}
+    for name, n, seed in (("fakea", 30, 0), ("fakeb", 20, 1)):
+        adapters[name] = fake_dataset(cxr_root, name, n, seed)
+        monkeypatch.setitem(data.DATASETS, name, adapters[name])
+    # fakea has readers: r0 on 12 of its 18 train studies, r1 on the rest
+    ids = [f"fakea_{i}" for i in range(30)]
+    reader = pd.Series(["r0" if i % 3 else "r1" for i in range(30)], index=ids)
+    adapters["fakea"].load_readers = lambda root: reader
+    adapters["fakea"].READER_FILES = ()
+    monkeypatch.setattr(finetune_stage, "MIN_READER_STUDIES", 10)
+    monkeypatch.setattr(weights, "resolve", lambda name: (tmp_path, {"fake": name}))
+    monkeypatch.setattr(finetune, "load_backbone", lambda d: tiny_backbone())
+    monkeypatch.setattr(finetune, "load_processor", lambda d: tiny_processor())
+    for k, v in TINY.items():
+        monkeypatch.setitem(finetune.PARAMS, k, v)
+
+    clf = finetune_stage.run(
+        "fakea-fakeb",
+        "findings-impression",
+        classifier="attn-reader",
+        seed=3,
+        multiclass=True,
+        cxr_root=cxr_root,
+    )
+    rel = "fakea-fakeb/raddino.ft-attn-reader-seed3/findings-impression/chexbert14.mc"
+    assert clf == paths.SHARED_ROOT / "classifiers" / rel
+    saved = torch.load(clf / "model.pt", weights_only=False)
+    assert saved["readers"] == ["unknown", "r0"]
+    assert saved["state_dict"]["head.condition"].shape == (2, 32)
+    assert artifacts.read_manifest(clf)["n_readers"] == 1
+
+    for name, known in (("fakea", 20), ("fakeb", 0)):
+        out = predict.run(name, rel, cxr_root=cxr_root)
+        assert artifacts.read_manifest(out)["known_reader_studies"] == known

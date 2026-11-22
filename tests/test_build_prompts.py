@@ -217,3 +217,12 @@ def test_joint_needs_both_readouts():
             predictions="chexpertplus-mimic-rexgradient/raddino.ft-attn-seed1/"
             "findings/chexbert14.mc",
         )  # fmt: skip
+
+
+def test_same_reader_needs_examples_and_readers():
+    with pytest.raises(SystemExit, match="--same-reader is for conditions with"):
+        build_prompts.run("val", "mimic", "findings", "no-context", same_reader=True)
+    with pytest.raises(SystemExit, match="rexgradient has no readers"):
+        build_prompts.run(
+            "val", "rexgradient", "findings", "retrieval-only", same_reader=True
+        )

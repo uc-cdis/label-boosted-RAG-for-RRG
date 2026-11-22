@@ -15,7 +15,9 @@ Each adapter module provides:
   whole report);
 - ``LABELS_ONLY`` (optional, default False): its labels come from the release, not
   from a labeler run on report text;
-- ``FRONTAL_VIEWS``: the ``view`` values of a frontal image.
+- ``FRONTAL_VIEWS``: the ``view`` values of a frontal image;
+- ``load_readers(cxr_root)`` and ``READER_FILES`` (optional): each study's reader, the
+  radiologist on its report, by study_id, and the release files that give it.
 """
 
 import pandas as pd
@@ -45,6 +47,14 @@ SECTIONS = (
 def labels_only(dataset: str) -> bool:
     """True for a dataset whose labels come from the release (PadChest)."""
     return getattr(DATASETS[dataset], "LABELS_ONLY", False)
+
+
+def readers(dataset: str, cxr_root) -> pd.Series | None:
+    """Each study's reader by study_id (str), or None for a dataset without them."""
+    adapter = DATASETS[dataset]
+    if not hasattr(adapter, "load_readers"):
+        return None
+    return adapter.load_readers(cxr_root)
 
 
 def has_joint(dataset: str) -> bool:

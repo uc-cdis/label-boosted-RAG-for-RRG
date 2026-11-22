@@ -22,6 +22,11 @@ AUROC (one vs rest).
 
 ``condition`` (per row, an index < ``conditions``): the head's vector for it, e.g. the
 report's reader (attention.Head).
+
+Several images per row (``paths`` items that are sequences of paths, StudyImages): the
+backbone encodes each image alone and the head attends over all of a study's tokens
+(padding masked out). The backbone then recomputes its activations in the backward
+pass (gradient checkpointing): a batch holds a variable number of images.
 """
 
 import copy
@@ -72,7 +77,9 @@ RESULT = ".finetune-result.pt"
 
 class Model(nn.Module):
     """Backbone tokens (CLS + patches, or CLS only) into the attention head; with
-    ``classes`` > 1 the head's readouts are section-major, then class."""
+    ``classes`` > 1 the head's readouts are section-major, then class. With ``counts``
+    (images per study, the pixels' rows in study order) the head reads each study's
+    tokens from all its images."""
 
     def __init__(
         self,
@@ -86,10 +93,30 @@ class Model(nn.Module):
         self.classes = classes
 
     def forward(
-        self, pixels: torch.Tensor, condition: torch.Tensor | None = None
+        self,
+        pixels: torch.Tensor,
+        condition: torch.Tensor | None = None,
+        counts: list[int] | None = None,
     ) -> torch.Tensor:
         hidden = self.backbone(pixel_values=pixels).last_hidden_state
-        return self.head(hidden[:, :1] if self.cls_only else hidden, condition)
+        if self.cls_only:
+            hidden = hidden[:, :1]
+        if counts is None:
+            return self.head(hidden, condition)
+        tokens, mask = by_study(hidden, counts)
+        return self.head(tokens, condition, mask)
+
+
+def by_study(
+    hidden: torch.Tensor, counts: list[int]
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Images' tokens (images, T, D), consecutive per study, as (studies, max tokens,
+    D) zero-padded, and the mask of the real tokens."""
+    per = [h.flatten(0, 1) for h in hidden.split(counts)]
+    tokens = nn.utils.rnn.pad_sequence(per, batch_first=True)
+    length = torch.tensor([len(p) for p in per], device=hidden.device)
+    mask = torch.arange(tokens.shape[1], device=hidden.device) < length[:, None]
+    return tokens, mask
 
 
 def build(
@@ -183,6 +210,56 @@ class Images(Dataset):
         if self.seed is not None:
             image = augment(image, np.random.default_rng([self.seed, self.epoch, i]))
         return self.processor(image, return_tensors="pt")["pixel_values"][0]
+
+
+class StudyImages(Images):
+    """Item i: study i's images' pixel values (images, 3, SIZE, SIZE), each augmented
+    when ``seed`` is set (drawn from (seed, epoch, i, image))."""
+
+    def __getitem__(self, i: int) -> torch.Tensor:
+        out = []
+        for k, path in enumerate(self.paths[i]):
+            image = load_8bit(path)
+            if self.seed is not None:
+                rng = np.random.default_rng([self.seed, self.epoch, i, k])
+                image = augment(image, rng)
+            out.append(self.processor(image, return_tensors="pt")["pixel_values"][0])
+        return torch.stack(out)
+
+
+def collate_studies(items: list[torch.Tensor]) -> tuple[torch.Tensor, list[int]]:
+    """StudyImages items as one stack of images and each study's count."""
+    return torch.cat(items), [len(x) for x in items]
+
+
+def multi_image(paths: Sequence) -> bool:
+    """True if each row has a sequence of paths (StudyImages), not one path."""
+    return len(paths) > 0 and not isinstance(paths[0], (str, os.PathLike))
+
+
+def image_data(paths: Sequence, processor, seed: int | None = None) -> Images:
+    """Images, or StudyImages for rows of several paths."""
+    return (StudyImages if multi_image(paths) else Images)(paths, processor, seed)
+
+
+def loader(
+    images: Images, batch_size: int, workers: int, rows=None, pin_memory=False
+) -> DataLoader:
+    """Batches of pixels (of ``rows``, if given, in order), or (pixels, counts) for
+    StudyImages."""
+    collate = collate_studies if isinstance(images, StudyImages) else None
+    return DataLoader(
+        images if rows is None else Subset(images, rows),
+        batch_size=batch_size,
+        num_workers=workers,
+        pin_memory=pin_memory,
+        collate_fn=collate,
+    )
+
+
+def unpack(batch) -> tuple[torch.Tensor, list[int] | None]:
+    """A loader batch as (pixels, counts or None)."""
+    return batch if isinstance(batch, tuple) else (batch, None)
 
 
 def param_groups(model: Model) -> list[dict]:
@@ -384,6 +461,10 @@ def _fit(
     n_labels = Y.shape[1] // readouts
     model = build(backbone, n_labels, readouts, cls_only, classes, conditions)
     model = model.to(device)
+    if multi_image(paths):  # a batch's image count varies; bound its activations
+        backbone.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
     cond = None if condition is None else torch.as_tensor(condition, dtype=torch.long)
     if classes == 1:
         targets = torch.as_tensor(Y, dtype=torch.float32)
@@ -399,9 +480,9 @@ def _fit(
     assert per_rank * world == batch, "batch_size must divide by the number of GPUs"
     steps = len(train_idx) // batch  # the last partial batch is dropped
     assert steps > 0, "fewer train rows than one batch"
-    data = Images([paths[i] for i in train_idx], processor, seed)
+    data = image_data([paths[i] for i in train_idx], processor, seed)
     shards = np.array_split(val_idx, world)
-    val_data = Images([paths[i] for i in shards[rank]], processor)
+    val_data = image_data([paths[i] for i in shards[rank]], processor)
     val_cond = None if cond is None else cond[shards[rank]]
     autocast = torch.autocast(device.type, dtype=torch.bfloat16)
 
@@ -430,21 +511,17 @@ def _fit(
             order = torch.Generator().manual_seed(seed * 1000 + epoch)
             perm = torch.randperm(len(train_idx), generator=order)[: steps * batch]
             mine = perm.view(steps, world, per_rank)[:, rank].reshape(-1).numpy()
-            loader = DataLoader(
-                Subset(data, mine.tolist()),
-                batch_size=per_rank,
-                num_workers=workers,
-                pin_memory=cuda,
-            )
+            batches = loader(data, per_rank, workers, mine.tolist(), cuda)
             loss_sum = torch.zeros((), dtype=torch.float64, device=device)
-            for b, pixels in enumerate(loader):
+            for b, items in enumerate(batches):
+                pixels, counts = unpack(items)
                 rows = train_idx[mine[b * per_rank : (b + 1) * per_rank]]
                 y, w = targets[rows].to(device), weights[rows].to(device)
                 denom = w.sum()
                 dist.all_reduce(denom)  # labelled entries of the global batch
                 c = None if cond is None else cond[rows].to(device)
                 with autocast:
-                    logits = ddp(pixels.to(device), c)
+                    logits = ddp(pixels.to(device), c, counts)
                 if classes == 1:
                     each = nn.functional.binary_cross_entropy_with_logits(
                         logits.float(), y, reduction="none"
@@ -521,24 +598,25 @@ def predict_proba(
     workers: int = 0,
     condition: torch.Tensor | np.ndarray | None = None,
 ) -> np.ndarray:
-    """Probabilities (len(images), readouts * labels), float64, in order, under the
-    training's bfloat16 autocast. Multiclass: (len(images), readouts * classes *
+    """Probabilities (len(images), readouts * labels), float64, in order (one row per
+    item: an image, or a study of StudyImages), under the training's bfloat16 autocast. Multiclass: (len(images), readouts * classes *
     labels), section-major then class, softmax over the classes. ``condition``: each
     image's index into the head's vectors."""
     model.eval()
-    loader = DataLoader(images, batch_size=PREDICT_BATCH, num_workers=workers)
     out = [np.zeros((0, model.head.bias.shape[0]))]
     c = model.classes
     if condition is not None:
         condition = torch.as_tensor(condition, dtype=torch.long)
     start = 0
-    for pixels in loader:
+    for items in loader(images, PREDICT_BATCH, workers):
+        pixels, counts = unpack(items)
+        n = len(pixels) if counts is None else len(counts)
         cond = None
         if condition is not None:
-            cond = condition[start : start + len(pixels)].to(device)
-        start += len(pixels)
+            cond = condition[start : start + n].to(device)
+        start += n
         with torch.autocast(device.type, dtype=torch.bfloat16):
-            logits = model(pixels.to(device), cond).float()
+            logits = model(pixels.to(device), cond, counts).float()
         if c == 1:
             p = torch.sigmoid(logits)
         else:

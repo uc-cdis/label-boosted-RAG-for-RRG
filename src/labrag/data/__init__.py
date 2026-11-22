@@ -3,7 +3,9 @@
 Each adapter module provides:
 - ``load_studies(cxr_root)``: one row per study with a frontal image (study_id,
   subject_id, split, view, image_path, and one column per report section, or
-  ``labels`` for a labels-only dataset); lateral images are never used;
+  ``labels`` for a labels-only dataset);
+- ``load_images(cxr_root)``: one row per image (study_id, view, image_path, ...), the
+  rows load_studies picks from;
 - ``SOURCE_FILES``: the author release files (or directories of them) it reads,
   relative to cxr_root;
 - ``IMAGE_ROOT``: the directory ``image_path`` is relative to, under cxr_root;
@@ -15,7 +17,9 @@ Each adapter module provides:
   whole report);
 - ``LABELS_ONLY`` (optional, default False): its labels come from the release, not
   from a labeler run on report text;
-- ``FRONTAL_VIEWS``: the ``view`` values of a frontal image;
+- ``FRONTAL_VIEWS``, ``VIEW_RANK``: the ``view`` values of a frontal image, and their
+  preference; ``LATERAL_VIEWS``: those of a lateral (only study_images uses laterals);
+- ``CORRUPT_IMAGES`` (optional): image_paths never used;
 - ``load_readers(cxr_root)`` and ``READER_FILES`` (optional): each study's reader, the
   radiologist on its report, by study_id, and the release files that give it;
 - ``load_sites(cxr_root)`` and ``SITE_FILES`` (optional): the same for each study's
@@ -75,6 +79,33 @@ def groups(dataset: str, group: str, cxr_root) -> pd.Series | None:
 def readers(dataset: str, cxr_root) -> pd.Series | None:
     """Each study's reader by study_id (str), or None for a dataset without them."""
     return groups(dataset, "reader", cxr_root)
+
+
+MAX_IMAGES = 4  # per study in study_images; 0.1% of the pooled studies have more
+
+
+def study_images(dataset: str, cxr_root, ids, preferred) -> list[list[str]]:
+    """Each study's images (image_paths), for studies ``ids`` with their
+    ``preferred`` frontal (load_studies' image_path): that one first, then the
+    study's other frontals by VIEW_RANK, then its laterals; ties by path; at most
+    MAX_IMAGES. Other views and CORRUPT_IMAGES are never used."""
+    adapter = DATASETS[dataset]
+    images = adapter.load_images(cxr_root)
+    corrupt = getattr(adapter, "CORRUPT_IMAGES", frozenset())
+    frontal = images.view.isin(adapter.FRONTAL_VIEWS)
+    lateral = images.view.isin(adapter.LATERAL_VIEWS)
+    first = dict(zip(ids, preferred))
+    rank = images.view.map(adapter.VIEW_RANK).where(
+        frontal, max(adapter.VIEW_RANK.values()) + 1
+    )
+    rank = rank.where(images.image_path.ne(images.study_id.map(first)), -1)
+    keep = (frontal | lateral) & images.study_id.isin(first)
+    images = images[keep & ~images.image_path.isin(corrupt)].assign(rank=rank)
+    images = images.sort_values(["study_id", "rank", "image_path"])
+    by = images.groupby("study_id").image_path.agg(list)
+    out = [by[i][:MAX_IMAGES] for i in ids]
+    assert all(o[0] == p for o, p in zip(out, preferred)), "preferred frontal missing"
+    return out
 
 
 def has_joint(dataset: str) -> bool:

@@ -62,9 +62,11 @@ CORRUPT_IMAGES = frozenset(
 )
 
 # Frontal views by preference (ties by image_path); a study with none drops out.
-# AP_horizontal is AP lying down. L, COSTAL (rib views), EXCLUDE and UNK are never used.
+# AP_horizontal is AP lying down. L is the lateral; COSTAL (rib views), EXCLUDE and UNK
+# are never used.
 VIEW_RANK = {"PA": 0, "AP": 1, "AP_horizontal": 2}
 FRONTAL_VIEWS = tuple(VIEW_RANK)
+LATERAL_VIEWS = ("L",)
 
 # PadChest-GR split of a patient, strictest first: a study whose images name several
 # patients (one in the release) takes the strictest of their splits.

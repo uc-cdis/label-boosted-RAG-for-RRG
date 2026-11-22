@@ -18,10 +18,11 @@ CORRUPT_IMAGES = frozenset({"PNG/train/patient32368/study1/view1_frontal.png"})
 # report text. ``view`` is ap_pa on frontals, else "Lateral". ap_pa is undocumented; its
 # 17 LL/RL images are labelled Frontal and mostly are (by eye), so they rank as "other
 # frontal". Every LL/RL study also has PA or AP, so the tier never decides here.
-# Lateral images are never used: a study without a frontal image drops out (37).
+# A study without a frontal image drops out (37).
 VIEW_RANK = {"PA": 0, "AP": 1, "LL": 2, "RL": 2}
 FRONTAL_VIEWS = tuple(VIEW_RANK)  # labelled Frontal in the release
 LATERAL = "Lateral"
+LATERAL_VIEWS = (LATERAL,)
 
 # Section-parser debris, not report text (stripped, case-insensitive; the only such
 # values in section_findings, 2026-11-09).

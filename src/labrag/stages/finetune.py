@@ -14,7 +14,9 @@ here are the fallback for a target without labels. Classifiers: ``attn`` (the he
 CLS + patch tokens), ``attn-cls`` (CLS only, the control) and ``attn-reader`` (attn
 conditioned on the report's reader: a learned vector per radiologist with at least
 MIN_READER_STUDIES train studies, the rest and datasets without readers sharing an
-"unknown" one; model.pt's ``readers`` lists them, "unknown" first).
+"unknown" one; model.pt's ``readers`` lists them, "unknown" first) and
+``attn-all-images`` (attn over the tokens of all the study's frontal and lateral
+images, data.study_images: the preferred frontal first; the studies are the same).
 
 Only report-labelled datasets (CheXbert-14 on report text): every dataset's labels
 are then the same labeler on the same section.
@@ -34,10 +36,26 @@ import torch
 
 from labrag import artifacts, paths, weights
 from labrag.classifiers import attention, finetune, logistic
-from labrag.data import DATASETS, JOIN, labels_only, readers, split_sections
+from labrag.data import (
+    DATASETS,
+    JOIN,
+    MAX_IMAGES,
+    labels_only,
+    readers,
+    split_sections,
+    study_images,
+)
 from labrag.stages import classify
 
-CLASSIFIERS = ("attn", "attn-cls", "attn-reader")
+CLASSIFIERS = ("attn", "attn-cls", "attn-reader", "attn-all-images")
+ALL_IMAGES = "attn-all-images"
+IMAGE = "preferred frontal per study, min-max to 8-bit grayscale"
+ALL_IMAGES_IMAGE = (
+    "every frontal and lateral image of the study, at most "
+    f"{MAX_IMAGES} (the preferred frontal, its other frontals, then its laterals), "
+    "each min-max to 8-bit grayscale and encoded alone; the head attends over all "
+    "their tokens"
+)
 UNKNOWN_READER = "unknown"
 MIN_READER_STUDIES = 200  # covers 99.5% of MIMIC test studies
 ENCODER = "raddino"
@@ -123,7 +141,7 @@ def run(
         "classifier": classifier,
         "params": finetune.PARAMS,
         "binarize": classify.BINARIZE[uncertain],
-        "image": "preferred frontal per study, min-max to 8-bit grayscale",
+        "image": ALL_IMAGES_IMAGE if classifier == ALL_IMAGES else IMAGE,
         "fit": "every dataset's train role; each section's loss on its labelled studies",
         "threshold": "max F1 per section on the pooled val (fallback; predict uses the "
         "target's own val)",
@@ -132,6 +150,8 @@ def run(
     }
     if classifier == "attn-cls":
         config["input"] = "CLS token only"
+    if classifier == ALL_IMAGES:
+        config["memory"] = "gradient checkpointing in the backbone"
     if with_readers:
         config["reader"] = {
             "source": "the radiologist on the report (adapter load_readers)",
@@ -190,7 +210,11 @@ def run(
             ids += list(studies.index)
             group += [d] * len(studies)
             role += list(studies.role)
-            image_paths += [root / p for p in studies.image_path]
+            if classifier == ALL_IMAGES:
+                each = study_images(d, cxr_root, studies.index, studies.image_path)
+                image_paths += [[root / p for p in ps] for ps in each]
+            else:
+                image_paths += [root / p for p in studies.image_path]
             if with_readers:
                 r = readers(d, cxr_root)
                 reader += (
@@ -297,8 +321,14 @@ def run(
             out / "model.pt",
         )
         best = max(history, key=lambda h: h["val_auroc"])
+        n_images = (
+            {"images_per_study": float(np.mean([len(p) for p in image_paths]))}
+            if classifier == ALL_IMAGES
+            else {}
+        )
         return {
             "n_studies": len(ids),
+            **n_images,
             "n_by_dataset_role": pd.Series(list(zip(group, role)))
             .map(lambda x: f"{x[0]}/{x[1]}")
             .value_counts()

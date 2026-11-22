@@ -30,6 +30,7 @@ PARSER = paths.REPO_ROOT / "external" / "mimic-cxr" / "txt" / "section_parser.py
 # with no ViewPosition (15,769) are never used, nor are the rare oblique/decubitus ones.
 VIEW_RANK = {"PA": 0, "AP": 1}
 FRONTAL_VIEWS = tuple(VIEW_RANK)
+LATERAL_VIEWS = ("LATERAL", "LL")
 
 SPLIT_FILES = ()  # official splits only
 ROLES = {"train": "train", "validate": "val", "test": "test"}

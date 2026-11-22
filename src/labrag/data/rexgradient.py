@@ -17,11 +17,12 @@ IMAGE_ROOT = "rexgradient"  # image_path is relative to this
 SECTIONS = ("findings", "impression")
 
 # Labelled frontal views by preference (ties by image_path); POSTERO_ANTERIOR is a PA
-# spelled out. Unlabelled views (UNKNOWN, N/A, None) are never used, nor are laterals,
-# obliques or non-chest views: 22.5% of studies, mostly LATERAL + UNKNOWN pairs, drop
-# out (test keeps 7,755 of 10,000).
+# spelled out. Unlabelled views (UNKNOWN, N/A, None) are never used, nor are obliques
+# or non-chest views; a study without a frontal drops out: 22.5% of studies, mostly
+# LATERAL + UNKNOWN pairs (test keeps 7,755 of 10,000).
 VIEW_RANK = {"PA": 0, "POSTERO_ANTERIOR": 0, "AP": 1}
 FRONTAL_VIEWS = tuple(VIEW_RANK)
+LATERAL_VIEWS = ("LATERAL", "LL", "LAT")
 
 SPLIT_FILES = ()  # official splits only
 SITE_FILES = SOURCE_FILES

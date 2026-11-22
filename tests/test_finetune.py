@@ -175,8 +175,9 @@ def test_reader_training_is_deterministic(tmp_path, world):
 
 def fake_dataset(cxr_root, name, n, seed):
     """An adapter over n fake studies: 60% train, 40% val; Findings for all,
-    Impression for every other study."""
+    Impression for every other study; a lateral for every third study."""
     paths_ = images(cxr_root / name, n, seed)
+    laterals = images(cxr_root / name / "lat", n, seed + 100)[::3]
     studies = pd.DataFrame(
         {
             "study_id": [f"{name}_{i}" for i in range(n)],
@@ -185,12 +186,23 @@ def fake_dataset(cxr_root, name, n, seed):
             "image_path": [p.name for p in paths_],
         }
     )
+    all_images = pd.DataFrame(
+        {
+            "study_id": [*studies.study_id, *studies.study_id[::3]],
+            "view": ["PA"] * n + ["LATERAL"] * len(laterals),
+            "image_path": [*studies.image_path, *(f"lat/{p.name}" for p in laterals)],
+        }
+    )
     adapter = types.SimpleNamespace(
         SOURCE_FILES=(),
         SPLIT_FILES=(),
         IMAGE_ROOT=name,
         SECTIONS=("findings", "impression"),
+        VIEW_RANK={"PA": 0},
+        FRONTAL_VIEWS=("PA",),
+        LATERAL_VIEWS=("LATERAL",),
         load_studies=lambda root: studies.copy(),
+        load_images=lambda root: all_images.copy(),
         classifier_roles=lambda s, splits_dir: s.split,
     )
     rng = np.random.default_rng(seed)
@@ -380,3 +392,90 @@ def test_reader_finetune_then_predict(tmp_path, monkeypatch):
     for name, known in (("fakea", 20), ("fakeb", 0)):
         out = predict.run(name, rel, cxr_root=cxr_root)
         assert artifacts.read_manifest(out)["known_reader_studies"] == known
+
+
+def test_study_images_preferred_frontal_then_frontals_then_laterals(monkeypatch):
+    rows = [
+        ("s1", "LATERAL", "a_lat.png"),
+        ("s1", "AP", "b_ap.png"),
+        ("s1", "UNKNOWN", "c_unknown.png"),
+        ("s1", "PA", "d_pa.png"),  # the preferred frontal
+        ("s1", "PA", "e_pa_corrupt.png"),
+        ("s1", "PA", "f_pa.png"),
+        ("s2", "AP", "s2_0.png"),
+        *(("s2", "LATERAL", f"s2_{i}.png") for i in range(1, 6)),
+    ]
+    frame = pd.DataFrame(rows, columns=["study_id", "view", "image_path"])
+    adapter = types.SimpleNamespace(
+        VIEW_RANK={"PA": 0, "AP": 1},
+        FRONTAL_VIEWS=("PA", "AP"),
+        LATERAL_VIEWS=("LATERAL",),
+        CORRUPT_IMAGES=frozenset({"e_pa_corrupt.png"}),
+        load_images=lambda root: frame,
+    )
+    monkeypatch.setitem(data.DATASETS, "fake", adapter)
+    got = data.study_images("fake", None, ["s2", "s1"], ["s2_0.png", "d_pa.png"])
+    assert got == [
+        ["s2_0.png", "s2_1.png", "s2_2.png", "s2_3.png"],  # at most MAX_IMAGES
+        ["d_pa.png", "f_pa.png", "b_ap.png", "a_lat.png"],
+    ]
+
+
+@pytest.mark.parametrize("world", [1, 2])
+def test_multi_image_training_is_deterministic(tmp_path, world):
+    paths_ = images(tmp_path / "img", 60)
+    rows = [paths_[i : i + 1 + i % 3] for i in range(40)]  # 1 to 3 images each
+    Y = np.random.default_rng(1).integers(0, 4, (40, 6))
+    mask = np.ones(Y.shape, dtype=bool)
+    train, group = np.arange(40) < 24, np.array(["a", "b"] * 20)
+    runs = []
+    for _ in range(2):
+        state, P, _ = finetune.train(
+            None, rows, Y, mask, train, ~train, group, 2, 7, tmp_path,
+            world=world, backbone=tiny_backbone(), processor=tiny_processor(),
+            params=TINY, classes=4,
+        )  # fmt: skip
+        runs.append((state, P))
+    (s1, p1), (s2, p2) = runs
+    assert all(torch.equal(s1[k], s2[k]) for k in s1)
+    assert np.array_equal(p1, p2) and p1.shape == (16, 2 * 4 * 3)
+
+
+def test_one_image_study_reads_as_the_single_image_model():
+    torch.manual_seed(0)
+    model = finetune.build(tiny_backbone(), 3, 2, False, classes=4).eval()
+    pixels = torch.randn(3, 3, 56, 56)
+    with torch.no_grad():
+        alone = model(pixels[:1])
+        studies = model(pixels, counts=[1, 2])
+    torch.testing.assert_close(studies[:1], alone)
+
+
+def test_all_images_finetune_then_predict(tmp_path, monkeypatch):
+    cxr_root = tmp_path / "cxr"
+    monkeypatch.setattr(paths, "SHARED_ROOT", tmp_path / "shared")
+    for name, n, seed in (("fakea", 30, 0), ("fakeb", 20, 1)):
+        monkeypatch.setitem(data.DATASETS, name, fake_dataset(cxr_root, name, n, seed))
+    monkeypatch.setattr(weights, "resolve", lambda name: (tmp_path, {"fake": name}))
+    monkeypatch.setattr(finetune, "load_backbone", lambda d: tiny_backbone())
+    monkeypatch.setattr(finetune, "load_processor", lambda d: tiny_processor())
+    for k, v in TINY.items():
+        monkeypatch.setitem(finetune.PARAMS, k, v)
+
+    clf = finetune_stage.run(
+        "fakea-fakeb",
+        "findings-impression",
+        classifier="attn-all-images",
+        seed=3,
+        multiclass=True,
+        cxr_root=cxr_root,
+    )
+    rel = (
+        "fakea-fakeb/raddino.ft-attn-all-images-seed3/findings-impression/chexbert14.mc"
+    )
+    assert clf == paths.SHARED_ROOT / "classifiers" / rel
+    manifest = artifacts.read_manifest(clf)
+    assert manifest["images_per_study"] == (30 + 10 + 20 + 7) / 50
+    assert manifest["config"]["image"] == finetune_stage.ALL_IMAGES_IMAGE
+    out = predict.run("fakeb", rel, cxr_root=cxr_root)
+    assert len(artifacts.read_table(out / "predictions.findings.csv")) == 20

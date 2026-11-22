@@ -38,6 +38,18 @@ def test_forward_shape():
     torch.testing.assert_close(weights.sum(-1), torch.ones(5, 8, 3))
 
 
+def test_masked_padding_is_left_out():
+    torch.manual_seed(0)
+    head = attention.Head(n_labels=3, dim=16, heads=8, ffn=32, dropout=0.0).eval()
+    x = torch.randn(5, 7, 16)
+    padded = torch.cat([x, 100 * torch.randn(5, 4, 16)], 1)
+    mask = torch.arange(11) < 7
+    out = head(padded, mask=mask.expand(5, 11))
+    torch.testing.assert_close(out, head(x))
+    _, weights = head.attention(padded, mask.expand(5, 11))
+    assert (weights[..., 7:] == 0).all()
+
+
 def test_readouts_share_the_query_and_keep_one_readout():
     torch.manual_seed(0)
     one = attention.Head(n_labels=3, dim=16, heads=8, ffn=32, dropout=0.0)

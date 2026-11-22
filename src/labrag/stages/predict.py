@@ -18,7 +18,8 @@ probs.<s>.<class>.csv each class's probability; no thresholds.
 
 A reader-conditioned fine-tune (``attn-reader``) reads each study's reader: its vector
 if in the classifier's vocabulary, else the "unknown" one (every study of a dataset
-without readers).
+without readers). An ``attn-all-images`` fine-tune reads all the study's frontal and
+lateral images, as in training.
 """
 
 import os
@@ -30,7 +31,7 @@ import torch
 
 from labrag import artifacts, paths, weights
 from labrag.classifiers import attention, quant
-from labrag.data import DATASETS, readers
+from labrag.data import DATASETS, readers, study_images
 from labrag.stages import classify
 
 
@@ -221,9 +222,12 @@ def _finetuned(
         model.load_state_dict(saved["state_dict"])
         model.to(device)
         root = cxr_root / adapter.IMAGE_ROOT
-        images = finetune.Images(
-            [root / p for p in studies.image_path], finetune.load_processor(model_dir)
-        )
+        if clf_config["classifier"] == finetune_stage.ALL_IMAGES:
+            each = study_images(dataset, cxr_root, ids, studies.image_path)
+            image_paths = [[root / p for p in ps] for ps in each]
+        else:
+            image_paths = [root / p for p in studies.image_path]
+        images = finetune.image_data(image_paths, finetune.load_processor(model_dir))
         workers = min(
             finetune_stage.MAX_WORKERS, max(0, len(os.sched_getaffinity(0)) - 1)
         )

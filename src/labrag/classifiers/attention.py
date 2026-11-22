@@ -10,7 +10,8 @@ AUROC.
 ``readouts`` > 1 gives each label several logits (one per report section) from the same
 query: the sections share where to look, and only the last linear layer learns what
 each section reports. ``conditions`` > 0 adds a learned vector per condition (e.g. the
-report's reader) to every label's pooled feature. Logits are readout-major; a mask leaves out each study's
+report's reader) to every label's pooled feature. A token ``mask`` leaves out padding
+(studies with fewer images than others in the batch). Logits are readout-major; a mask leaves out each study's
 sections without labels, in the loss and in the val AUROC. Deterministic for a given seed and device: deterministic torch algorithms, the
 attention written out (no fused kernels), a seeded generator for the batch order.
 """
@@ -67,23 +68,33 @@ class Head(nn.Module):
         if conditions:  # zero at init: starts as the unconditioned head
             self.condition = nn.Parameter(torch.zeros(conditions, dim))
 
-    def attention(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Pooled features (B, labels, dim) and weights (B, heads, labels, tokens)."""
+    def attention(
+        self, x: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Pooled features (B, labels, dim) and weights (B, heads, labels, tokens);
+        ``mask`` (B, tokens), if given, is False on tokens to leave out."""
         b, t, d = x.shape
         h = self.heads
         q = self.q(self.query).view(-1, h, d // h)
         k = self.k(x).view(b, t, h, d // h)
         v = self.v(x).view(b, t, h, d // h)
-        weights = (torch.einsum("lhe,bthe->bhlt", q, k) / (d // h) ** 0.5).softmax(-1)
+        scores = torch.einsum("lhe,bthe->bhlt", q, k) / (d // h) ** 0.5
+        if mask is not None:
+            scores = scores.masked_fill(~mask[:, None, None], float("-inf"))
+        weights = scores.softmax(-1)
         pooled = torch.einsum("bhlt,bthe->blhe", self.drop(weights), v).flatten(-2)
         return self.o(pooled), weights
 
     def forward(
-        self, x: torch.Tensor, condition: torch.Tensor | None = None
+        self,
+        x: torch.Tensor,
+        condition: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Logits (B, readouts * labels) for tokens x (B, tokens, dim); ``condition``
-        (B,) indexes a learned vector added to every label's pooled feature."""
-        pooled, _ = self.attention(x)
+        (B,) indexes a learned vector added to every label's pooled feature; ``mask``
+        as in attention."""
+        pooled, _ = self.attention(x, mask)
         z = self.query + self.drop(pooled)
         if condition is not None:
             z = z + self.condition[condition][:, None]

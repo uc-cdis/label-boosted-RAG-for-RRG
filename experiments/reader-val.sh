@@ -6,9 +6,9 @@
 #             vs the plain one (seed 1, joint-val's) and a second plain seed (the
 #             fine-tune noise floor for that comparison);
 #   examples: retrieval restricted to the target's reader (--same-reader) vs all.
-# Cells: retrieval-only, mc and the oracle (joint-val's, skipped), retrieval-only and
-# mc with same-reader examples, mc from plain seed 2, and mc-reader with and without
-# same-reader examples. Qwen3.5-27B with the image (518 px).
+# Cells: retrieval-only, mc and the oracle (joint-val's, skipped), retrieval-only, mc
+# and the oracle with same-reader examples, mc from plain seed 2, and mc-reader with
+# and without same-reader examples. Qwen3.5-27B with the image (518 px).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -78,11 +78,13 @@ L=$F/labrag.$POOL
 cell retrieval-only.negatives.indication $lj:$emb $F/retrieval-only/$PN --condition retrieval-only --prompt $PN
 cell retrieval-only.negatives.indication.same-reader $lj:$emb $F/retrieval-only.same-reader/$PN --condition retrieval-only --prompt $PN --same-reader
 cell oracle.negatives.indication $lj:$emb $F/labrag-oracle.chexbert14/$PS --condition labrag-oracle --prompt $PS
+cell oracle.negatives.indication.same-reader $lj:$emb $F/labrag-oracle.chexbert14.same-reader/$PS --condition labrag-oracle --prompt $PS --same-reader
 cell mc.positives.negatives.indication $lj:$emb:${prm[ft-attn-seed1]} $L.ft-attn-seed1.$SEC.chexbert14.mc/$PS $(mc ft-attn-seed1)
 cell mc.positives.negatives.indication.same-reader $lj:$emb:${prm[ft-attn-seed1]} $L.ft-attn-seed1.$SEC.chexbert14.mc.same-reader/$PS $(mc ft-attn-seed1) --same-reader
 cell mc-seed2.positives.negatives.indication $lj:$emb:${prm[ft-attn-seed2]} $L.ft-attn-seed2.$SEC.chexbert14.mc/$PS $(mc ft-attn-seed2)
 cell mc-reader.positives.negatives.indication $lj:$emb:${prm[ft-attn-reader-seed1]} $L.ft-attn-reader-seed1.$SEC.chexbert14.mc/$PS $(mc ft-attn-reader-seed1)
 cell mc-reader.positives.negatives.indication.same-reader $lj:$emb:${prm[ft-attn-reader-seed1]} $L.ft-attn-reader-seed1.$SEC.chexbert14.mc.same-reader/$PS $(mc ft-attn-reader-seed1) --same-reader
-cmp=$(s -d afterok$dep -- labrag compare --generations $cells --out $F/qwen3.5-27b.reader/$SET)
+# --overwrite: the comparison gained the oracle same-reader cell after the first run
+cmp=$(s -d afterok$dep -- labrag compare --generations $cells --out $F/qwen3.5-27b.reader/$SET --overwrite)
 ids+=" compare $cmp"
 echo "$ids"

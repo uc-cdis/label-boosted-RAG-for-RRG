@@ -219,10 +219,12 @@ def test_joint_needs_both_readouts():
         )  # fmt: skip
 
 
-def test_same_reader_needs_examples_and_readers():
-    with pytest.raises(SystemExit, match="--same-reader is for conditions with"):
-        build_prompts.run("val", "mimic", "findings", "no-context", same_reader=True)
+def test_same_needs_examples_and_the_group():
+    with pytest.raises(SystemExit, match="--same reader is for conditions with"):
+        build_prompts.run("val", "mimic", "findings", "no-context", same="reader")
     with pytest.raises(SystemExit, match="rexgradient has no readers"):
         build_prompts.run(
-            "val", "rexgradient", "findings", "retrieval-only", same_reader=True
+            "val", "rexgradient", "findings", "retrieval-only", same="reader"
         )
+    with pytest.raises(SystemExit, match="mimic has no sites"):
+        build_prompts.run("val", "mimic", "findings", "retrieval-only", same="site")

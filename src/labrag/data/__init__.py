@@ -17,7 +17,9 @@ Each adapter module provides:
   from a labeler run on report text;
 - ``FRONTAL_VIEWS``: the ``view`` values of a frontal image;
 - ``load_readers(cxr_root)`` and ``READER_FILES`` (optional): each study's reader, the
-  radiologist on its report, by study_id, and the release files that give it.
+  radiologist on its report, by study_id, and the release files that give it;
+- ``load_sites(cxr_root)`` and ``SITE_FILES`` (optional): the same for each study's
+  site, the institution that made it.
 """
 
 import pandas as pd
@@ -49,12 +51,30 @@ def labels_only(dataset: str) -> bool:
     return getattr(DATASETS[dataset], "LABELS_ONLY", False)
 
 
+GROUPS = ("reader", "site")  # study attributes an adapter may give (load_<group>s)
+
+
+def has_group(dataset: str, group: str) -> bool:
+    """True if the dataset's adapter gives each study's ``group`` (GROUPS)."""
+    return hasattr(DATASETS[dataset], f"load_{group}s")
+
+
+def group_files(dataset: str, group: str) -> tuple[str, ...]:
+    """The release files that give each study's ``group``, relative to cxr_root."""
+    return getattr(DATASETS[dataset], f"{group.upper()}_FILES")
+
+
+def groups(dataset: str, group: str, cxr_root) -> pd.Series | None:
+    """Each study's ``group`` (GROUPS) by study_id (str), or None for a dataset
+    without it."""
+    if not has_group(dataset, group):
+        return None
+    return getattr(DATASETS[dataset], f"load_{group}s")(cxr_root)
+
+
 def readers(dataset: str, cxr_root) -> pd.Series | None:
     """Each study's reader by study_id (str), or None for a dataset without them."""
-    adapter = DATASETS[dataset]
-    if not hasattr(adapter, "load_readers"):
-        return None
-    return adapter.load_readers(cxr_root)
+    return groups(dataset, "reader", cxr_root)
 
 
 def has_joint(dataset: str) -> bool:

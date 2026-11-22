@@ -24,6 +24,7 @@ VIEW_RANK = {"PA": 0, "POSTERO_ANTERIOR": 0, "AP": 1}
 FRONTAL_VIEWS = tuple(VIEW_RANK)
 
 SPLIT_FILES = ()  # official splits only
+SITE_FILES = SOURCE_FILES
 
 
 def load_images(cxr_root: Path) -> pd.DataFrame:
@@ -66,6 +67,16 @@ def load_images(cxr_root: Path) -> pd.DataFrame:
     assert (df.groupby("subject_id").split.nunique() == 1).all(), "patient in 2 splits"
     assert (df.groupby("study_id").split.nunique() == 1).all(), "study in 2 splits"
     return df
+
+
+def load_sites(cxr_root: Path) -> pd.Series:
+    """Each study's site by study_id: its InstitutionName (hashed in the release;
+    every study has one)."""
+    sites = {}
+    for source in SITE_FILES:
+        with open(cxr_root / source) as f:
+            sites |= {i: r["InstitutionName"] for i, r in json.load(f).items()}
+    return pd.Series(sites, name="site", dtype=str)
 
 
 def load_studies(cxr_root: Path) -> pd.DataFrame:

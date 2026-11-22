@@ -9,7 +9,7 @@ import argparse
 
 from labrag import artifacts, data, serving
 from labrag.classifiers import quant
-from labrag.data import DATASETS
+from labrag.data import DATASETS, GROUPS
 from labrag.stages import (
     build_prompts,
     classify,
@@ -234,10 +234,10 @@ def add_build_prompts(sub) -> None:
         help="labrag: show each target label with the classifier's probability",
     )
     p.add_argument(
-        "--same-reader",
-        action="store_true",
+        "--same",
+        choices=GROUPS,
         help="examples only from studies with the target's reader (the radiologist on "
-        "the report; datasets with readers)",
+        "the report) or site (the institution); datasets that give it",
     )
     p.add_argument(
         "--predictions",

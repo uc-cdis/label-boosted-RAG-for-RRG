@@ -57,9 +57,10 @@ Predicted target labels combine the predict artifact's findings and impression r
 the way the labels stage combines the reference labels (labels.combine), so predicted,
 example and oracle labels share one definition.
 
-``--same-reader`` (any condition with examples; a dataset with readers): examples only
-from corpus studies whose report has the target's reader (the radiologist), ranking
-otherwise unchanged; directory suffix ``.same-reader``.
+``--same reader|site`` (any condition with examples; a dataset that gives that group):
+examples only from corpus studies with the target's reader (the radiologist on the
+report) or site (the institution), ranking otherwise unchanged; directory suffix
+``.same-reader`` / ``.same-site``.
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
 path relative to the CXR root in the record's ``image``). A version with {indication}
@@ -77,12 +78,15 @@ import pandas as pd
 from labrag import artifacts, paths, prompts, retrieval
 from labrag.data import (
     DATASETS,
+    GROUPS,
     JOIN,
     JOINT,
     JOINT_PARTS,
     add_joint,
     check_section,
-    readers,
+    group_files,
+    groups,
+    has_group,
 )
 from labrag.labelers import radgraph_sides
 from labrag.stages import threshold
@@ -137,7 +141,7 @@ def run(
     ranking: str = "labels",
     sides: bool = False,
     confidence: bool = False,
-    same_reader: bool = False,
+    same: str | None = None,
     overwrite: bool = False,
     cxr_root: Path | None = None,
 ) -> Path:
@@ -187,10 +191,14 @@ def run(
         raise SystemExit("build-prompts: --sides is for labrag-oracle")
     if confidence and condition != "labrag":
         raise SystemExit("build-prompts: --confidence is for labrag")
-    if same_reader and not with_examples:
-        raise SystemExit("build-prompts: --same-reader is for conditions with examples")
-    if same_reader and not hasattr(adapter, "load_readers"):
-        raise SystemExit(f"build-prompts: {dataset} has no readers")
+    if same is not None and same not in GROUPS:
+        raise SystemExit(f"build-prompts: --same is one of {GROUPS}")
+    if same and not with_examples:
+        raise SystemExit(
+            f"build-prompts: --same {same} is for conditions with examples"
+        )
+    if same and not has_group(dataset, same):
+        raise SystemExit(f"build-prompts: {dataset} has no {same}s")
     transfer = predictions is not None
     categories = prompts.uses_categories(version)
     absent = prompts.uses_absent(version)
@@ -297,11 +305,11 @@ def run(
         image_root = cxr_root / adapter.IMAGE_ROOT
         inputs["images"] = {"root": str(image_root)}  # too many to hash
         config["image"] = "preferred per study (the embedded one)"
-    if same_reader:
-        inputs["readers"] = [
-            artifacts.file_record(cxr_root / f) for f in adapter.READER_FILES
+    if same:
+        inputs[f"{same}s"] = [
+            artifacts.file_record(cxr_root / f) for f in group_files(dataset, same)
         ]
-        config["same_reader"] = "examples only from studies with the target's reader"
+        config[f"same_{same}"] = f"examples only from studies with the target's {same}"
     if sides:
         sides_dir = paths.SHARED_ROOT / "sides" / dataset / section / LABELER
         inputs["sides"] = artifacts.artifact_record(sides_dir)
@@ -395,8 +403,8 @@ def run(
         if with_examples:
             config["ranking"] = "cosine"
         condition_dir = condition
-    if same_reader:
-        condition_dir += ".same-reader"
+    if same:
+        condition_dir += f".same-{same}"
 
     def build(out: Path) -> dict:
         labels = artifacts.read_table(lab_dir / "labels.csv").set_index("study_id")
@@ -440,10 +448,10 @@ def run(
 
         sim = retrieval.cosine(embeddings(target), embeddings(corpus))
         exclude = target.subject_id.to_numpy()[:, None] == corpus.subject_id.to_numpy()
-        if same_reader:
-            reader = readers(dataset, cxr_root)
-            t, c = reader.reindex(target.index), reader.reindex(corpus.index)
-            assert t.notna().all(), "a target study has no reader"
+        if same:
+            group = groups(dataset, same, cxr_root)
+            t, c = group.reindex(target.index), group.reindex(corpus.index)
+            assert t.notna().all(), f"a target study has no {same}"
             exclude |= t.to_numpy()[:, None] != c.to_numpy()[None, :]
         if with_labels:
 

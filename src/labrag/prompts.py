@@ -9,6 +9,7 @@ from labrag import paths
 PROMPTS_YAML = paths.CONFIGS_DIR / "prompts.yaml"
 NO_POSITIVE = "Other"  # the preprint's implicit label for "no positive label"
 NO_INDICATION = "Not provided"
+NO_PRIOR = "None"  # {prior} for a target without an earlier study of its patient
 # Where {image} was: generate swaps in the study's image (the record's "image" path).
 IMAGE_PART = {"type": "image"}
 _IMAGE_MARK = "\x00image\x00"  # never in report text
@@ -35,6 +36,7 @@ def load(name: str) -> dict:
         "labels",
         "absent",
         "indication",
+        "prior",
         "image",
         "section",
     }, f"{name}: {fields}"
@@ -77,6 +79,11 @@ def uses_absent(version: dict) -> bool:
 def uses_indication(version: dict) -> bool:
     """{indication}: the target's reason for the exam."""
     return "{indication}" in version["user"]
+
+
+def uses_prior(version: dict) -> bool:
+    """{prior}: the report of the target patient's previous study (build-prompts)."""
+    return "{prior}" in version["user"]
 
 
 def uses_example_indications(version: dict) -> bool:
@@ -151,6 +158,7 @@ def render(
     absent: list[str] | None = None,
     indication: str | None = None,
     example_indications: list[str] | None = None,
+    prior: str | None = None,
 ) -> list[dict]:
     """Chat messages for one target.
 
@@ -162,8 +170,9 @@ def render(
     with {absent} ("None" if empty). ``indication``: the target's indication text, for a
     version with {indication} ("" if the study has none: NO_INDICATION; whitespace runs
     collapsed like report text). ``example_indications``: the same per example, for a
-    version whose example template has {indication}. With {image}, the content is a list of parts: text,
-    IMAGE_PART, text.
+    version whose example template has {indication}. ``prior``: the prior report's
+    text, for a version with {prior} ("" if none: NO_PRIOR; whitespace runs collapsed).
+    With {image}, the content is a list of parts: text, IMAGE_PART, text.
     """
     with_labels = uses_labels(version)
     assert with_labels == (labels is not None), "labels given iff the version uses them"
@@ -175,6 +184,7 @@ def render(
     assert uses_example_indications(version) == (
         example_indications is not None
     ), "example indications given iff the examples show them"
+    assert uses_prior(version) == (prior is not None), "prior given iff it uses it"
     assert example_indications is None or len(example_indications) == len(examples)
     blocks = [
         version["example"].format(
@@ -200,6 +210,8 @@ def render(
         fields["absent"] = ", ".join(absent) or "None"
     if indication is not None:
         fields["indication"] = indication_text(indication)
+    if prior is not None:
+        fields["prior"] = clean_report(prior) or NO_PRIOR
     text = version["user"].format(**fields).strip()
     if not uses_image(version):
         return [{"role": "user", "content": text}]

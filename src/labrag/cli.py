@@ -20,6 +20,7 @@ from labrag.stages import (
     generate,
     labels,
     predict,
+    severity,
     sides,
     styles,
     threshold,
@@ -81,6 +82,10 @@ def add_labels(sub) -> None:
 
 def add_sides(sub) -> None:
     stage(sub, sides, "--dataset", "--section")
+
+
+def add_severity(sub) -> None:
+    stage(sub, severity, "--dataset", "--section")
 
 
 def add_styles(sub) -> None:
@@ -234,6 +239,17 @@ def add_build_prompts(sub) -> None:
         help="labrag-oracle: show each label with its side (sides stage)",
     )
     p.add_argument(
+        "--severity",
+        action="store_true",
+        help="labrag-oracle: show each label with its size or severity (severity stage)",
+    )
+    p.add_argument(
+        "--devices",
+        action="store_true",
+        help="labrag-oracle: add the device types (labels --labeler devices) to the "
+        "label set, shown and ranked on",
+    )
+    p.add_argument(
         "--confidence",
         action="store_true",
         help="labrag: show each target label with the classifier's probability",
@@ -331,6 +347,7 @@ COMMANDS = (
     add_splits,
     add_labels,
     add_sides,
+    add_severity,
     add_styles,
     add_embed,
     add_classify,

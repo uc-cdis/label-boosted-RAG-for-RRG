@@ -115,6 +115,18 @@ def load_studies(cxr_root: Path) -> pd.DataFrame:
     return studies
 
 
+def load_study_times(cxr_root: Path) -> pd.Series:
+    """Each study's time by study_id, for ordering a patient's studies: its images'
+    earliest StudyDate and StudyTime (shifted dates), as one number yyyymmddhhmmss."""
+    meta = pd.read_csv(
+        cxr_root / METADATA_CSV,
+        dtype={"study_id": str},
+        usecols=["study_id", "StudyDate", "StudyTime"],
+    )
+    time = meta.StudyDate.astype(float) * 1e6 + meta.StudyTime.astype(float)
+    return time.groupby(meta.study_id).min()
+
+
 def load_readers(cxr_root: Path) -> pd.Series:
     """Each study's reader by study_id: the attending radiologist on its report
     (MIMIC-CXR 2.1.0 provider list; every study has one)."""

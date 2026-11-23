@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from labrag.data import priors
 from labrag.stages import build_prompts
 from labrag.stages.build_prompts import DEFAULT_PROMPT, DIAGNOSTICS, mix_labels
 
@@ -228,3 +229,50 @@ def test_same_needs_examples_and_the_group():
         )
     with pytest.raises(SystemExit, match="mimic has no sites"):
         build_prompts.run("val", "mimic", "findings", "retrieval-only", same="site")
+
+
+def test_severity_and_devices_are_for_the_oracle():
+    with pytest.raises(SystemExit, match="--severity is for labrag-oracle"):
+        build_prompts.run(
+            "val", "mimic", "findings", "labrag", predictions=FT, severity=True
+        )
+    with pytest.raises(SystemExit, match="--devices is for labrag-oracle"):
+        build_prompts.run("val", "mimic", "findings", "retrieval-only", devices=True)
+    with pytest.raises(SystemExit, match="not both"):
+        build_prompts.run(
+            "val", "mimic", "findings", "labrag-oracle", sides=True, severity=True
+        )
+
+
+def test_prior_text_takes_the_latest_earlier_study_with_a_report():
+    class Adapter:
+        SECTIONS = ("findings", "impression")
+
+        @staticmethod
+        def load_study_times(cxr_root):
+            return pd.Series({"s1": 1, "s2": 2, "s3": 3, "s4": 4, "s5": 1})
+
+    nan = float("nan")
+    studies = pd.DataFrame(
+        {
+            "subject_id": ["a", "a", "a", "a", "b"],
+            "findings": ["F1", nan, nan, "F4", "F5"],
+            "impression": ["I1", nan, "I3", "I4", nan],
+        },
+        index=["s1", "s2", "s3", "s4", "s5"],
+    )
+    got = build_prompts.prior_text(studies, Adapter, None)
+    # s2 has no report: s3's prior skips it; s1 and s5 have none
+    assert got == {
+        "s3": ("s1", "Findings: F1 Impression: I1"),
+        "s4": ("s3", "Impression: I3"),
+    }
+
+
+def test_priors_need_a_strictly_earlier_time():
+    index = pd.Index(list("pqrst"), name="study_id")  # as load_studies' index
+    studies = pd.DataFrame({"subject_id": ["a"] * 4 + ["b"]}, index=index)
+    times = pd.Series({"p": 3, "q": 1, "r": 2, "s": 2, "t": 1})
+    got = priors(studies, times).fillna("-").to_dict()
+    # r and s share a time: neither is the other's prior; p takes s (ties by id)
+    assert got == {"p": "s", "q": "-", "r": "q", "s": "q", "t": "-"}

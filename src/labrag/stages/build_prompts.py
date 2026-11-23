@@ -39,6 +39,12 @@ retrieval-only, the labels shown but not used to rank; directory suffix
 ``--sides`` (labrag-oracle): each label shown with its side from the ``sides`` stage,
 "Pleural Effusion (left)", for the target and the examples; ranking unchanged;
 directory suffix ``.sides``.
+``--severity`` (labrag-oracle): each label shown with its size or severity from the
+``severity`` stage, "Pleural Effusion (small)", for the target and the examples; ranking
+unchanged; directory suffix ``.severity``. ``--devices`` (labrag-oracle): the device
+types (labels stage, labeler ``devices``) join the label set, for the target and the
+examples and in the ranking: "Support Devices, Endotracheal Tube, Enteric Tube";
+directory suffix ``.devices``.
 ``--confidence`` (labrag): each target label shown with the classifier's probability,
 "Atelectasis (28%)" (its probs file); example labels, label set and ranking unchanged;
 directory suffix ``.confidence``.
@@ -64,7 +70,8 @@ institution), for a dataset that gives that group, or report-style cluster (the
 style oracle), ranking otherwise unchanged; directory suffix ``.same-<group>``.
 
 A prompt version with {image} shows the study's preferred image (the one embedded; its
-path relative to the CXR root in the record's ``image``). A version with {indication}
+path relative to the CXR root in the record's ``image``). A version with {prior} shows the report of the target patient's previous study
+(``prior_text``; its study id in the record's ``prior``), "None" if none. A version with {indication}
 shows the target's indication (the adapter's ``indication``; also in the record), any
 condition; if its example template has {indication} too, each example shows its own.
 """
@@ -88,12 +95,15 @@ from labrag.data import (
     group_files,
     groups,
     has_group,
+    has_times,
+    priors,
 )
 from labrag.labelers import radgraph_sides
+from labrag.stages import severity as severity_stage
 from labrag.stages import styles as styles_stage
 from labrag.stages import threshold
 from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, MULTICLASS_SUFFIX, POSITIVE
-from labrag.stages.labels import COMBINE_RULE, combine
+from labrag.stages.labels import COMBINE_RULE, DEVICES, combine
 
 # experiment -> dataset -> target roles, corpus roles and, optionally, a sample of the
 # targets: that many patients drawn with the seed, one study each
@@ -144,6 +154,8 @@ def run(
     predictions: str | None = None,
     ranking: str = "labels",
     sides: bool = False,
+    severity: bool = False,
+    devices: bool = False,
     confidence: bool = False,
     same: str | None = None,
     overwrite: bool = False,
@@ -193,6 +205,12 @@ def run(
         raise SystemExit("build-prompts: --ranking is for conditions with labels")
     if sides and condition != "labrag-oracle":
         raise SystemExit("build-prompts: --sides is for labrag-oracle")
+    if severity and condition != "labrag-oracle":
+        raise SystemExit("build-prompts: --severity is for labrag-oracle")
+    if devices and condition != "labrag-oracle":
+        raise SystemExit("build-prompts: --devices is for labrag-oracle")
+    if sides and severity:
+        raise SystemExit("build-prompts: --sides or --severity, not both")
     if confidence and condition != "labrag":
         raise SystemExit("build-prompts: --confidence is for labrag")
     if same is not None and same not in SAME:
@@ -208,6 +226,9 @@ def run(
     absent = prompts.uses_absent(version)
     indication = prompts.uses_indication(version)
     example_indications = prompts.uses_example_indications(version)
+    prior = prompts.uses_prior(version)
+    if prior and not has_times(dataset):
+        raise SystemExit(f"build-prompts: {dataset}'s adapter gives no study times")
     if (prompts.uses_labels(version), prompts.uses_examples(version)) != (
         with_labels,
         with_examples,
@@ -305,6 +326,12 @@ def run(
         config["indication"] = (
             f"{shown_for}: the adapter's indication, {prompts.NO_INDICATION!r} if none"
         )
+    if prior:
+        config["prior"] = (
+            "the report (its sections, the ones it has) of the patient's latest study "
+            "with one strictly before the target (adapter study times), "
+            f"{prompts.NO_PRIOR!r} if none"
+        )
     if with_image:
         image_root = cxr_root / adapter.IMAGE_ROOT
         inputs["images"] = {"root": str(image_root)}  # too many to hash
@@ -326,6 +353,14 @@ def run(
         inputs["sides"] = artifacts.artifact_record(sides_dir)
         if labeler != LABELER:
             raise SystemExit(f"build-prompts: sides are for {LABELER} labels")
+    if severity:
+        severity_dir = paths.SHARED_ROOT / severity_stage.relpath(dataset, section)
+        inputs["severity"] = artifacts.artifact_record(severity_dir)
+        if labeler != LABELER:
+            raise SystemExit(f"build-prompts: severity is for {LABELER} labels")
+    if devices:
+        devices_dir = paths.SHARED_ROOT / "labels" / dataset / section / DEVICES
+        inputs["device_labels"] = artifacts.artifact_record(devices_dir)
     if transfer:
         pred_dir = paths.SHARED_ROOT / "predictions" / dataset / predictions.strip("/")
         inputs["predictions"] = artifacts.artifact_record(pred_dir)
@@ -404,9 +439,17 @@ def run(
             condition_dir += ".corpus-predicted"
         if ranking == "image":
             condition_dir += ".image-ranked"
+        if devices:
+            config["devices"] = (
+                f"the {DEVICES} labels join the label set: target, examples, ranking"
+            )
+            condition_dir += ".devices"
         if sides:
             config["sides"] = "reference, target and examples: label (side)"
             condition_dir += ".sides"
+        if severity:
+            config["severity"] = "reference, target and examples: label (severity)"
+            condition_dir += ".severity"
         if confidence:
             config["confidence"] = "target labels: label (probability, % rounded, 1-99)"
             condition_dir += ".confidence"
@@ -417,8 +460,15 @@ def run(
     if same:
         condition_dir += f".same-{same}"
 
+    prior_texts = {}  # target study_id -> (prior study_id, prior report text)
+
     def build(out: Path) -> dict:
         labels = artifacts.read_table(lab_dir / "labels.csv").set_index("study_id")
+        if devices:
+            typed = artifacts.read_table(devices_dir / "labels.csv")
+            typed = typed.set_index("study_id")
+            assert labels.index.isin(typed.index).all(), "a study has no device labels"
+            labels = labels.join(typed)
         names = list(labels.columns)
         if transfer:
             tables = [
@@ -437,6 +487,8 @@ def run(
         if indication and "indication" not in studies:
             raise SystemExit(f"build-prompts: no indication in {dataset}'s adapter")
         studies["role"] = adapter.classifier_roles(studies, paths.SPLITS_DIR)
+        if prior:
+            prior_texts.update(prior_text(studies, adapter, cxr_root))
         studies = studies.loc[labels.index]  # the studies with this section
         target = studies[studies.role.isin(exp["targets"])]
         if "sample" in exp:
@@ -505,10 +557,13 @@ def run(
             overlap = None
         top = retrieval.top_k(K, sim, exclude, overlap if ranking == "labels" else None)
 
-        side = {}
+        detail = {}  # (study_id, label) -> side or severity, shown after the label
         if sides:
             table = artifacts.read_table(sides_dir / "sides.csv")
-            side = dict(zip(zip(table.study_id, table.label), table.side))
+            detail = dict(zip(zip(table.study_id, table.label), table.side))
+        if severity:
+            table = artifacts.read_table(severity_dir / "severity.csv")
+            detail = dict(zip(zip(table.study_id, table.label), table.severity))
 
         prob = None
         if confidence:
@@ -530,7 +585,7 @@ def run(
                 return [
                     prompts.with_probability(n, prob.at[study_id, n]) for n in shown
                 ]
-            return [radgraph_sides.sided(n, side.get((study_id, n))) for n in shown]
+            return [radgraph_sides.sided(n, detail.get((study_id, n))) for n in shown]
 
         reports = (
             ("Findings: " + corpus.findings + " Impression: " + corpus.impression)
@@ -610,6 +665,9 @@ def run(
         indication_i = None
         if indication:
             indication_i = "" if pd.isna(row.indication) else row.indication
+        prior_id, prior_i = (
+            prior_texts.get(study_id, (None, "")) if prior else (None, None)
+        )
         r = {
             "study_id": study_id,
             "set": row.role,
@@ -621,6 +679,7 @@ def run(
                 absent_i,
                 indication_i,
                 example_indications_i,
+                prior_i,
             ),
         }
         if with_image:
@@ -628,6 +687,8 @@ def run(
         shown = {"labels": labels_i} | ({"absent": absent_i} if absent else {})
         if indication:
             shown["indication"] = indication_i or None
+        if prior:
+            shown["prior"] = prior_id
         return r | (retrieved or {}) | shown | {"reference": row[section]}
 
     def write(out: Path, records: list[dict]) -> dict:
@@ -652,6 +713,23 @@ def run(
         build,
         overwrite,
     )
+
+
+def prior_text(studies: pd.DataFrame, adapter, cxr_root: Path) -> dict:
+    """study_id -> (prior study_id, its report: "Findings: ... Impression: ...", the
+    sections it has) for each study (index study_id) with a prior: the patient's latest
+    earlier study with any section (data.priors)."""
+    parts = list(adapter.SECTIONS)
+    reported = studies[studies[parts].notna().any(axis=1)]
+    prior_of = priors(reported, adapter.load_study_times(cxr_root)).dropna()
+    rows = reported.loc[prior_of.to_numpy(), parts]
+    texts = [
+        " ".join(
+            f"{prompts.SECTION_NAMES[p]}: {t}" for p, t in r.items() if pd.notna(t)
+        )
+        for _, r in rows.iterrows()
+    ]
+    return dict(zip(prior_of.index, zip(prior_of.to_numpy(), texts)))
 
 
 def sample_targets(target: pd.DataFrame, patients: int, seed: int) -> pd.DataFrame:

@@ -23,7 +23,9 @@ Each adapter module provides:
 - ``load_readers(cxr_root)`` and ``READER_FILES`` (optional): each study's reader, the
   radiologist on its report, by study_id, and the release files that give it;
 - ``load_sites(cxr_root)`` and ``SITE_FILES`` (optional): the same for each study's
-  site, the institution that made it.
+  site, the institution that made it;
+- ``load_study_times(cxr_root)`` (optional): each study's time by study_id, any
+  sortable number, read from SOURCE_FILES (orders a patient's studies: ``priors``).
 """
 
 import pandas as pd
@@ -79,6 +81,36 @@ def groups(dataset: str, group: str, cxr_root) -> pd.Series | None:
 def readers(dataset: str, cxr_root) -> pd.Series | None:
     """Each study's reader by study_id (str), or None for a dataset without them."""
     return groups(dataset, "reader", cxr_root)
+
+
+def has_times(dataset: str) -> bool:
+    """True if the dataset's adapter gives each study's time (load_study_times)."""
+    return hasattr(DATASETS[dataset], "load_study_times")
+
+
+def priors(studies: pd.DataFrame, times: pd.Series) -> pd.Series:
+    """Each study's prior by study_id: the latest of its patient's ``studies`` (index
+    study_id, column subject_id) with a strictly earlier time (``times``; ties between
+    earlier studies by study_id); NaN if none."""
+    t = times.reindex(studies.index)
+    assert t.notna().all(), "a study has no time"
+    df = pd.DataFrame(
+        {
+            "study_id": studies.index.to_numpy(),
+            "subject": studies.subject_id.to_numpy(),
+            "t": t.to_numpy(),
+        }
+    ).sort_values(["t", "study_id"], kind="stable")
+    earlier = df.rename(columns={"study_id": "prior"})
+    m = pd.merge_asof(
+        df,
+        earlier,
+        on="t",
+        by="subject",
+        allow_exact_matches=False,
+        direction="backward",
+    )
+    return m.set_index("study_id").prior.reindex(studies.index)
 
 
 MAX_IMAGES = 4  # per study in study_images; 0.1% of the pooled studies have more

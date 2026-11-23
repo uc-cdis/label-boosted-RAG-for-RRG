@@ -161,3 +161,20 @@ def test_render_absent_lists_predicted_negatives():
     plain = prompts.load("section-simple-negatives-image")
     with pytest.raises(AssertionError):
         prompts.render(plain, [("a", [])], [], "findings", [])
+
+
+def test_render_prior_report():
+    version = prompts.load("joint-simple-negatives-indication-prior-image")
+    assert prompts.uses_prior(version)
+    [message] = prompts.render(
+        version, [("a", [])], [], "findings", indication="x",
+        prior="Findings: Clear.\n Impression:  Normal.",
+    )  # fmt: skip
+    first = message["content"][0]["text"]
+    assert first.endswith("Prior report: Findings: Clear. Impression: Normal.\n")
+    [message] = prompts.render(
+        version, [("a", [])], [], "findings", indication="x", prior=""
+    )
+    assert message["content"][0]["text"].endswith("Prior report: None\n")
+    with pytest.raises(AssertionError):
+        prompts.render(version, [("a", [])], [], "findings", indication="x")

@@ -61,3 +61,8 @@ def test_joint_labels_combine_the_studies_with_both_sections(tmp_path, monkeypat
     assert got.Cardiomegaly.tolist() == [1]
     config = artifacts.read_manifest(out)["config"]
     assert config["combined"] == ["findings", "impression"]
+
+
+def test_device_labels_are_for_text_datasets():
+    with pytest.raises(SystemExit, match="PadChest only"):
+        labels.run("mimic", "findings", labeler="padchest60")

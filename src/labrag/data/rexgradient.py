@@ -80,6 +80,16 @@ def load_sites(cxr_root: Path) -> pd.Series:
     return pd.Series(sites, name="site", dtype=str)
 
 
+def load_study_times(cxr_root: Path) -> pd.Series:
+    """Each study's time by study_id, for ordering a patient's studies: its StudyDate
+    (yyyymmdd; the release gives no time of day)."""
+    times = {}
+    for source in SOURCE_FILES:
+        with open(cxr_root / source) as f:
+            times |= {i: int(r["StudyDate"]) for i, r in json.load(f).items()}
+    return pd.Series(times, name="time")
+
+
 def load_studies(cxr_root: Path) -> pd.DataFrame:
     """One row per study (see canonical_studies)."""
     return canonical_studies(load_images(cxr_root))

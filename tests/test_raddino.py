@@ -7,6 +7,16 @@ import torch
 from labrag import paths
 from labrag.encoders import raddino
 
+
+@pytest.fixture(autouse=True)
+def threads():
+    """The real ViT-B at 518 px needs more than conftest's one thread."""
+    before = torch.get_num_threads()
+    torch.set_num_threads(16)
+    yield
+    torch.set_num_threads(before)
+
+
 MODEL_DIR = paths.MODELS_ROOT / "microsoft" / "rad-dino"
 IMAGES = paths.CXR_ROOT / "chexpertplus" / "PNG" / "train"
 FRONTAL = IMAGES / "patient00001" / "study1" / "view1_frontal.png"

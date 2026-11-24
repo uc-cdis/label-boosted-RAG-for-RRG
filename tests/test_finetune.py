@@ -18,6 +18,13 @@ NAMES = ["Edema", "Support Devices", "No Finding"]
 TINY = dict(lp_epochs=1, ft_epochs=2, batch_size=8)
 
 
+@pytest.fixture(autouse=True)
+def few_workers(monkeypatch):
+    """The stages size loader pools by the host's CPUs (up to 128): forking that many
+    for a few tiny images dominated these tests."""
+    monkeypatch.setattr(finetune_stage, "MAX_WORKERS", 2)
+
+
 def tiny_backbone():
     from transformers import Dinov2Config, Dinov2Model
 

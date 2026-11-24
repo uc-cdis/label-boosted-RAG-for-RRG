@@ -49,6 +49,7 @@ from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_sco
 from labrag import artifacts, paths
 from labrag.classifiers import attention, logistic, quant
 from labrag.data import DATASETS, labels_only, padchest, split_sections
+from labrag.labelers import devices
 
 CLASSIFIERS = ("lr", "lr-tuned", "attn", "attn-cls")
 TOKEN_CHUNK = 256  # studies packed at a time while loading tokens
@@ -70,7 +71,8 @@ PARAMS = {
     "attn-cls": attention.PARAMS,
 }
 NO_FINDING = "No Finding"
-NOT_PATHOLOGY = ("No Finding", "Support Devices")
+# Device types (labels --labeler devices) are devices too: they never clear No Finding.
+NOT_PATHOLOGY = ("No Finding", "Support Devices", *devices.NAMES)
 CONSISTENCY = "No Finding = 0 when any label other than Support Devices is predicted"
 FOLD_SEED = 20261117
 PADCHEST_CONSISTENCY = "normal = 0 when any other label is predicted"

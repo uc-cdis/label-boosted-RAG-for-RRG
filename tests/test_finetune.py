@@ -336,6 +336,58 @@ def test_multiclass_finetune_then_predict(tmp_path, monkeypatch):
     assert config["threshold"] == "none: the most probable class"
 
 
+def test_device_finetune_then_predict(tmp_path, monkeypatch):
+    from labrag.labelers import devices
+
+    cxr_root = tmp_path / "cxr"
+    monkeypatch.setattr(paths, "SHARED_ROOT", tmp_path / "shared")
+    for name, n, seed in (("fakea", 30, 0), ("fakeb", 20, 1)):
+        adapter = fake_dataset(cxr_root, name, n, seed)
+        monkeypatch.setitem(data.DATASETS, name, adapter)
+        rng = np.random.default_rng(seed + 50)
+        for section in ("findings", "impression"):
+            ref = paths.SHARED_ROOT / "labels" / name / section / "chexbert14"
+            ids = artifacts.read_table(ref / "labels.csv").study_id
+            codes = rng.choice([1.0, 0.0, np.nan], size=(len(ids), len(devices.NAMES)))
+            typed = pd.DataFrame(codes, columns=devices.NAMES)
+            typed.insert(0, "study_id", ids.to_numpy())
+
+            def build(out, typed=typed):
+                typed.to_csv(out / "labels.csv", index=False)
+
+            artifacts.publish(
+                f"labels/{name}/{section}/devices", {"fake": name}, {}, build
+            )
+    monkeypatch.setattr(weights, "resolve", lambda name: (tmp_path, {"fake": name}))
+    monkeypatch.setattr(finetune, "load_backbone", lambda d: tiny_backbone())
+    monkeypatch.setattr(finetune, "load_processor", lambda d: tiny_processor())
+    for k, v in TINY.items():
+        monkeypatch.setitem(finetune.PARAMS, k, v)
+
+    with pytest.raises(SystemExit, match="--labeler"):
+        finetune_stage.run("fakea-fakeb", "findings", labeler="devices")
+    clf = finetune_stage.run(
+        "fakea-fakeb",
+        "findings-impression",
+        labeler="chexbert14.devices",
+        seed=3,
+        multiclass=True,
+        cxr_root=cxr_root,
+    )
+    rel = "fakea-fakeb/raddino.ft-attn-seed3/findings-impression/chexbert14.devices.mc"
+    assert clf == paths.SHARED_ROOT / "classifiers" / rel
+    manifest = artifacts.read_manifest(clf)
+    assert set(manifest["inputs"]["device_labels"]) == set(manifest["inputs"]["labels"])
+    names = [*NAMES, *devices.NAMES]
+    assert torch.load(clf / "model.pt", weights_only=False)["labels"] == names
+
+    out = predict.run("fakeb", rel, cxr_root=cxr_root)
+    pred = artifacts.read_table(out / "predictions.findings.csv")
+    assert list(pred.columns[1:]) == names
+    assert set(pd.read_csv(out / "metrics.csv").label) == set(names)
+    assert "device_labels" in artifacts.read_manifest(out)["inputs"]
+
+
 def test_reader_index_keeps_frequent_train_readers():
     reader = np.array(["r1", "r1", "r2", None, "r1", "r3", "r2"], dtype=object)
     train = np.array([True, True, True, True, False, True, False])

@@ -135,6 +135,7 @@ def _finetuned(
     """predictions/<dataset>/<classifier>/ of a finetune classifier, from the images."""
     from labrag.classifiers import finetune, logistic
     from labrag.stages import finetune as finetune_stage
+    from labrag.stages import labels as labels_stage
 
     adapter = DATASETS[dataset]
     sections, labeler = clf_config["sections"], clf_config["labeler"]
@@ -146,14 +147,14 @@ def _finetuned(
         else {v: k for k, v in classify.BINARIZE.items()}[clf_config["binarize"]]
     )
     lab_dirs = {
-        s: paths.SHARED_ROOT / "labels" / dataset / s / labeler
+        s: labels_stage.label_dirs(dataset, s, labeler)
         for s in sections
         if s in adapter.SECTIONS
-        and (paths.SHARED_ROOT / "labels" / dataset / s / labeler).is_dir()
+        and all(d.is_dir() for d in labels_stage.label_dirs(dataset, s, labeler))
     }
     inputs = {
         "classifier": clf_record,
-        "labels": {s: artifacts.artifact_record(d) for s, d in lab_dirs.items()},
+        "labels": {s: artifacts.artifact_record(d[0]) for s, d in lab_dirs.items()},
         "sources": [artifacts.file_record(cxr_root / f) for f in adapter.SOURCE_FILES],
         "splits": [
             artifacts.file_record(paths.SPLITS_DIR / f) for f in adapter.SPLIT_FILES
@@ -161,6 +162,10 @@ def _finetuned(
         "images": {"root": str(cxr_root / adapter.IMAGE_ROOT)},
         "weights": weights_record,
     }
+    if labeler == labels_stage.WITH_DEVICES:
+        inputs["device_labels"] = {
+            s: artifacts.artifact_record(d[1]) for s, d in lab_dirs.items()
+        }
     config = {
         "stage": "predict",
         "dataset": dataset,
@@ -243,9 +248,7 @@ def _finetuned(
             else:
                 t = stored[i]
             if s in lab_dirs:
-                labels = artifacts.read_table(lab_dirs[s] / "labels.csv").set_index(
-                    "study_id"
-                )
+                labels = labels_stage.read_labels(lab_dirs[s])
                 has = ids.isin(labels.index).to_numpy()
                 Y = labels.reindex(ids)[names].isin(classify.POSITIVE[positive])
                 Y = Y.to_numpy(dtype=int)

@@ -38,6 +38,8 @@ from labrag.stages.classify import NO_FINDING, NOT_PATHOLOGY
 
 DEVICES = "devices"
 LABELERS = ("chexbert14", DEVICES, *padchest.VOCABULARIES)
+# One label set: CheXbert-14's labels, then the device types (finetune, predict).
+WITH_DEVICES = f"chexbert14.{DEVICES}"
 # A label's value from several sections: the first of these any gives (NaN last).
 COMBINE = (1.0, -1.0, 0.0)
 COMBINE_RULE = (
@@ -101,6 +103,28 @@ def run(
     return artifacts.publish(
         f"labels/{dataset}/{section}/{labeler}", config, inputs, build, overwrite
     )
+
+
+def parts(labeler: str) -> list[str]:
+    """The labels artifacts a label set reads: WITH_DEVICES is two."""
+    return ["chexbert14", DEVICES] if labeler == WITH_DEVICES else [labeler]
+
+
+def label_dirs(dataset: str, section: str, labeler: str) -> list[Path]:
+    return [
+        paths.SHARED_ROOT / "labels" / dataset / section / p for p in parts(labeler)
+    ]
+
+
+def read_labels(dirs: list[Path]) -> pd.DataFrame:
+    """Labels (index study_id) of one or more labels artifacts of the same studies,
+    their columns side by side."""
+    tables = [
+        artifacts.read_table(d / "labels.csv").set_index("study_id") for d in dirs
+    ]
+    for t in tables[1:]:
+        assert set(t.index) == set(tables[0].index), "label sets cover other studies"
+    return tables[0].join(tables[1:]) if len(tables) > 1 else tables[0]
 
 
 def _device_labels(dataset: str, section: str, overwrite: bool, cxr_root: Path) -> Path:

@@ -144,7 +144,12 @@ def add_classify(sub) -> None:
 
 
 def add_finetune(sub) -> None:
-    p = stage(sub, finetune, "--labeler", "--uncertain")
+    p = stage(sub, finetune, "--uncertain")
+    p.add_argument(
+        "--labeler",
+        choices=finetune.LABELERS,
+        help="the label set: chexbert14, or chexbert14.devices (and the device types)",
+    )
     p.add_argument(
         "--dataset",
         required=True,
@@ -247,7 +252,8 @@ def add_build_prompts(sub) -> None:
         "--devices",
         action="store_true",
         help="labrag-oracle: add the device types (labels --labeler devices) to the "
-        "label set, shown and ranked on",
+        "label set, shown and ranked on; labrag: the same, predicted by a "
+        "chexbert14.devices fine-tune (--predictions)",
     )
     p.add_argument(
         "--confidence",

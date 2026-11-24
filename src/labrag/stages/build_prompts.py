@@ -44,7 +44,9 @@ directory suffix ``.sides``.
 unchanged; directory suffix ``.severity``. ``--devices`` (labrag-oracle): the device
 types (labels stage, labeler ``devices``) join the label set, for the target and the
 examples and in the ranking: "Support Devices, Endotracheal Tube, Enteric Tube";
-directory suffix ``.devices``.
+directory suffix ``.devices``. labrag ``--devices``: the same, the target's device types
+predicted by a ``chexbert14.devices`` fine-tune (``--predictions``); without
+``--devices`` its predicted device types are left out (CheXbert-14 labels only).
 ``--confidence`` (labrag): each target label shown with the classifier's probability,
 "Atelectasis (28%)" (its probs file); example labels, label set and ranking unchanged;
 directory suffix ``.confidence``.
@@ -98,12 +100,13 @@ from labrag.data import (
     has_times,
     priors,
 )
+from labrag.labelers import devices as device_types
 from labrag.labelers import radgraph_sides
 from labrag.stages import severity as severity_stage
 from labrag.stages import styles as styles_stage
 from labrag.stages import threshold
 from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, MULTICLASS_SUFFIX, POSITIVE
-from labrag.stages.labels import COMBINE_RULE, DEVICES, combine
+from labrag.stages.labels import COMBINE_RULE, DEVICES, WITH_DEVICES, combine
 
 # experiment -> dataset -> target roles, corpus roles and, optionally, a sample of the
 # targets: that many patients drawn with the seed, one study each
@@ -207,8 +210,8 @@ def run(
         raise SystemExit("build-prompts: --sides is for labrag-oracle")
     if severity and condition != "labrag-oracle":
         raise SystemExit("build-prompts: --severity is for labrag-oracle")
-    if devices and condition != "labrag-oracle":
-        raise SystemExit("build-prompts: --devices is for labrag-oracle")
+    if devices and condition not in ("labrag-oracle", "labrag"):
+        raise SystemExit("build-prompts: --devices is for labrag-oracle and labrag")
     if sides and severity:
         raise SystemExit("build-prompts: --sides or --severity, not both")
     if confidence and condition != "labrag":
@@ -236,7 +239,7 @@ def run(
         raise SystemExit(f"prompt {prompt!r} does not fit condition {condition!r}")
 
     labeler = LABELER + LABELER_SUFFIX[uncertain]
-    multiclass = False
+    multiclass = with_types = False
     if transfer:
         source, clf_name, clf_sections, labeler = parse_classifier(predictions)
         readouts = clf_sections.split(JOIN)
@@ -252,6 +255,7 @@ def run(
             raise SystemExit(f"build-prompts: {predictions} has no {section} readout")
         readout = readouts[0]
         multiclass = labeler.endswith(MULTICLASS_SUFFIX)
+        with_types = labeler.removesuffix(MULTICLASS_SUFFIX) == WITH_DEVICES
         if multiclass and (
             condition != "labrag" or confidence or corpus_labels != "reference"
         ):
@@ -261,6 +265,7 @@ def run(
             )
         if (
             corpus_labels == "reference"
+            and not with_types
             and labeler.removesuffix(MULTICLASS_SUFFIX)
             != LABELER + LABELER_SUFFIX[uncertain]
         ):
@@ -281,6 +286,20 @@ def run(
             )
         if section not in clf_sections.split(JOIN):
             raise SystemExit(f"build-prompts: {classifier} has no {section} readout")
+    if devices and condition == "labrag" and not (transfer and with_types):
+        raise SystemExit(
+            f"build-prompts: labrag --devices needs --predictions of a {WITH_DEVICES} "
+            "fine-tune"
+        )
+    if (
+        transfer
+        and with_types
+        and (corpus_labels != "reference" or uncertain != "zeros")
+    ):
+        raise SystemExit(
+            f"build-prompts: {WITH_DEVICES} predictions take reference corpus labels "
+            "and --uncertain zeros"
+        )
     if categories and not multiclass:
         raise SystemExit(
             f"build-prompts: prompt {prompt!r} shows label categories: it needs "
@@ -444,6 +463,8 @@ def run(
                 f"the {DEVICES} labels join the label set: target, examples, ranking"
             )
             condition_dir += ".devices"
+        elif transfer and with_types:
+            config["devices"] = "the predicted device types left out"
         if sides:
             config["sides"] = "reference, target and examples: label (side)"
             condition_dir += ".sides"
@@ -480,6 +501,9 @@ def run(
                 if joint
                 else tables[0].set_index("study_id")
             )
+            if with_types and not devices:
+                keep = [c for c in transferred.columns if c not in device_types.NAMES]
+                transferred = transferred[keep]
             names = list(transferred.columns)
         studies = adapter.load_studies(cxr_root).set_index("study_id")
         if joint:

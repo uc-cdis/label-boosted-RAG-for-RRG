@@ -19,7 +19,9 @@ MIN_READER_STUDIES train studies, the rest and datasets without readers sharing 
 images, data.study_images: the preferred frontal first; the studies are the same).
 
 Only report-labelled datasets (CheXbert-14 on report text): every dataset's labels
-are then the same labeler on the same section.
+are then the same labeler on the same section. ``--labeler chexbert14.devices``:
+CheXbert-14's labels and then the device types (labels --labeler devices) as one label
+set, each a readout per section like the others.
 
 ``--multiclass``: each label is one of CheXbert's four values (positive, negative,
 uncertain, blank) instead of positive vs the rest, softmax cross-entropy; the predicted
@@ -46,8 +48,10 @@ from labrag.data import (
     study_images,
 )
 from labrag.stages import classify
+from labrag.stages import labels as labels_stage
 
 CLASSIFIERS = ("attn", "attn-cls", "attn-reader", "attn-all-images")
+LABELERS = ("chexbert14", labels_stage.WITH_DEVICES)
 ALL_IMAGES = "attn-all-images"
 IMAGE = "preferred frontal per study, min-max to 8-bit grayscale"
 ALL_IMAGES_IMAGE = (
@@ -93,8 +97,9 @@ def run(
         if labels_only(d):
             raise SystemExit(f"finetune: {d} has release labels, not report labels")
         sections = split_sections("finetune", d, section)
-    if labeler != "chexbert14":
-        raise SystemExit("finetune: report labels are chexbert14")
+    if labeler not in LABELERS:
+        raise SystemExit(f"finetune: --labeler {list(LABELERS)}")
+    with_devices = labeler == labels_stage.WITH_DEVICES
     if classifier not in CLASSIFIERS:
         raise SystemExit(f"finetune: --classifier {list(CLASSIFIERS)}")
     seed = 0 if seed is None else seed
@@ -105,13 +110,14 @@ def run(
         raise SystemExit("finetune: attn-reader needs a dataset with readers")
     model_dir, weights_record = weights.resolve(embed_weights())
     lab_dirs = {
-        (d, s): paths.SHARED_ROOT / "labels" / d / s / labeler
+        (d, s): labels_stage.label_dirs(d, s, labeler)
         for d in datasets
         for s in sections
     }
     inputs = {
         "labels": {
-            f"{d}/{s}": artifacts.artifact_record(p) for (d, s), p in lab_dirs.items()
+            f"{d}/{s}": artifacts.artifact_record(p[0])
+            for (d, s), p in lab_dirs.items()
         },
         "sources": {
             d: [artifacts.file_record(cxr_root / f) for f in DATASETS[d].SOURCE_FILES]
@@ -127,6 +133,11 @@ def run(
         "images": {d: str(cxr_root / DATASETS[d].IMAGE_ROOT) for d in datasets},
         "weights": weights_record,
     }
+    if with_devices:
+        inputs["device_labels"] = {
+            f"{d}/{s}": artifacts.artifact_record(p[1])
+            for (d, s), p in lab_dirs.items()
+        }
     if with_readers:
         inputs["readers"] = {
             d: [artifacts.file_record(cxr_root / f) for f in DATASETS[d].READER_FILES]
@@ -148,6 +159,11 @@ def run(
         "consistency": classify.CONSISTENCY,
         "seed": seed,
     }
+    if with_devices:
+        config["devices"] = (
+            "the device types join CheXbert-14's labels; like Support Devices, they "
+            "never clear No Finding"
+        )
     if classifier == "attn-cls":
         config["input"] = "CLS token only"
     if classifier == ALL_IMAGES:
@@ -183,12 +199,7 @@ def run(
         rows, names = [], None
         for d in datasets:
             adapter = DATASETS[d]
-            labels = {
-                s: artifacts.read_table(lab_dirs[d, s] / "labels.csv").set_index(
-                    "study_id"
-                )
-                for s in sections
-            }
+            labels = {s: labels_stage.read_labels(lab_dirs[d, s]) for s in sections}
             for t in labels.values():
                 names = names or list(t.columns)
                 assert list(t.columns) == names, "labels differ"

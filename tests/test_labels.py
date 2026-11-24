@@ -33,6 +33,33 @@ def test_combine_pathologies_win_over_no_finding(multiclass, cleared):
     np.testing.assert_array_equal(out["No Finding"].to_numpy(), [cleared, 1])
 
 
+def test_device_types_keep_no_finding():
+    f = pd.DataFrame(
+        [["a", 0, 1, 1], ["b", 1, 1, nan]],
+        columns=["study_id", "Edema", "Endotracheal Tube", "No Finding"],
+    )
+    out = combine([f], multiclass=True)
+    np.testing.assert_array_equal(out["No Finding"].to_numpy(), [1, nan])
+
+
+def test_read_labels_joins_label_sets_of_the_same_studies(tmp_path):
+    for name, cols, ids in (
+        ("chexbert14", ["Edema"], ["a", "b"]),
+        ("devices", ["Chest Tube"], ["b", "a"]),
+        ("other", ["Chest Tube"], ["a"]),
+    ):
+        (tmp_path / name).mkdir()
+        t = pd.DataFrame({"study_id": ids, cols[0]: [1.0, 0.0][: len(ids)]})
+        t.to_csv(tmp_path / name / "labels.csv", index=False)
+    out = labels.read_labels([tmp_path / "chexbert14", tmp_path / "devices"])
+    assert list(out.columns) == ["Edema", "Chest Tube"]
+    assert out.loc["a"].tolist() == [1.0, 0.0]
+    with pytest.raises(AssertionError, match="other studies"):
+        labels.read_labels([tmp_path / "chexbert14", tmp_path / "other"])
+    assert labels.parts(labels.WITH_DEVICES) == ["chexbert14", "devices"]
+    assert labels.parts("chexbert14") == ["chexbert14"]
+
+
 def test_combine_refuses_unknown_values():
     with pytest.raises(AssertionError, match="unexpected"):
         combine([table([["a", 2, nan, nan, nan]])], multiclass=True)

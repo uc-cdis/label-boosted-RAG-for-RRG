@@ -77,6 +77,7 @@ def test_view_preference_and_laterals():
     assert studies.image_path.to_dict() == {"s1": "c.jpg", "s2": "a.jpg"}
 
 
+@pytest.mark.data
 @needs_data
 def test_sections_match_upstream_sectioned_csv(tmp_path):
     script = mimic.PARSER.parent / "create_section_files.py"
@@ -108,6 +109,7 @@ def test_sections_match_upstream_sectioned_csv(tmp_path):
         assert (both[section].fillna("") == both[f"{section}_up"]).all(), section
 
 
+@pytest.mark.data
 @needs_data
 def test_release_studies():
     studies = mimic.load_studies(paths.CXR_ROOT)

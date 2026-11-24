@@ -52,6 +52,7 @@ def test_indication_none_string_is_nan():
     assert pd.isna(studies.indication["1"]) and studies.indication["2"] == "Cough"
 
 
+@pytest.mark.data
 @needs_data
 def test_release_studies():
     studies = rexgradient.load_studies(paths.CXR_ROOT)

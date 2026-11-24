@@ -73,6 +73,7 @@ def test_corrupt_image_is_skipped_and_text_is_cleaned():
     assert pd.isna(studies.loc["p2_s1", "findings"])
 
 
+@pytest.mark.data
 @needs_data
 def test_release_studies():
     images = chexpertplus.load_images(paths.CXR_ROOT)

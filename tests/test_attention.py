@@ -75,6 +75,7 @@ def test_mean_auroc_masks_rows_per_label():
     assert attention.mean_auroc(Y, P, mask) == 1.0  # label 1 on rows 0-1 only
 
 
+@pytest.mark.train
 def test_masked_entries_do_not_train(small):
     store, Y, train, val = small
     Y2 = np.concatenate([Y, Y], axis=1)  # two readouts, same labels
@@ -93,6 +94,7 @@ def test_masked_entries_do_not_train(small):
     assert attention.mean_auroc(Y2[val], P[val], mask[val]) > 0.9
 
 
+@pytest.mark.train
 def test_learns_and_is_deterministic(small):
     store, Y, train, val = small
     model, history = attention.fit(store, Y, train, val, seed=1, log=lambda _: None)
@@ -107,6 +109,7 @@ def test_learns_and_is_deterministic(small):
     assert max(h["val_auroc"] for h in history) == attention.mean_auroc(Y[val], P[val])
 
 
+@pytest.mark.train
 def test_out_of_fold_predicts_each_fold_from_the_other_folds(small):
     from labrag.stages import classify
 

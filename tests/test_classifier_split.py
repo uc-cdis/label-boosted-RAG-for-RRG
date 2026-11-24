@@ -42,6 +42,7 @@ def test_classifier_roles(tmp_path):
     }
 
 
+@pytest.mark.data
 @needs_data
 def test_classifier_val_split_patients():
     images = chexpertplus.load_images(paths.CXR_ROOT)

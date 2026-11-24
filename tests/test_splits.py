@@ -6,6 +6,7 @@ from labrag import paths
 from labrag.data import DATASETS
 
 
+@pytest.mark.data
 @pytest.mark.parametrize("dataset", sorted(DATASETS))
 def test_write_splits_reproduces_committed_files(tmp_path, dataset):
     adapter = DATASETS[dataset]

@@ -48,8 +48,12 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not gpu'"  # a later -m on the command line replaces this
-markers = ["gpu: needs Docker and one GPU; runs only when asked for with -m gpu"]
+addopts = "-m 'not gpu and not train and not data'"  # a later -m replaces this
+markers = [
+    "gpu: needs Docker and one GPU; runs only when asked for with -m gpu",
+    "train: trains a model (minutes on CPU); runs in a job, with -m train",
+    "data: reads the mounted datasets or weights (audits); runs with -m data",
+]
 
 [tool.isort]
 profile = "black"

@@ -49,6 +49,7 @@ def model_and_processor():
     return raddino.load_model(MODEL_DIR, torch.device("cpu"))
 
 
+@pytest.mark.data
 @needs_weights_and_images
 def test_matches_upstream_values(model_and_processor):
     model, processor = model_and_processor
@@ -59,6 +60,7 @@ def test_matches_upstream_values(model_and_processor):
         np.testing.assert_allclose(np.linalg.norm(row), norm, rtol=1e-5)
 
 
+@pytest.mark.data
 @needs_weights_and_images
 def test_batching_and_order(model_and_processor):
     model, processor = model_and_processor
@@ -69,6 +71,7 @@ def test_batching_and_order(model_and_processor):
     np.testing.assert_array_equal(batched[0], batched[2])
 
 
+@pytest.mark.data
 @needs_weights_and_images
 def test_tokens_hold_the_cls_embedding(model_and_processor):
     model, processor = model_and_processor

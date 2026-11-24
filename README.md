@@ -63,8 +63,21 @@ Each root is set by an environment variable (`src/labrag/paths.py`):
   job logs.
 
 ## Tests
-`uv run pytest` runs the checks, including exact reproduction of the frozen splits.
-Tests that need a dataset skip when it isn't mounted.
+`uv run pytest` runs the fast checks: no model training, no reads of the mounted
+datasets or weights. Two opt-in groups hold the rest:
+
+- `data`: audits against the mounted releases and weights (adapters vs the release,
+  exact reproduction of the frozen splits, encoder and labeler parity). Run them when
+  an adapter, a split or a release changes: `uv run pytest -m data`; a test skips if
+  its dataset isn't mounted.
+- `train`: the tests that train a classifier (fine-tune and attention head:
+  determinism, finetune → predict). They run on CPU in a job, next to the GPUs; the
+  GPUs are hidden (Slurm doesn't confine a job without --gres, and the fine-tune would
+  take every visible GPU):
+
+```
+slurm/submit.sh --cpus-per-task=16 -- env CUDA_VISIBLE_DEVICES= pytest -p no:cacheprovider -m train
+```
 
 Tests marked `gpu` run only when asked for with `-m gpu`. GREEN's upstream reproduction
 test, through both of our judge paths, is one of them. On the cluster:

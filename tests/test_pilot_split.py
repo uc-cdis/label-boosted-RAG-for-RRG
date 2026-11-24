@@ -11,6 +11,7 @@ needs_data = pytest.mark.skipif(
 )
 
 
+@pytest.mark.data
 @needs_data
 def test_pilot_eligibility_counts():
     images = chexpertplus.load_images(paths.CXR_ROOT)

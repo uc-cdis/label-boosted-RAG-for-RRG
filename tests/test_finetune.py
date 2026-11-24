@@ -22,7 +22,7 @@ TINY = dict(lp_epochs=1, ft_epochs=2, batch_size=8)
 def few_workers(monkeypatch):
     """The stages size loader pools by the host's CPUs (up to 128): forking that many
     for a few tiny images dominated these tests."""
-    monkeypatch.setattr(finetune_stage, "MAX_WORKERS", 2)
+    monkeypatch.setattr(finetune_stage, "MAX_WORKERS", 0)
 
 
 def tiny_backbone():
@@ -122,6 +122,7 @@ def test_datasets_join_in_registry_order():
     ]
 
 
+@pytest.mark.train
 @pytest.mark.parametrize("world", [1, 2])
 def test_training_is_deterministic(tmp_path, world):
     paths_ = images(tmp_path / "img", 40)
@@ -159,6 +160,7 @@ def test_training_is_deterministic(tmp_path, world):
     assert finetune.PARAMS["ft_epochs"] == 10  # the override doesn't leak
 
 
+@pytest.mark.train
 @pytest.mark.parametrize("world", [1, 2])
 def test_reader_training_is_deterministic(tmp_path, world):
     paths_ = images(tmp_path / "img", 40)
@@ -230,6 +232,7 @@ def fake_dataset(cxr_root, name, n, seed):
     return adapter
 
 
+@pytest.mark.train
 def test_finetune_then_predict(tmp_path, monkeypatch):
     cxr_root = tmp_path / "cxr"
     monkeypatch.setattr(paths, "SHARED_ROOT", tmp_path / "shared")
@@ -272,6 +275,7 @@ def test_class_index_and_positive_probs():
     assert finetune.positive_probs(P, 2, 4).tolist() == [[0, 1, 2, 12, 13, 14]]
 
 
+@pytest.mark.train
 def test_multiclass_training_is_deterministic(tmp_path):
     paths_ = images(tmp_path / "img", 40)
     Y = np.random.default_rng(1).integers(0, 4, (40, 6))
@@ -305,6 +309,7 @@ def test_multiclass_training_is_deterministic(tmp_path):
     assert np.allclose(p1.reshape(16, 2, 4, 3).sum(2), 1)
 
 
+@pytest.mark.train
 def test_multiclass_finetune_then_predict(tmp_path, monkeypatch):
     cxr_root = tmp_path / "cxr"
     monkeypatch.setattr(paths, "SHARED_ROOT", tmp_path / "shared")
@@ -343,6 +348,7 @@ def test_multiclass_finetune_then_predict(tmp_path, monkeypatch):
     assert config["threshold"] == "none: the most probable class"
 
 
+@pytest.mark.train
 def test_device_finetune_then_predict(tmp_path, monkeypatch):
     from labrag.labelers import devices
 
@@ -414,6 +420,7 @@ def test_reader_vectors_start_at_zero():
     assert torch.equal(plain(x), cond(x, torch.tensor([0, 1, 2, 3, 1])))
 
 
+@pytest.mark.train
 def test_reader_finetune_then_predict(tmp_path, monkeypatch):
     cxr_root = tmp_path / "cxr"
     monkeypatch.setattr(paths, "SHARED_ROOT", tmp_path / "shared")
@@ -480,6 +487,7 @@ def test_study_images_preferred_frontal_then_frontals_then_laterals(monkeypatch)
     ]
 
 
+@pytest.mark.train
 @pytest.mark.parametrize("world", [1, 2])
 def test_multi_image_training_is_deterministic(tmp_path, world):
     paths_ = images(tmp_path / "img", 60)
@@ -510,6 +518,7 @@ def test_one_image_study_reads_as_the_single_image_model():
     torch.testing.assert_close(studies[:1], alone)
 
 
+@pytest.mark.train
 def test_all_images_finetune_then_predict(tmp_path, monkeypatch):
     cxr_root = tmp_path / "cxr"
     monkeypatch.setattr(paths, "SHARED_ROOT", tmp_path / "shared")

@@ -33,6 +33,7 @@ def test_to_chexpert_coding():
     assert list(chexbert.to_chexpert(classes).columns) == chexbert.CONDITIONS
 
 
+@pytest.mark.data
 @needs_weights
 def test_encode_special_tokens_and_truncation():
     from transformers import BertTokenizer
@@ -52,6 +53,7 @@ def test_encode_special_tokens_and_truncation():
     assert len(long) == chexbert.MAX_TOKENS and long[-1] == tok.sep_token_id
 
 
+@pytest.mark.data
 @needs_weights
 def test_reproduces_upstream_labeled_reports():
     """The repo's labeled_reports.csv is upstream label.py's output on sample_reports.csv."""
@@ -65,6 +67,7 @@ def test_reproduces_upstream_labeled_reports():
     pd.testing.assert_frame_equal(got, expected)
 
 
+@pytest.mark.data
 @needs_weights
 def test_configured_weights_resolve():
     for name in ("chexbert", "bert-base-uncased"):

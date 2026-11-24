@@ -49,6 +49,7 @@ def test_unknown_mode_is_refused(tmp_path):
         images.load_8bit(path)
 
 
+@pytest.mark.data
 @pytest.mark.skipif(not CHEXPERTPLUS.is_file(), reason="CheXpert Plus not mounted")
 def test_chexpertplus_image_is_unchanged():
     with Image.open(CHEXPERTPLUS) as im:
@@ -56,6 +57,7 @@ def test_chexpertplus_image_is_unchanged():
     np.testing.assert_array_equal(np.asarray(images.load_8bit(CHEXPERTPLUS)), raw)
 
 
+@pytest.mark.data
 @pytest.mark.skipif(not PADCHEST_DIR.is_dir(), reason="PadChest not mounted")
 def test_padchest_16bit_image_spans_8bit_range():
     path = next(PADCHEST_DIR.glob("*.png"))

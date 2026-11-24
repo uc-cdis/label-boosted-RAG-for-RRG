@@ -119,6 +119,7 @@ def test_vocabulary_counts_train_only_and_leaves_out_non_findings():
     assert padchest.vocabulary(studies, roles, 9) == [("a", 2), ("b", 2), ("c", 1)]
 
 
+@pytest.mark.data
 @needs_data
 def test_release_studies():
     images = padchest.load_images(paths.CXR_ROOT)

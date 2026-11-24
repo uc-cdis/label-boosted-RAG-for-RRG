@@ -50,6 +50,7 @@ def test_repeated_names_agree(tree):
     assert (per_name == 1).all().all()
 
 
+@pytest.mark.data
 @pytest.mark.skipif(
     not (paths.CXR_ROOT / PADCHEST_CSV).exists(),
     reason="PadChest label CSV not mounted",

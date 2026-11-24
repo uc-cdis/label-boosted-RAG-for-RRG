@@ -15,7 +15,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-s() { slurm/submit.sh --parsable --kill-on-invalid-dep=yes "$@"; }
+s() { slurm/submit.sh --parsable --kill-on-invalid-dep=yes -x kg35-nvl02,kg35-nvl03 "$@"; }
 SET=val
 MODEL=qwen3.5-27b-vision
 SAMPLING="qwen3.5-thinking-32k qwen3.5-thinking-32k-seed2"

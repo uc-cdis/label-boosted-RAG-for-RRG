@@ -10,7 +10,9 @@ definition. Needs the two sections' labels; no GPU.
 
 Labeler ``devices``: the device types a section names, by rule (labelers/devices.py; 1
 named, 0 named as removed or absent, blank = not mentioned), no GPU; next to CheXbert's
-one Support Devices label.
+one Support Devices label. Labeler ``incidentals``: incidental and chronic findings
+outside CheXbert-14 (degenerative spine, aortic calcification, ...), by rule
+(labelers/incidentals.py; 1 named, 0 negated, blank), no GPU.
 
 A labels-only dataset (PadChest, section ``report``): labels.csv (one row per labelled
 study, 1 present / 0 absent, columns most common first) and vocabulary.csv (label,
@@ -33,11 +35,17 @@ from labrag.data import (
     labels_only,
     padchest,
 )
-from labrag.labelers import chexbert, devices
+from labrag.labelers import chexbert, devices, incidentals
 from labrag.stages.classify import NO_FINDING, NOT_PATHOLOGY
 
 DEVICES = "devices"
-LABELERS = ("chexbert14", DEVICES, *padchest.VOCABULARIES)
+INCIDENTALS = "incidentals"
+# Rule labelers: name -> (module, summary key for the share of studies with a positive).
+RULES = {
+    DEVICES: (devices, "share_with_a_device"),
+    INCIDENTALS: (incidentals, "share_with_an_incidental"),
+}
+LABELERS = ("chexbert14", *RULES, *padchest.VOCABULARIES)
 # One label set: CheXbert-14's labels, then the device types (finetune, predict).
 WITH_DEVICES = f"chexbert14.{DEVICES}"
 # A label's value from several sections: the first of these any gives (NaN last).
@@ -59,13 +67,13 @@ def run(
     cxr_root = cxr_root or paths.CXR_ROOT
     if labels_only(dataset):
         return _release_labels(dataset, section, labeler, overwrite, cxr_root)
-    if labeler not in ("chexbert14", DEVICES):
+    if labeler not in ("chexbert14", *RULES):
         raise SystemExit(f"labels: {labeler} is for PadChest only")
     if section == JOINT:
         return _joint_labels(dataset, labeler, overwrite)
     adapter = DATASETS[dataset]
-    if labeler == DEVICES:
-        return _device_labels(dataset, section, overwrite, cxr_root)
+    if labeler in RULES:
+        return _rule_labels(dataset, section, labeler, overwrite, cxr_root)
     chexbert_dir, chexbert_record = weights.resolve("chexbert")
     bert_dir, bert_record = weights.resolve("bert-base-uncased")
     code = subprocess.run(
@@ -127,8 +135,11 @@ def read_labels(dirs: list[Path]) -> pd.DataFrame:
     return tables[0].join(tables[1:]) if len(tables) > 1 else tables[0]
 
 
-def _device_labels(dataset: str, section: str, overwrite: bool, cxr_root: Path) -> Path:
-    """DEVICES: the rules on each study's section text."""
+def _rule_labels(
+    dataset: str, section: str, labeler: str, overwrite: bool, cxr_root: Path
+) -> Path:
+    """RULES: the labeler's rules on each study's section text."""
+    rules, share = RULES[labeler]
     adapter = DATASETS[dataset]
     inputs = {
         "sources": [artifacts.file_record(cxr_root / f) for f in adapter.SOURCE_FILES],
@@ -137,25 +148,25 @@ def _device_labels(dataset: str, section: str, overwrite: bool, cxr_root: Path) 
         "stage": "labels",
         "dataset": dataset,
         "section": section,
-        "labeler": DEVICES,
-        "labels": devices.NAMES,
+        "labeler": labeler,
+        "labels": rules.NAMES,
     }
 
     def build(out: Path) -> dict:
         studies = adapter.load_studies(cxr_root)
         studies = studies[studies[section].notna()].reset_index(drop=True)
-        labels = devices.label_reports(studies[section])
+        labels = rules.label_reports(studies[section])
         labels.insert(0, "study_id", studies.study_id)
         labels.to_csv(out / "labels.csv", index=False)
-        named = labels[devices.NAMES].eq(1)
+        named = labels[rules.NAMES].eq(1)
         return {
             "n_studies": len(labels),
-            "share_with_a_device": round(float(named.any(axis=1).mean()), 4),
+            share: round(float(named.any(axis=1).mean()), 4),
             "named": {n: int(c) for n, c in named.sum().items()},
         }
 
     return artifacts.publish(
-        f"labels/{dataset}/{section}/{DEVICES}", config, inputs, build, overwrite
+        f"labels/{dataset}/{section}/{labeler}", config, inputs, build, overwrite
     )
 
 

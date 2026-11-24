@@ -256,6 +256,12 @@ def add_build_prompts(sub) -> None:
         "chexbert14.devices fine-tune (--predictions)",
     )
     p.add_argument(
+        "--incidentals",
+        action="store_true",
+        help="labrag-oracle: add the incidental findings (labels --labeler "
+        "incidentals) to the label set, shown and ranked on",
+    )
+    p.add_argument(
         "--confidence",
         action="store_true",
         help="labrag: show each target label with the classifier's probability",

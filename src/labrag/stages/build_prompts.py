@@ -47,6 +47,9 @@ examples and in the ranking: "Support Devices, Endotracheal Tube, Enteric Tube";
 directory suffix ``.devices``. labrag ``--devices``: the same, the target's device types
 predicted by a ``chexbert14.devices`` fine-tune (``--predictions``); without
 ``--devices`` its predicted device types are left out (CheXbert-14 labels only).
+``--incidentals`` (labrag-oracle): the incidental findings (labels stage, labeler
+``incidentals``: degenerative spine, aortic calcification, ...) join the label set the
+same way, after any device types; directory suffix ``.incidentals``.
 ``--confidence`` (labrag): each target label shown with the classifier's probability,
 "Atelectasis (28%)" (its probs file); example labels, label set and ranking unchanged;
 directory suffix ``.confidence``.
@@ -106,7 +109,13 @@ from labrag.stages import severity as severity_stage
 from labrag.stages import styles as styles_stage
 from labrag.stages import threshold
 from labrag.stages.classify import BINARIZE, LABELER_SUFFIX, MULTICLASS_SUFFIX, POSITIVE
-from labrag.stages.labels import COMBINE_RULE, DEVICES, WITH_DEVICES, combine
+from labrag.stages.labels import (
+    COMBINE_RULE,
+    DEVICES,
+    INCIDENTALS,
+    WITH_DEVICES,
+    combine,
+)
 
 # experiment -> dataset -> target roles, corpus roles and, optionally, a sample of the
 # targets: that many patients drawn with the seed, one study each
@@ -159,6 +168,7 @@ def run(
     sides: bool = False,
     severity: bool = False,
     devices: bool = False,
+    incidentals: bool = False,
     confidence: bool = False,
     same: str | None = None,
     overwrite: bool = False,
@@ -212,6 +222,8 @@ def run(
         raise SystemExit("build-prompts: --severity is for labrag-oracle")
     if devices and condition not in ("labrag-oracle", "labrag"):
         raise SystemExit("build-prompts: --devices is for labrag-oracle and labrag")
+    if incidentals and condition != "labrag-oracle":
+        raise SystemExit("build-prompts: --incidentals is for labrag-oracle")
     if sides and severity:
         raise SystemExit("build-prompts: --sides or --severity, not both")
     if confidence and condition != "labrag":
@@ -380,6 +392,9 @@ def run(
     if devices:
         devices_dir = paths.SHARED_ROOT / "labels" / dataset / section / DEVICES
         inputs["device_labels"] = artifacts.artifact_record(devices_dir)
+    if incidentals:
+        incidentals_dir = paths.SHARED_ROOT / "labels" / dataset / section / INCIDENTALS
+        inputs["incidental_labels"] = artifacts.artifact_record(incidentals_dir)
     if transfer:
         pred_dir = paths.SHARED_ROOT / "predictions" / dataset / predictions.strip("/")
         inputs["predictions"] = artifacts.artifact_record(pred_dir)
@@ -465,6 +480,11 @@ def run(
             condition_dir += ".devices"
         elif transfer and with_types:
             config["devices"] = "the predicted device types left out"
+        if incidentals:
+            config["incidentals"] = (
+                f"the {INCIDENTALS} labels join the label set: target, examples, ranking"
+            )
+            condition_dir += ".incidentals"
         if sides:
             config["sides"] = "reference, target and examples: label (side)"
             condition_dir += ".sides"
@@ -485,10 +505,13 @@ def run(
 
     def build(out: Path) -> dict:
         labels = artifacts.read_table(lab_dir / "labels.csv").set_index("study_id")
-        if devices:
-            typed = artifacts.read_table(devices_dir / "labels.csv")
-            typed = typed.set_index("study_id")
-            assert labels.index.isin(typed.index).all(), "a study has no device labels"
+        extra = [devices_dir] if devices else []
+        extra += [incidentals_dir] if incidentals else []
+        for d in extra:  # rule label sets, joined after CheXbert-14's
+            typed = artifacts.read_table(d / "labels.csv").set_index("study_id")
+            assert labels.index.isin(
+                typed.index
+            ).all(), f"a study has no {d.name} labels"
             labels = labels.join(typed)
         names = list(labels.columns)
         if transfer:

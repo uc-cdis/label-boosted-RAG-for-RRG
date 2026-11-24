@@ -1,8 +1,8 @@
-"""Rule labelers on report text: device types and label severity."""
+"""Rule labelers on report text: device types, incidental findings, label severity."""
 
 import pytest
 
-from labrag.labelers import devices, severity
+from labrag.labelers import devices, incidentals, severity
 
 
 @pytest.mark.parametrize(
@@ -51,6 +51,40 @@ def test_device_table_has_every_name():
     table = devices.label_reports(["ET tube in place.", "Clear lungs."])
     assert list(table.columns) == devices.NAMES
     assert table["Endotracheal Tube"].tolist()[0] == 1.0
+    assert table.iloc[1].isna().all()
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (
+            "Degenerative changes of the thoracic spine.",
+            {"Degenerative Spine Changes": 1.0},
+        ),
+        ("Calcification of the aortic knob.", {"Aortic Calcification": 1.0}),
+        ("Atherosclerotic calcifications.", {"Aortic Calcification": 1.0}),
+        ("The aorta is tortuous.", {"Tortuous or Dilated Aorta": 1.0}),
+        ("Lung volumes are low.", {"Low Lung Volumes": 1.0}),
+        ("No hiatal hernia.", {"Hiatal Hernia": 0.0}),
+        # a negation in another clause doesn't touch the finding
+        (
+            "No pneumothorax, and the lungs are hyperinflated.",
+            {"Emphysema or Hyperinflation": 1.0},
+        ),
+        ("Elevation of the right hemidiaphragm.", {"Elevated Hemidiaphragm": 1.0}),
+        ("Calcified granuloma in the left upper lobe.", {"Calcified Granuloma": 1.0}),
+        ("The lungs are clear. No pneumothorax.", {}),
+        ("", {}),
+    ],
+)
+def test_incidentals(text, expected):
+    assert incidentals.label(text) == expected
+
+
+def test_incidental_table_has_every_name():
+    table = incidentals.label_reports(["Mild scoliosis.", "Clear lungs."])
+    assert list(table.columns) == incidentals.NAMES
+    assert table["Scoliosis or Kyphosis"].tolist()[0] == 1.0
     assert table.iloc[1].isna().all()
 
 

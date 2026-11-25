@@ -17,6 +17,9 @@ in `external/`.
   everything else: prompts, tokenization, parsing and scores (`green-client`).
 - `green-native`: GREEN with upstream's own HF generate, on one GPU. This is the reference
   for the served path and is not used for runs.
+- `crimson-client` + `crimson-vllm`, `crimson-native`: CRIMSON (Baharoon et al. 2026), the
+  same pair of paths as GREEN's. CRIMSON's code builds the prompt and parses the judge's
+  JSON; a study it can't parse or score gets `crimson_failed` = 1 and no score.
 
 Each metric's directory holds its `Dockerfile`, its pins (`requirements.txt`, or
 `constraints.txt` for CXR-Report-Metric) and `run.py`, the wrapper that calls upstream.
@@ -38,8 +41,9 @@ Every `run.py` has the same interface:
   collapse and the "EMPTY" placeholder are done by `labrag evaluate`, not here.
 - `out.csv` has one row per study with the metric's scores. `<out>.json` holds the timing.
 
-`green-client` also takes `score <dir>...`, which judges each directory's set
-(`gt.csv`, `pred.csv` → `out.csv`) alone on the running judge; `labrag evaluate` uses it.
+`green-client` and `crimson-client` also take `score <dir>...`, which judges each
+directory's set (`gt.csv`, `pred.csv` → `out.csv`) alone on the running judge;
+`labrag evaluate` uses it. The suite job runs the judges one at a time on its GPU.
 
 To run one by hand (for debugging):
 
@@ -62,8 +66,8 @@ path needs the judge running too (`green-client` waits for `green-vllm` to be he
   build today gets the tree the authors had.
 - **No network at run time.** Running containers have no outside network (building an
   image does: pip installs the pins). Models come read-only from `/models`, which is
-  `LABRAG_MODELS_ROOT` on the host. Only the GREEN judge and its client share a network,
-  and it is internal.
+  `LABRAG_MODELS_ROOT` on the host. Only each judge and its client share a network, and
+  it is internal.
 - **Images by digest.** Base images are pinned by digest. The judge's vLLM image is never
   pulled for you (`pull_policy: never`): pull it by digest on each node in advance.
 - **Images are tagged with the commit** (`LABRAG_COMMIT`, or `dev` for a dirty tree), and
@@ -79,6 +83,8 @@ path needs the judge running too (`green-client` waits for `green-vllm` to be he
 - **GREEN, served:** `VLLM_BATCH_INVARIANT=1` and `TORCHINDUCTOR_DETERMINISTIC=1` make the
   judge's text independent of which studies share a batch and of the job.
   The judge's image, environment and command are part of the scores' config.
+- **CRIMSON, served:** the same settings; whether they give the same guarantee for its
+  judge (Gemma 3) is not measured yet.
 
 GREEN's upstream reproduction test checks both GREEN paths. It is an opt-in GPU test; see
 "Tests" in the [top-level README](../README.md).

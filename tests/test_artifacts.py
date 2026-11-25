@@ -81,6 +81,19 @@ def test_weights_resolve_checks_sha256_and_reads_revision(tmp_path, monkeypatch)
         weights.resolve("m", models_root=tmp_path)
 
 
+def test_weights_resolve_refuses_a_file_listed_absent(tmp_path, monkeypatch):
+    model_dir = tmp_path / "org" / "repo"
+    model_dir.mkdir(parents=True)
+    (model_dir / "w.bin").write_bytes(b"weights")
+    good = artifacts.sha256_file(model_dir / "w.bin")
+    cfg = {"m": {"repo": "org/repo", "files": {"w.bin": good}, "absent": ["x.json"]}}
+    monkeypatch.setattr(weights, "load_config", lambda: cfg)
+    weights.resolve("m", models_root=tmp_path)
+    (model_dir / "x.json").write_text("{}")
+    with pytest.raises(SystemExit, match="must not be there"):
+        weights.resolve("m", models_root=tmp_path)
+
+
 def test_artifact_record_checks_outputs(tmp_path):
     final = artifacts.publish("a", {"k": 1}, {}, _build("v1"), shared_root=tmp_path)
     record = artifacts.artifact_record(final)

@@ -7,7 +7,7 @@
 #
 # Images are tagged with the commit (LABRAG_COMMIT; "dev" by hand); each job is its own
 # compose project. No service has outside network: model files come from /models (the
-# host weights root, read-only); only the GREEN judge and its client share a network.
+# host weights root, read-only); only each LLM judge and its client share a network.
 
 name: labrag-eval
 
@@ -131,6 +131,81 @@ services:
       - --port=8000
       - --dtype=float16
       - --max-model-len=2048
+      - --generation-config=vllm
+      - --skip-tokenizer-init
+      - --disable-uvicorn-access-log
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 1h  # the first start compiles kernels
+
+  # CRIMSON with upstream's judge path (HF pipeline, bf16, one study per pass), on the
+  # job's GPU: the reference.
+  crimson-native:
+    <<: *offline
+    image: labrag/crimson:${LABRAG_COMMIT:-dev}
+    build:
+      context: crimson
+      additional_contexts:
+        upstream: ../external/CRIMSON
+    gpus:
+      - driver: nvidia
+        device_ids: ["${CUDA_VISIBLE_DEVICES:-unset}"]
+    environment:
+      - OMP_NUM_THREADS  # required by run.py
+      # no home for the job's uid (HOME=/), no network
+      - HF_HOME=/tmp/huggingface
+      - HF_HUB_OFFLINE=1
+      - XDG_CACHE_HOME=/tmp/.cache
+
+  # CRIMSON with its judge served by crimson-vllm: crimson-native's image, no GPU;
+  # everything but the forward passes, with upstream's code (eval/crimson/run.py). It
+  # loads the judge's weights on the CPU, unused: upstream's pipeline object needs them.
+  crimson-client:
+    image: labrag/crimson:${LABRAG_COMMIT:-dev}
+    pull_policy: never
+    networks: [judge]
+    volumes: *models
+    depends_on:
+      crimson-vllm:
+        condition: service_healthy
+    environment:  # as crimson-native's, plus where the judge answers
+      - OMP_NUM_THREADS  # required by run.py
+      - HF_HOME=/tmp/huggingface
+      - HF_HUB_OFFLINE=1
+      - XDG_CACHE_HOME=/tmp/.cache
+      - CRIMSON_JUDGE_URL=http://crimson-vllm:8000
+
+  # CRIMSON's judge: green-vllm's image and settings, except bf16 (upstream's and the
+  # checkpoint's dtype) and --max-model-len 16384, which holds a prompt (≈1.9k tokens
+  # on the pilot) plus upstream's max_new_tokens 8192 (the client checks each fits).
+  crimson-vllm:
+    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+    pull_policy: never
+    user: "65534:65534"
+    networks: [judge]
+    volumes: *models
+    gpus:
+      - driver: nvidia
+        device_ids: ["${CUDA_VISIBLE_DEVICES:-unset}"]
+    ipc: host
+    environment:
+      - HOME=/tmp
+      - USER=labrag
+      - HF_HUB_OFFLINE=1
+      - VLLM_NO_USAGE_STATS=1
+      - DO_NOT_TRACK=1
+      - VLLM_BATCH_INVARIANT=1
+      - TORCHINDUCTOR_DETERMINISTIC=1
+    command:
+      - /models/rajpurkarlab/medgemma-4b-it-crimson
+      - --host=0.0.0.0
+      - --port=8000
+      - --dtype=bfloat16
+      - --max-model-len=16384
       - --generation-config=vllm
       - --skip-tokenizer-init
       - --disable-uvicorn-access-log

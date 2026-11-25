@@ -39,6 +39,43 @@ def test_align_refuses_missing_scores():
         compare.align({"a": records([1.0, float("nan")]), "b": records([1, 2])}, ["x"])
 
 
+def test_align_refuses_none_scores_unless_skipped():
+    a, b = records([1.0, None, 3.0]), records([1.0, 2.0, 3.0])
+    with pytest.raises(SystemExit, match="missing scores"):
+        compare.align({"a": a, "b": b}, ["x"])
+    values = compare.align({"a": a, "b": b}, ["x"], skip={("pilot", "patient1_study1")})
+    assert values["a"][:, 0].tolist() == [1.0, 3.0]
+    assert values["b"][:, 0].tolist() == [1.0, 3.0]  # paired: left out of both
+
+
+def crimson_records(scores, failed):
+    rows = records(scores, column="crimson_score")
+    for r, f in zip(rows, failed):
+        others = ("crimson_score", "study_id", "set", "empty_report")
+        r.update({c: None if f else 0.0 for c in CRIMSON if c not in others})
+        r["crimson_failed"] = f
+    return rows
+
+
+CRIMSON = compare.evaluate.METRICS["crimson"]["scores"]
+
+
+def test_failed_studies_leave_every_condition_but_count_in_the_rate():
+    recs = {
+        "a": crimson_records([0.5, None, 0.1, 0.3], [0, 1, 0, 0]),
+        "b": crimson_records([0.4, 0.2, None, 0.3], [0, 0, 1, 0]),
+    }
+    pools = {"a": ["a"], "b": ["b"]}
+    rows = compare.metric_tables(recs, pools, "crimson")
+    by = {(r["statistic"], r["kind"], r["a"], r["b"]): r for r in rows}
+    rate = by[("crimson_failed", "condition", "a", "")]
+    assert (rate["n"], rate["estimate"]) == (4, 0.25)
+    score = by[("crimson_score", "difference", "a", "b")]
+    assert score["n"] == 2  # studies 0 and 3: no condition failed on them
+    assert score["estimate"] == pytest.approx(0.05)
+    assert {r["statistic"] for r in rows} == set(CRIMSON)
+
+
 def test_paired_difference_cancels_shared_noise():
     # b = a + 0.1 exactly: study-level noise is shared, so every resample's
     # difference is -0.1 although each condition's own interval is wide

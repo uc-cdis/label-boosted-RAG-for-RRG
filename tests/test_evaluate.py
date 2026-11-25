@@ -206,10 +206,61 @@ def test_summarize_radcliq_is_corpus_level():
         {"empty_report": False, "RadCliQ-v1": 1.0},
         {"empty_report": True, "RadCliQ-v1": 3.0},
     ]
-    summary = evaluate.summarize(records, ["RadCliQ-v1"])
+    summary = evaluate.summarize(records, {"scores": ["RadCliQ-v1"]})
     assert summary["empty_reports"] == 1
     assert summary["1/RadCliQ-v1"] == pytest.approx(0.5)  # 1/mean, not mean of 1/x
     assert summary["mean"]["RadCliQ-v1"] == pytest.approx(2.0)
+
+
+def crimson_out(failed, scored_where_failed=False):
+    """A fake crimson out.csv writer: study i scores i/10 unless it failed."""
+    spec = evaluate.METRICS["crimson"]
+
+    def fake_compose(*args, tag, prefix=None):
+        out = args[-1]
+        df = pd.read_csv(args[-2])[["study_id"]]
+        for c in spec["scores"]:
+            df[c] = [
+                None if f and not scored_where_failed else i / 10
+                for i, f in enumerate(failed)
+            ]
+        df["crimson_failed"] = failed
+        df["crimson_response"] = ["text"] * len(df)
+        df.to_csv(out, index=False)
+        Path(out).with_suffix(".json").write_text("{}")
+
+    return {**spec, "gpu": False}, fake_compose
+
+
+def three_pairs(n=3):
+    return evaluate.pair_reports(
+        rows(*[f"r{i}." for i in range(n)]),
+        {f"patient{i}_study1": "a" for i in range(n)},
+        "findings",
+        "x",
+    )
+
+
+def test_failed_studies_may_lack_scores_and_are_counted(monkeypatch):
+    spec, fake = crimson_out([0, 1, 0])
+    monkeypatch.setattr(evaluate, "compose", fake)
+    scores, _ = evaluate.score(spec, {"tag": "abc"}, three_pairs())
+    assert scores[1]["crimson_score"] is None and scores[1]["crimson_failed"] == 1
+    assert scores[2]["crimson_score"] == pytest.approx(0.2)
+    records = [{"empty_report": False, **s} for s in scores]
+    json.dumps(records, allow_nan=False)  # null, not NaN, in the artifact
+    summary = evaluate.summarize(records, spec)
+    assert summary["failed"] == 1
+    assert summary["mean"]["crimson_score"] == pytest.approx(0.1)  # scored studies
+    assert summary["mean"]["crimson_failed"] == pytest.approx(1 / 3)
+
+
+def test_missing_scores_without_failure_are_refused(monkeypatch):
+    spec, fake = crimson_out([0, 1])
+    monkeypatch.setattr(evaluate, "compose", fake)
+    spec = {k: v for k, v in spec.items() if k != "failed"}  # no failure flag
+    with pytest.raises(SystemExit, match="missing scores"):
+        evaluate.score(spec, {"tag": "abc"}, three_pairs(2))
 
 
 def test_torch_threads_half_the_job(monkeypatch):
@@ -311,7 +362,7 @@ def test_score_sets_one_run(monkeypatch):
 
 
 @pytest.mark.parametrize("fail", [False, True])
-def test_judge_session_always_takes_the_project_down(monkeypatch, fail):
+def test_judge_session_always_removes_its_judge_only(monkeypatch, fail):
     calls = []
     monkeypatch.setattr(
         evaluate, "compose", lambda *a, tag, check=True: calls.append(a[:2])
@@ -324,7 +375,8 @@ def test_judge_session_always_takes_the_project_down(monkeypatch, fail):
         assert calls == [("up", "--detach")]  # up (and healthy) before the body
         if fail:
             raise RuntimeError
-    assert calls[1:] == [("logs", "--no-color"), ("down", "--timeout")]
+    # not `down`: that would also remove the job's other running containers
+    assert calls[1:] == [("logs", "--no-color"), ("rm", "--stop")]
     assert isinstance(plan["judge_startup_seconds"], int)
 
 
@@ -364,8 +416,14 @@ def test_plan_threads_gives_the_rest_to_the_chunked_metric(monkeypatch):
     plans = plans_of(*evaluate.SUITE)
     evaluate.plan_threads(plans)
     by = {p["metric"]: (p["threads"], p["workers"]) for p in plans}
-    # ratescore 8 + green 4; cxr-report-metric: (36 - 12) // 4 containers of 4
-    assert by == {"ratescore": (8, 1), "green": (4, 1), "cxr-report-metric": (4, 6)}
+    # ratescore 8 + one judge client 4 at a time (green, then crimson);
+    # cxr-report-metric: (36 - 12) // 4 containers of 4
+    assert by == {
+        "ratescore": (8, 1),
+        "green": (4, 1),
+        "crimson": (4, 1),
+        "cxr-report-metric": (4, 6),
+    }
     monkeypatch.setenv("SLURM_CPUS_PER_TASK", "30")  # 15 < 8 + 4 + 4: refused
     with pytest.raises(SystemExit, match="need 16 torch threads.*>= 32"):
         evaluate.plan_threads(plans_of(*evaluate.SUITE))
@@ -374,7 +432,9 @@ def test_plan_threads_gives_the_rest_to_the_chunked_metric(monkeypatch):
     )  # one container, never fewer threads
     plans = plans_of(*evaluate.SUITE)
     evaluate.plan_threads(plans)
-    assert [(p["threads"], p["workers"]) for p in plans] == [(4, 1), (8, 1), (4, 1)]
+    assert [(p["threads"], p["workers"]) for p in plans] == [(4, 1), (8, 1), (4, 1)] + [
+        (4, 1)
+    ]
     monkeypatch.setenv("SLURM_CPUS_PER_TASK", "96")  # 3 sets of 200: 3 chunks
     plans = plans_of(*evaluate.SUITE, studies=200)
     plans[0]["sets"] = plans[0]["sets"] * 3
@@ -382,54 +442,10 @@ def test_plan_threads_gives_the_rest_to_the_chunked_metric(monkeypatch):
     assert plans[0]["workers"] == 3
 
 
-def test_run_starts_cpu_metrics_before_the_judge_and_reports_failures(monkeypatch):
-    events, lock = [], threading.Lock()
-    judge_up = threading.Event()
-
-    def fake_prepare(metric, generations, overwrite):
-        return {"metric": metric, "spec": evaluate.METRICS[metric], "sets": []}, []
-
-    @contextlib.contextmanager
-    def fake_session(spec, image, plan):
-        judge_up.set()
-        with lock:
-            events.append("judge up")
-        yield
-        with lock:
-            events.append("judge down")
-
-    def fake_score_metric(plan, overwrite):
-        with lock:
-            events.append((plan["metric"], judge_up.is_set(), plan["alongside"]))
-        if plan["metric"] == "ratescore":
-            raise SystemExit("boom")
-        return [plan["metric"]]
-
-    monkeypatch.setattr(evaluate, "prepare", fake_prepare)
-    monkeypatch.setattr(evaluate, "check_gpu", lambda spec: [])
-    monkeypatch.setattr(evaluate, "build_image", lambda spec: {"tag": "abc"})
-    monkeypatch.setattr(evaluate, "judge_session", fake_session)
-    monkeypatch.setattr(evaluate, "score_metric", fake_score_metric)
-    monkeypatch.setattr(evaluate.serving, "raise_on_sigterm", lambda: None)
-    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "64")
-    with pytest.raises(SystemExit, match="failed metrics: ratescore"):
-        evaluate.run(["g"])
-    cpu = ("cxr-report-metric", False, ["ratescore", "green"])
-    assert events[0] in (cpu, "judge up")  # the CPU metric doesn't wait for the judge
-    assert cpu in events
-    assert ("ratescore", True, ["cxr-report-metric", "green"]) in events
-    assert ("green", True, ["cxr-report-metric", "ratescore"]) in events
-    assert events[-1] == "judge down"  # after every metric, the failed one included
-
-
-def test_judge_that_fails_to_start_fails_only_its_metric(monkeypatch):
-    scored = []
-
-    @contextlib.contextmanager
-    def failing_session(spec, image, plan):
-        raise subprocess.CalledProcessError(1, ["docker", "compose", "up"])
-        yield
-
+def fake_run_env(monkeypatch, session, score_metric):
+    """run() with fake prepare, images, judge sessions and scoring; returns the compose
+    calls made by run() itself."""
+    calls = []
     monkeypatch.setattr(
         evaluate,
         "prepare",
@@ -437,20 +453,84 @@ def test_judge_that_fails_to_start_fails_only_its_metric(monkeypatch):
     )
     monkeypatch.setattr(evaluate, "check_gpu", lambda spec: [])
     monkeypatch.setattr(evaluate, "build_image", lambda spec: {"tag": "abc"})
-    monkeypatch.setattr(evaluate, "judge_session", failing_session)
+    monkeypatch.setattr(evaluate, "judge_session", session)
+    monkeypatch.setattr(evaluate, "score_metric", score_metric)
     monkeypatch.setattr(
-        evaluate, "score_metric", lambda plan, o: scored.append(plan["metric"]) or []
+        evaluate, "compose", lambda *a, tag, check=True: calls.append(a[0])
     )
     monkeypatch.setattr(evaluate.serving, "raise_on_sigterm", lambda: None)
     monkeypatch.setenv("SLURM_CPUS_PER_TASK", "64")
+    return calls
+
+
+def test_run_holds_the_gpu_one_judge_at_a_time_and_reports_failures(monkeypatch):
+    events, lock = [], threading.Lock()
+    judge = {"up": None}
+
+    @contextlib.contextmanager
+    def fake_session(spec, image, plan):
+        with lock:
+            judge["up"] = spec["judge"]
+            events.append(("up", spec["judge"]))
+        yield
+        with lock:
+            judge["up"] = None
+            events.append(("down", spec["judge"]))
+
+    def fake_score_metric(plan, overwrite):
+        with lock:
+            events.append((plan["metric"], judge["up"]))
+        if plan["metric"] == "ratescore":
+            raise SystemExit("boom")
+        return [plan["metric"]]
+
+    calls = fake_run_env(monkeypatch, fake_session, fake_score_metric)
+    with pytest.raises(SystemExit, match="failed metrics: ratescore"):
+        evaluate.run(["g"])
+    assert ("cxr-report-metric", None) in events  # doesn't wait for a judge
+    green_up, green_down = events.index(("up", "green-vllm")), events.index(
+        ("down", "green-vllm")
+    )
+    # GREEN's judge first, RaTEScore beside it, then CRIMSON's judge alone
+    assert green_up < events.index(("green", "green-vllm")) < green_down
+    assert green_up < events.index(("ratescore", "green-vllm")) < green_down
+    assert green_down < events.index(("up", "crimson-vllm"))
+    assert ("crimson", "crimson-vllm") in events
+    assert events[-1] == ("down", "crimson-vllm")
+    assert calls == ["down"]  # the project, once, after every metric
+
+
+def test_judge_that_fails_to_start_fails_only_its_metric(monkeypatch):
+    scored = []
+
+    @contextlib.contextmanager
+    def session(spec, image, plan):
+        if spec["judge"] == "green-vllm":
+            raise subprocess.CalledProcessError(1, ["docker", "compose", "up"])
+        yield
+
+    fake_run_env(
+        monkeypatch, session, lambda plan, o: scored.append(plan["metric"]) or []
+    )
     with pytest.raises(SystemExit, match="failed metrics: green$"):
         evaluate.run(["g"])
-    assert sorted(scored) == ["cxr-report-metric", "ratescore"]
+    assert sorted(scored) == ["crimson", "cxr-report-metric", "ratescore"]
 
 
-def test_green_native_runs_alone():
+@pytest.mark.parametrize("metric", ["green-native", "crimson-native"])
+def test_native_judges_run_alone(metric):
     with pytest.raises(SystemExit, match="alone"):
-        evaluate.run(["g"], ["green-native", "ratescore"])
+        evaluate.run(["g"], [metric, "ratescore"])
+
+
+def test_gpu_phases_one_judge_each_rest_with_the_first():
+    names = lambda phases: [[p["metric"] for p in ph] for ph in phases]  # noqa: E731
+    assert names(evaluate.gpu_phases(plans_of(*evaluate.SUITE))) == [
+        ["green", "ratescore"],
+        ["crimson"],
+    ]
+    assert names(evaluate.gpu_phases(plans_of("ratescore"))) == [["ratescore"]]
+    assert evaluate.gpu_phases(plans_of("cxr-report-metric")) == []
 
 
 def test_judged_metric_records_the_judge_and_native_shares_its_image():
@@ -469,6 +549,24 @@ def test_judged_metric_records_the_judge_and_native_shares_its_image():
     assert "--skip-tokenizer-init" in judge["command"]
     assert "VLLM_BATCH_INVARIANT=1" in judge["environment"]
     assert "TORCHINDUCTOR_DETERMINISTIC=1" in judge["environment"]
+
+
+def test_crimson_client_and_native_share_an_image_and_the_judge_is_bf16():
+    spec, native = evaluate.METRICS["crimson"], evaluate.METRICS["crimson-native"]
+    assert evaluate.image_build(spec) == (
+        "crimson-native",
+        "eval/crimson",
+        "labrag/crimson",
+    )
+    assert evaluate.image_build(native) == evaluate.image_build(spec)
+    assert "judge" not in native and native["service"] == "crimson-native"
+    judge = evaluate.judge_definition(spec)
+    green = evaluate.judge_definition(evaluate.METRICS["green"])
+    assert judge["service"] == "crimson-vllm"
+    assert judge["image"] == green["image"]  # one pinned vLLM for both judges
+    assert judge["environment"] == green["environment"]  # batch-invariant, determin.
+    assert "--dtype=bfloat16" in judge["command"]
+    assert "--skip-tokenizer-init" in judge["command"]
 
 
 def test_chunked_metric_config_records_its_container_layout(monkeypatch):

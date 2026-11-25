@@ -13,7 +13,9 @@ the runs. Each pooled run's own mean is a ``run`` row (``b`` = its pool).
 
 Paired: a drawn study counts in every condition, so shared noise cancels in the
 differences. Fixed seed and single-threaded numpy means, so intervals don't depend on
-the machine. Scores are never missing; empty reports are scored as "EMPTY".
+the machine. Empty reports are scored as "EMPTY". Scores are missing only where a
+metric failed on a study (CRIMSON): that study is left out of the metric's scores in
+every condition (``n`` drops), and the failure flag's mean covers every study.
 """
 
 import csv
@@ -83,8 +85,7 @@ def run(
             first = records[runs[0]][0]
             flags = [c for c in evaluate.FLAGS if c in first]
             tables += pooled(align(records, flags), pools, flags, "generations")
-        columns = evaluate.METRICS[metric]["scores"]
-        tables += pooled(align(records, columns), pools, columns, metric)
+        tables += metric_tables(records, pools, metric)
 
     def build(dest: Path) -> dict:
         with open(dest / "comparison.csv", "w", newline="") as f:
@@ -111,6 +112,23 @@ def conditions(generations: list[str]) -> dict[str, list[str]]:
     return pools
 
 
+def metric_tables(records: dict[str, list[dict]], pools, metric: str) -> list:
+    """One metric's rows. With a failure flag: its rate over every study, and the
+    scores over the studies no condition failed on."""
+    spec = evaluate.METRICS[metric]
+    columns = spec["scores"]
+    if "failed" not in spec:
+        return pooled(align(records, columns), pools, columns, metric)
+    flag = spec["failed"]
+    columns = [c for c in columns if c != flag]
+    skip = {
+        (r["set"], r["study_id"]) for rows in records.values() for r in rows if r[flag]
+    }
+    return pooled(align(records, [flag]), pools, [flag], metric) + pooled(
+        align(records, columns, skip), pools, columns, metric
+    )
+
+
 def pooled(values, pools, columns: list[str], metric: str) -> list:
     """``compare`` over the pools (per-study means over their runs), then each pooled
     run's own mean as a ``run`` row."""
@@ -125,8 +143,11 @@ def pooled(values, pools, columns: list[str], metric: str) -> list:
     return rows
 
 
-def align(records: dict[str, list[dict]], columns: list[str]) -> dict[str, np.ndarray]:
-    """Per condition, an (n, columns) array with the studies in one shared order.
+def align(
+    records: dict[str, list[dict]], columns: list[str], skip: set | None = None
+) -> dict[str, np.ndarray]:
+    """Per condition, an (n, columns) array with the studies in one shared order,
+    leaving out the (set, study_id) keys in ``skip``.
 
     Refuses conditions not scored on the same studies of the same set.
     """
@@ -141,11 +162,14 @@ def align(records: dict[str, list[dict]], columns: list[str]) -> dict[str, np.nd
     for g in rest:
         if set(keyed[g]) != set(order):
             raise SystemExit(f"compare: {g} and {first} score different studies")
+    order = [k for k in order if k not in (skip or ())]
     values = {}
     for g, by_key in keyed.items():
         v = np.array(
-            [[float(by_key[k][c]) for c in columns] for k in order], dtype=np.float64
-        )
+            [[float(by_key[k][c] if by_key[k][c] is not None else np.nan)
+              for c in columns] for k in order],
+            dtype=np.float64,
+        )  # fmt: skip
         if np.isnan(v).any():
             raise SystemExit(f"compare: {g} has missing scores")
         values[g] = v

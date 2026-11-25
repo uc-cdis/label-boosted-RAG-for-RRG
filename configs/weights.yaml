@@ -129,3 +129,19 @@ green.radllama2-7b:
     tokenization_chexagent.py: 41cd5a036cb6f78b0ed3e8557e36a9f16739f9e977568c3d6d8e50f7e6d98b07
     tokenizer.model: 9e556afd44213b6bd1be2b850ebbbd98f5481437a8021afaf58ee7fb1818d347
     tokenizer_config.json: f3f9570f456ef91657c1f3f38b75f48a54f59db84fcc8e55a5c04057b1540685
+
+# CRIMSON's judge, MedGemmaCRIMSON (Baharoon et al. 2026; HAI-DEF terms, not gated),
+# revision 02e8a99b: text-only Gemma3ForCausalLM, one bf16 model.safetensors.
+# Pulled with --exclude model.safetensors.index.json: that index is stale (maps every
+# tensor to two fp32 shards not in the repo), and vLLM loads only the files an index
+# lists, so it would find no weights. `absent`: the check fails if the file is there.
+crimson.medgemma-4b-it:
+  repo: rajpurkarlab/medgemma-4b-it-crimson
+  absent: [model.safetensors.index.json]
+  files:
+    chat_template.jinja: 7de1c58e208eda46e9c7f86397df37ec49883aeece39fb961e0a6b24088dd3c4
+    config.json: 2957d2900ecca877a4efe630bab9329b0d85a1aae5442ef9e03b91514446a14d
+    generation_config.json: f8de602d9d6a2e1c0bd10570b97a17d12b93b0153f4f0c0eea410cded97a20c0
+    model.safetensors: d858e73a744b4c34cc0bed90e2d4da7273256ff27a85c24e02aeb3a792ec5c9b
+    tokenizer.json: daab2354f8a74e70d70b4d1f804939b68a8c9624dd06cb7858e52dd8970e9726
+    tokenizer_config.json: eb28e3a9807f77cd74dce1b8aed91884621c0302941794470c5a46f884462615

@@ -6,16 +6,21 @@ the means and, for CXR-Report-Metric, 1/RadCliQ-v1 = 1 / mean(RadCliQ-v1), as Re
 
 Each metric is a service of eval/compose.yaml: the upstream's code and pins in its own
 image, built from this checkout and tagged with the commit. ``cxr-report-metric`` runs
-on CPU; ``ratescore`` and ``green`` (judge served by vLLM) share the job's GPU;
-``green-native`` (upstream's HF generate) is the reference and runs alone. Weights are checked (sha256) before any build.
+on CPU; ``ratescore``, ``green`` and ``crimson`` (judges served by vLLM) share the
+job's GPU; ``green-native`` and ``crimson-native`` (upstream's HF generate) are the
+references and run alone. Weights are checked (sha256) before any build.
 
 One job runs the whole suite (``--metric`` picks metrics): --gres=gpu:1 at slurm/job.sh's
-default 72 CPUs. The judge starts first, sizing its KV cache on the empty GPU; meanwhile
-CXR-Report-Metric scores fixed chunks of studies in parallel CPU containers. Torch
-threads are half the job's CPUs: 8 RaTEScore + 4 GREEN client + 4 per CXR container, so
---cpus-per-task = 2 × (12 + 4W) runs W containers; 72 gives W = 6, which keeps pace with
-the GPU. Chunk size and threads change CXR scores in the last bit, so both are in its
-config, and a job too small for them is refused. A failed metric doesn't stop others.
+default 72 CPUs. The judges run one at a time, each sizing its KV cache on an otherwise
+empty GPU: GREEN's with RaTEScore beside it, then CRIMSON's. Meanwhile CXR-Report-Metric
+scores fixed chunks of studies in parallel CPU containers. Torch threads are half the
+job's CPUs: 8 RaTEScore + 4 judge client + 4 per CXR container, so --cpus-per-task =
+2 × (12 + 4W) runs W containers; 72 gives W = 6, which keeps pace with the GPU. Chunk
+size and threads change CXR scores in the last bit, so both are in its config, and a job
+too small for them is refused. A failed metric doesn't stop others.
+
+CRIMSON can fail on a study (upstream can't parse or score the judge's text): the study
+gets ``crimson_failed`` = 1 and no other CRIMSON scores; means are over scored studies.
 
 Input format (deviations from ReXrank: docs/revision-plan.md §7): no section header (a
 leading "Findings:" is removed), whitespace collapsed, study ids 0..n-1; an empty report
@@ -70,7 +75,9 @@ FORMATS = {"findings": FORMAT, JOINT: JOINT_FORMAT}  # the sections we know how 
 
 # Optional keys: ``build`` (the service that builds the image, default the service),
 # ``judge`` (the service serving the LLM judge), ``chunk`` (studies per container run;
-# chunks run in parallel), ``texts`` (text columns kept per study).
+# chunks run in parallel), ``texts`` (text columns kept per study), ``alone`` (holds the
+# GPU: runs in a job of its own), ``failed`` (the 0/1 column of studies the metric
+# couldn't score; their other scores are missing, anywhere else that is an error).
 METRICS = {
     "cxr-report-metric": {
         "service": "cxr-report-metric",
@@ -127,14 +134,47 @@ METRICS = {
         "judge": "green-vllm",
     },
 }
-METRICS["green-native"] = {  # the reference: upstream's HF generate
-    **{k: v for k, v in METRICS["green"].items() if k not in ("build", "judge")},
-    "service": "green-native",
+METRICS["crimson"] = {
+    "service": "crimson-client",
+    "build": "crimson-native",
+    "upstream": "external/CRIMSON",
+    "gpu": True,
+    "threads": 4,  # CRIMSON's text work; the judge runs in its own container
+    "weights": ["crimson.medgemma-4b-it"],
+    "scores": [
+        "crimson_score",
+        *(
+            f"crimson_{k}"
+            for k in (  # upstream's error_counts, in its order
+                "false_findings",
+                "missing_findings",
+                "attribute_errors",
+                "location_errors",
+                "severity_errors",
+                "descriptor_errors",
+                "measurement_errors",
+                "certainty_errors",
+                "unspecific_errors",
+                "overinterpretation_errors",
+                "temporal_errors",
+            )
+        ),
+        "crimson_failed",
+    ],
+    "failed": "crimson_failed",
+    "texts": ["crimson_response"],
+    "judge": "crimson-vllm",
 }
+for _name in ("green", "crimson"):  # the references: upstream's HF generate
+    METRICS[f"{_name}-native"] = {
+        **{k: v for k, v in METRICS[_name].items() if k not in ("build", "judge")},
+        "service": f"{_name}-native",
+        "alone": True,
+    }
 # Per-study flags kept with the scores (unparsed: JOINT only).
 FLAGS = ["empty_report", "unparsed"]
 # The default of `labrag evaluate`: every metric of the suite, in one job.
-SUITE = ["cxr-report-metric", "ratescore", "green"]
+SUITE = ["cxr-report-metric", "ratescore", "green", "crimson"]
 # artifacts.publish reads the umask by setting it, which isn't thread-safe.
 _PUBLISH = threading.Lock()
 
@@ -184,8 +224,9 @@ def run(
 ) -> list[Path]:
     """Score generations artifacts with ``metrics`` (default: the suite), at once."""
     metrics = metrics or SUITE
-    if "green-native" in metrics and len(metrics) > 1:
-        raise SystemExit("green-native runs alone (its judge would share the GPU)")
+    for metric in metrics:
+        if METRICS[metric].get("alone") and len(metrics) > 1:
+            raise SystemExit(f"{metric} runs alone (its judge would share the GPU)")
     plans, done = [], []
     for metric in metrics:
         plan, built = prepare(metric, generations, overwrite)
@@ -197,7 +238,6 @@ def run(
     for plan in plans:  # before anything runs: a GPU metric needs the job's one GPU
         check_gpu(plan["spec"])
         plan["image"] = build_image(plan["spec"])
-    judged = next((p for p in plans if "judge" in p["spec"]), None)
     plan_threads(plans)
     for plan in plans:  # recorded with the timing: what shared the job's GPU and CPUs
         plan["alongside"] = [p["metric"] for p in plans if p is not plan]
@@ -206,27 +246,37 @@ def run(
     pool = concurrent.futures.ThreadPoolExecutor(len(plans))
     futures = {}
     try:
-        # CPU metrics first: they don't wait for the judge
+        # CPU metrics first: they don't wait for a judge
         for plan in plans:
             if not plan["spec"]["gpu"]:
                 futures[pool.submit(score_metric, plan, overwrite)] = plan["metric"]
-        with contextlib.ExitStack() as session:
-            # the judge sizes its KV cache before anything else is on the GPU
-            if judged:
-                try:
-                    session.enter_context(
-                        judge_session(judged["spec"], judged["image"], judged)
-                    )
-                except Exception as e:  # its metric fails; the others still run
-                    failed_judge = concurrent.futures.Future()
-                    failed_judge.set_exception(e)
-                    futures[failed_judge] = judged["metric"]
-            for plan in plans:
-                if plan["spec"]["gpu"] and plan["metric"] not in futures.values():
-                    futures[pool.submit(score_metric, plan, overwrite)] = plan["metric"]
-            concurrent.futures.wait(futures)
+        for phase in gpu_phases(plans):
+            with contextlib.ExitStack() as session:
+                # a judge sizes its KV cache before anything else is on the GPU
+                judged = phase[0]
+                if "judge" in judged["spec"]:
+                    try:
+                        session.enter_context(
+                            judge_session(judged["spec"], judged["image"], judged)
+                        )
+                    except Exception as e:  # its metric fails; the others still run
+                        failed_judge = concurrent.futures.Future()
+                        failed_judge.set_exception(e)
+                        futures[failed_judge] = judged["metric"]
+                started = []
+                for plan in phase:
+                    if plan["metric"] not in futures.values():
+                        future = pool.submit(score_metric, plan, overwrite)
+                        futures[future] = plan["metric"]
+                        started.append(future)
+                concurrent.futures.wait(started)  # the GPU is free for the next phase
+        concurrent.futures.wait(futures)
     finally:
         pool.shutdown(cancel_futures=True)
+        if any("judge" in p["spec"] for p in plans):
+            compose(
+                "down", "--timeout", "30", tag=plans[0]["image"]["tag"], check=False
+            )
     failed = []
     for future, metric in futures.items():
         if future.exception() is None:
@@ -300,21 +350,34 @@ def prepare(
     return {"metric": metric, "spec": spec, "sets": sets}, built
 
 
+def gpu_phases(plans: list[dict]) -> list[list[dict]]:
+    """The GPU metrics in the order they hold the GPU: one phase per judge, its metric
+    first, in plan order; the GPU metrics without a judge run in the first phase."""
+    judged = [p for p in plans if "judge" in p["spec"]]
+    others = [p for p in plans if p["spec"]["gpu"] and "judge" not in p["spec"]]
+    if not judged:
+        return [others] if others else []
+    return [[judged[0], *others], *([p] for p in judged[1:])]
+
+
 def plan_threads(plans: list[dict]) -> None:
-    """How many chunk containers run at a time: torch_threads minus the other metrics'
-    threads, at the chunked metric's threads each. Threads are never lowered (CXR
-    scores depend on them), so a job too small for one container of each is refused."""
+    """How many chunk containers run at a time: torch_threads minus what else runs at
+    once (the busiest GPU phase), at the chunked metric's threads each. Threads are
+    never lowered (CXR scores depend on them), so a job too small for one container of
+    each is refused."""
     budget = torch_threads()
     for plan in plans:
         plan["threads"] = plan["spec"]["threads"]
         plan["workers"] = 1
-    need = sum(p["threads"] for p in plans)
+    cpu = [p for p in plans if not p["spec"]["gpu"]]
+    gpu = max((sum(p["threads"] for p in ph) for ph in gpu_phases(plans)), default=0)
+    need = sum(p["threads"] for p in cpu) + gpu
     if need > budget:
         raise SystemExit(
             f"evaluate: {', '.join(p['metric'] for p in plans)} need {need} torch "
             f"threads, i.e. --cpus-per-task >= {2 * need} (got {budget} threads)"
         )
-    left = budget - sum(p["threads"] for p in plans if "chunk" not in p["spec"])
+    left = budget - gpu - sum(p["threads"] for p in cpu if "chunk" not in p["spec"])
     for plan in plans:
         if "chunk" in plan["spec"]:
             size = plan["spec"]["chunk"]
@@ -391,7 +454,7 @@ def publish_scores(
     extra = {
         "image": image,
         "timing": {**timing, "alongside": plan.get("alongside", [])},
-        "summary": summarize(records, spec["scores"]),
+        "summary": summarize(records, spec),
     }
 
     def build(dest: Path) -> dict:
@@ -518,7 +581,8 @@ def score_sets(
 @contextlib.contextmanager
 def judge_session(spec: dict, image: dict, plan: dict | None = None):
     """Start the judge and wait until it answers; on exit (SIGTERM included) copy its
-    log into the job log and take the compose project down."""
+    log into the job log and remove its container. Only the judge's: `compose down`
+    would also remove the job's running `compose run` containers (CXR-Report-Metric)."""
     serving.raise_on_sigterm()
     start = time.monotonic()
     try:
@@ -529,7 +593,7 @@ def judge_session(spec: dict, image: dict, plan: dict | None = None):
         yield
     finally:
         compose("logs", "--no-color", spec["judge"], tag=image["tag"], check=False)
-        compose("down", "--timeout", "30", tag=image["tag"], check=False)
+        compose("rm", "--stop", "--force", spec["judge"], tag=image["tag"], check=False)
 
 
 def repro(metric: str) -> None:
@@ -546,8 +610,11 @@ def repro(metric: str) -> None:
     session = contextlib.nullcontext()
     if "judge" in spec:
         session = judge_session(spec, image)
-    with tempfile.TemporaryDirectory(prefix="labrag-eval-") as work, session:
-        run_service(spec, image, Path(work), "--repro")
+    try:
+        with tempfile.TemporaryDirectory(prefix="labrag-eval-") as work, session:
+            run_service(spec, image, Path(work), "--repro")
+    finally:
+        compose("down", "--timeout", "30", tag=image["tag"], check=False)
 
 
 def check_gpu(spec: dict) -> list[str]:
@@ -605,11 +672,17 @@ def read_scores(spec: dict, out_csv: Path, pairs: pd.DataFrame) -> list[dict]:
             out_csv, keep_default_na=False, dtype={t: str for t in texts}
         ).set_index("study_id")[texts]
     out = out.loc[pairs["study_id"]]
-    if out[spec["scores"]].isna().any().any():
+    missing = out[spec["scores"]].isna()
+    if "failed" in spec:  # allowed only where the metric says it failed
+        flag = out[spec["failed"]]
+        if not flag.isin([0, 1]).all():
+            raise SystemExit(f"{spec['failed']} must be 0 or 1 for every study")
+        missing = missing[flag == 0]
+    if missing.any().any():
         raise SystemExit("the metric returned missing scores")
     return [
         {
-            **{k: float(row[k]) for k in spec["scores"]},
+            **{k: None if pd.isna(row[k]) else float(row[k]) for k in spec["scores"]},
             **{k: row[k] for k in texts},
         }
         for _, row in out.iterrows()
@@ -647,8 +720,8 @@ def torch_threads() -> int:
 
 
 def image_source(spec: dict) -> dict:
-    """The service that runs (green-client and green-native share an image) and the
-    git ids its image is built from."""
+    """The service that runs (a judge's client and its -native reference share an
+    image) and the git ids its image is built from."""
     _, context, _ = image_build(spec)
     return {
         "service": spec["service"],
@@ -716,13 +789,17 @@ def compose(
         raise subprocess.CalledProcessError(proc.returncode, cmd)
 
 
-def summarize(records: list[dict], columns: list[str]) -> dict:
+def summarize(records: list[dict], spec: dict) -> dict:
+    """Means per score column (for a metric with ``failed``: over the studies it
+    scored, with the failures counted)."""
+    columns = spec["scores"]
     df = pd.DataFrame(records)
     summary = {
         "n": len(df),
         "empty_reports": int(df["empty_report"].sum()),
         **({"unparsed": int(df["unparsed"].sum())} if "unparsed" in df else {}),
-        "mean": {c: float(df[c].mean()) for c in columns},
+        **({"failed": int(df[spec["failed"]].sum())} if "failed" in spec else {}),
+        "mean": {c: float(df[c].astype(float).mean()) for c in columns},
     }
     if "RadCliQ-v1" in columns:
         summary["1/RadCliQ-v1"] = float(1.0 / np.mean(df["RadCliQ-v1"]))

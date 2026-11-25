@@ -13,9 +13,14 @@ the runs. Each pooled run's own mean is a ``run`` row (``b`` = its pool).
 
 Paired: a drawn study counts in every condition, so shared noise cancels in the
 differences. Fixed seed and single-threaded numpy means, so intervals don't depend on
-the machine. Empty reports are scored as "EMPTY". Scores are missing only where a
-metric failed on a study (CRIMSON): that study is left out of the metric's scores in
-every condition (``n`` drops), and the failure flag's mean covers every study.
+the machine. Empty reports are scored as "EMPTY".
+
+Scores are missing only where a metric failed on a study (CRIMSON, as upstream: no
+score, out of the mean). Each statistic then uses the studies it can, within the same
+resamples: a condition's mean over the studies it scored (its upstream mean, the same in
+any table); a difference over the studies both conditions scored (still paired); a
+pool's per-study score over the runs that scored it. ``n`` is per row. The failure
+flag's own rows cover every study.
 """
 
 import csv
@@ -113,26 +118,17 @@ def conditions(generations: list[str]) -> dict[str, list[str]]:
 
 
 def metric_tables(records: dict[str, list[dict]], pools, metric: str) -> list:
-    """One metric's rows. With a failure flag: its rate over every study, and the
-    scores over the studies no condition failed on."""
+    """One metric's rows; its scores may be missing only where its failure flag is
+    set."""
     spec = evaluate.METRICS[metric]
     columns = spec["scores"]
-    if "failed" not in spec:
-        return pooled(align(records, columns), pools, columns, metric)
-    flag = spec["failed"]
-    columns = [c for c in columns if c != flag]
-    skip = {
-        (r["set"], r["study_id"]) for rows in records.values() for r in rows if r[flag]
-    }
-    return pooled(align(records, [flag]), pools, [flag], metric) + pooled(
-        align(records, columns, skip), pools, columns, metric
-    )
+    return pooled(align(records, columns, spec.get("failed")), pools, columns, metric)
 
 
 def pooled(values, pools, columns: list[str], metric: str) -> list:
     """``compare`` over the pools (per-study means over their runs), then each pooled
     run's own mean as a ``run`` row."""
-    means = {c: np.mean([values[g] for g in m], axis=0) for c, m in pools.items()}
+    means = {c: _mean_over_runs([values[g] for g in m]) for c, m in pools.items()}
     rows = compare(means, columns, metric)
     for c, members in pools.items():
         if len(members) > 1:
@@ -144,10 +140,10 @@ def pooled(values, pools, columns: list[str], metric: str) -> list:
 
 
 def align(
-    records: dict[str, list[dict]], columns: list[str], skip: set | None = None
+    records: dict[str, list[dict]], columns: list[str], failed: str | None = None
 ) -> dict[str, np.ndarray]:
-    """Per condition, an (n, columns) array with the studies in one shared order,
-    leaving out the (set, study_id) keys in ``skip``.
+    """Per condition, an (n, columns) array with the studies in one shared order; NaN
+    where a score is missing, allowed only in studies flagged by the column ``failed``.
 
     Refuses conditions not scored on the same studies of the same set.
     """
@@ -162,7 +158,6 @@ def align(
     for g in rest:
         if set(keyed[g]) != set(order):
             raise SystemExit(f"compare: {g} and {first} score different studies")
-    order = [k for k in order if k not in (skip or ())]
     values = {}
     for g, by_key in keyed.items():
         v = np.array(
@@ -170,31 +165,68 @@ def align(
               for c in columns] for k in order],
             dtype=np.float64,
         )  # fmt: skip
-        if np.isnan(v).any():
+        missing = np.isnan(v)
+        if failed:  # allowed where the metric failed (the flag itself is never missing)
+            flag = np.array([bool(by_key[k][failed]) for k in order])
+            missing &= ~flag[:, None]
+        if missing.any():
             raise SystemExit(f"compare: {g} has missing scores")
         values[g] = v
     return values
 
 
-def resampled_means(values: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
-    """Per condition, the (RESAMPLES, columns) column means of the paired resamples."""
+def _mean_over_runs(runs: list[np.ndarray]) -> np.ndarray:
+    """Per-study mean over a pool's runs; over the runs that scored it where some
+    didn't (NaN where none did)."""
+    stacked = np.stack(runs)
+    if not np.isnan(stacked).any():
+        return stacked.mean(axis=0)
+    return _nanmean(stacked, axis=0)
+
+
+def _nanmean(x: np.ndarray, axis: int) -> np.ndarray:
+    """Mean over the non-NaN values along ``axis`` (NaN where there are none)."""
+    scored = ~np.isnan(x)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(scored, x, 0.0).sum(axis=axis) / scored.sum(axis=axis)
+
+
+def resampled_means(
+    values: dict[str, np.ndarray], pairs: list[tuple[str, str]] = ()
+) -> tuple[dict[str, np.ndarray], dict]:
+    """Per condition, the (RESAMPLES, columns) column means of the paired resamples;
+    and per pair in ``pairs`` and column with a missing score in either, the
+    resamples' mean difference over the studies both scored ({pair: {column: array}}).
+    """
     n = next(iter(values.values())).shape[0]
     rng = np.random.default_rng(SEED)
     means = {g: np.empty((RESAMPLES, v.shape[1])) for g, v in values.items()}
+    gaps = {g: np.isnan(v).any(axis=0) for g, v in values.items()}
+    diffs = {
+        (a, b): {c: np.empty(RESAMPLES) for c in np.flatnonzero(gaps[a] | gaps[b])}
+        for a, b in pairs
+    }
     for start in range(0, RESAMPLES, BLOCK):
         stop = min(start + BLOCK, RESAMPLES)
         idx = rng.integers(0, n, size=(stop - start, n))  # shared by every condition
         for g, v in values.items():
             for c in range(v.shape[1]):
-                means[g][start:stop, c] = v[:, c][idx].mean(axis=1)
-    return means
+                x = v[:, c][idx]
+                means[g][start:stop, c] = _nanmean(x, 1) if gaps[g][c] else x.mean(1)
+        for (a, b), columns in diffs.items():
+            for c, out in columns.items():
+                d = values[a][:, c] - values[b][:, c]  # NaN unless both scored
+                out[start:stop] = _nanmean(d[idx], 1)
+    return means, diffs
 
 
 def compare(values: dict[str, np.ndarray], columns: list[str], metric: str) -> list:
     """Rows of the comparison table for one metric (see FIELDS)."""
     n = next(iter(values.values())).shape[0]
-    boot = resampled_means(values)
-    point = {g: v.mean(axis=0) for g, v in values.items()}
+    pairs = list(itertools.combinations(values, 2))
+    boot, boot_diffs = resampled_means(values, pairs)
+    point = {g: _nanmean(v, 0) for g, v in values.items()}
+    scored = {g: (~np.isnan(v)).sum(axis=0) for g, v in values.items()}
     stats = [(c, i, lambda m: m) for i, c in enumerate(columns)]
     stats += [
         (name, columns.index(col), f) for name, col, f in DERIVED if col in columns
@@ -202,24 +234,39 @@ def compare(values: dict[str, np.ndarray], columns: list[str], metric: str) -> l
     lo, hi = (1 - CI) / 2, 1 - (1 - CI) / 2
     rows = []
 
-    def row(stat, kind, a, b, estimate, samples):
-        low, high = np.quantile(samples, [lo, hi])
+    def row(stat, kind, a, b, n, estimate, samples):
+        # a resample can draw no scored study (tiny n only): it has no value
+        low, high = np.nanquantile(samples, [lo, hi])
         rows.append({"metric": metric, "statistic": stat, "kind": kind, "a": a,
-                     "b": b, "n": n, "estimate": float(estimate),
+                     "b": b, "n": int(n), "estimate": float(estimate),
                      "ci_low": float(low), "ci_high": float(high)})  # fmt: skip
 
     for stat, i, f in stats:
+        derived = stat != columns[i]
         for g in values:
-            row(stat, "condition", g, "", f(point[g][i]), f(boot[g][:, i]))
-        for a, b in itertools.combinations(values, 2):
             row(
-                stat,
-                "difference",
-                a,
-                b,
-                f(point[a][i]) - f(point[b][i]),
-                f(boot[a][:, i]) - f(boot[b][:, i]),
+                stat, "condition", g, "", scored[g][i], f(point[g][i]), f(boot[g][:, i])
             )
+        for a, b in pairs:
+            if i in boot_diffs[(a, b)]:  # missing scores: over the studies both scored
+                if derived:
+                    raise SystemExit(
+                        f"compare: {stat} needs {columns[i]} for every study"
+                    )
+                d = values[a][:, i] - values[b][:, i]
+                both = ~np.isnan(d)
+                row(stat, "difference", a, b, both.sum(), d[both].mean(),
+                    boot_diffs[(a, b)][i])  # fmt: skip
+            else:
+                row(
+                    stat,
+                    "difference",
+                    a,
+                    b,
+                    n,
+                    f(point[a][i]) - f(point[b][i]),
+                    f(boot[a][:, i]) - f(boot[b][:, i]),
+                )
     return rows
 
 

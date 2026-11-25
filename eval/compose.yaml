@@ -20,7 +20,10 @@ x-models: &models
     bind:
       create_host_path: false
 
+# init: run.py is the container's PID 1 otherwise, and PID 1 ignores a SIGTERM it has
+# no handler for (the GPU monitor's, docker stop's): the init passes it on.
 x-offline: &offline
+  init: true
   network_mode: none
   volumes: *models
 
@@ -86,6 +89,7 @@ services:
   green-client:
     image: labrag/green:${LABRAG_COMMIT:-dev}
     pull_policy: never
+    init: true  # as x-offline's
     networks: [judge]
     volumes: *models  # the judge's tokenizer
     depends_on:
@@ -169,6 +173,7 @@ services:
   crimson-client:
     image: labrag/crimson:${LABRAG_COMMIT:-dev}
     pull_policy: never
+    init: true  # as x-offline's
     networks: [judge]
     volumes: *models
     depends_on:

@@ -185,6 +185,8 @@ services:
   # CRIMSON's judge: green-vllm's image and settings, except bf16 (upstream's and the
   # checkpoint's dtype) and --max-model-len 16384, which holds a prompt (≈1.9k tokens
   # on the pilot) plus upstream's max_new_tokens 8192 (the client checks each fits).
+  # Prefix caching and chunked prefill off: with either on, judge text varies with
+  # batch and job (Gemma 3's sliding window is shorter than the prompts); off = no cost.
   crimson-vllm:
     image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
     pull_policy: never
@@ -212,6 +214,9 @@ services:
       - --generation-config=vllm
       - --skip-tokenizer-init
       - --disable-uvicorn-access-log
+      - --no-enable-prefix-caching
+      - --no-enable-chunked-prefill
+      - --max-num-batched-tokens=16384  # one whole prompt per step without chunking
     healthcheck:
       test: ["CMD", "python3", "-c",
              "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]

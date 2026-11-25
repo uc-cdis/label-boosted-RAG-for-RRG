@@ -47,6 +47,15 @@ def test_device_types(text, expected):
     assert devices.label(text) == expected
 
 
+def test_line_wraps_dont_split_patterns():
+    # MIMIC-CXR and CheXpert Plus wrap report lines mid-phrase
+    assert devices.label("Right chest\n tube in place.") == {"Chest Tube": 1.0}
+    assert incidentals.label("Low lung\n volumes.") == {"Low Lung Volumes": 1.0}
+    assert incidentals.label("Elevated  right hemidiaphragm.") == {
+        "Elevated Hemidiaphragm": 1.0
+    }
+
+
 def test_device_table_has_every_name():
     table = devices.label_reports(["ET tube in place.", "Clear lungs."])
     assert list(table.columns) == devices.NAMES

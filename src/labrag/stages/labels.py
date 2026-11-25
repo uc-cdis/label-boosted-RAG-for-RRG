@@ -155,6 +155,7 @@ def _rule_labels(
         "section": section,
         "labeler": labeler,
         "labels": rules.NAMES,
+        "text": "whitespace runs collapsed to one space",
     }
 
     def build(out: Path) -> dict:

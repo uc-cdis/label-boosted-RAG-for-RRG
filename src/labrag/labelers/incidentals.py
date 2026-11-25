@@ -2,7 +2,9 @@
 ``incidentals`` labeler.
 
 Findings outside CheXbert-14 that reports state often (degenerative spine, aortic
-calcification, low lung volumes, ...). A report is split into clauses (severity.CLAUSE).
+calcification, low lung volumes, ...). Whitespace runs are collapsed first, so a
+pattern's words match across a line wrap. A report is split into clauses
+(severity.CLAUSE).
 A finding is positive (1) if some clause names it without a negation before it in the
 clause (severity.NEGATED: "no hiatal hernia"), negative (0) if every clause that names
 it negates it, else blank (not mentioned).
@@ -58,7 +60,7 @@ def label(text: str) -> dict[str, float]:
     """One report's incidental labels: name -> 1.0 (named), 0.0 (named, negated);
     names not mentioned are left out."""
     named, negated = set(), set()
-    for clause in CLAUSE.split(text or ""):
+    for clause in CLAUSE.split(" ".join((text or "").split())):
         for name, pattern in PATTERNS.items():
             for m in pattern.finditer(clause):
                 if NEGATED.search(clause[: m.start()]):

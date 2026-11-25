@@ -1,6 +1,8 @@
 """Device types a report names, by rule: the labels stage's ``devices`` labeler.
 
-A report is split into clauses (CLAUSE). In each clause the DEVICES patterns are tried
+Whitespace runs are collapsed first, so a pattern's words match across a line wrap
+(MIMIC-CXR and CheXpert Plus reports are wrapped). A report is split into clauses
+(CLAUSE). In each clause the DEVICES patterns are tried
 in order, and each match is cut out before the next pattern is tried, so a PICC is not
 also a central line. A device is positive (1) if some clause names it without saying it
 is gone, negative (0) if every clause that names it says so (REMOVED, or "no" right
@@ -69,7 +71,7 @@ def label(text: str) -> dict[str, float]:
     """One report's device labels: name -> 1.0 (named), 0.0 (named as gone); names
     not mentioned are left out."""
     named, gone = set(), set()
-    for clause in CLAUSE.split(text or ""):
+    for clause in CLAUSE.split(" ".join((text or "").split())):
         removed = bool(REMOVED.search(clause))
         for name, pattern in PATTERNS.items():
             hits = list(pattern.finditer(clause))

@@ -3,8 +3,8 @@
 # methods draft: incidental-readouts-val's cells on MIMIC-CXR and ReXGradient (2
 # sampling seeds) and reader-val's matched-radiologist retrieval on MIMIC-CXR. One
 # evaluate job per generations artifact (CRIMSON only; the other metrics are built),
-# then the three comparisons rebuilt on the whole suite. The two MIMIC sets the
-# crimson-check scored with the earlier judge flags are overwritten.
+# then the three comparisons rebuilt on the whole suite. (The two MIMIC sets the
+# crimson-check scored with the earlier judge flags were overwritten by 7c32dcc's run.)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -26,23 +26,19 @@ MC=labrag.$POOL.ft-attn-seed1.$SEC.chexbert14.mc
 MC2=labrag.$POOL.ft-attn-seed2.$SEC.chexbert14.mc
 MCR=labrag.$POOL.ft-attn-reader-seed1.$SEC.chexbert14.mc
 OR=labrag-oracle.chexbert14
-STALE=" val/mimic/$JOINT/retrieval-only/$PNC/$MODEL.qwen3.5-thinking-32k/$SET \
-val/mimic/$JOINT/$MIL.devices.incidentals/$PSC/$MODEL.qwen3.5-thinking-32k/$SET "
 
 ids=""
 # comparison <dataset> <name> <condition=prompt dir>...: CRIMSON per seed, then compare
 comparison() {
   local dataset=$1 name=$2 F=val/$1/$JOINT
   shift 2
-  local cells="" dep="" item cond dir sampling g e ow
+  local cells="" dep="" item cond dir sampling g e
   for item in "$@"; do
     cond=${item%%=*} dir=${item#*=}
     local runs=""
     for sampling in $SAMPLING; do
       g=$F/$dir/$MODEL.$sampling/$SET
-      ow=""
-      [[ $STALE == *" $g "* ]] && ow=--overwrite
-      e=$(s --gres=gpu:1 --cpus-per-task=16 -- labrag evaluate --metric crimson --generations $g $ow)
+      e=$(s --gres=gpu:1 --cpus-per-task=16 -- labrag evaluate --metric crimson --generations $g)
       ids+=" $e"
       dep+=":$e"
       runs+=",$g"

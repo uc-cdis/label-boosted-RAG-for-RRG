@@ -81,6 +81,35 @@ def test_device_table_has_every_name():
             {"Emphysema or Hyperinflation": 1.0},
         ),
         ("Elevation of the right hemidiaphragm.", {"Elevated Hemidiaphragm": 1.0}),
+        # a negation reaches through a list, but not past a scope end
+        (
+            "No evidence of acute cardiopulmonary disease or old granulomatous disease.",
+            {"Calcified Granuloma": 0.0},
+        ),
+        (
+            "No free air below the elevated right hemidiaphragm.",
+            {"Elevated Hemidiaphragm": 1.0},
+        ),
+        (
+            "No acute osseous abnormality is identified noting degenerative changes.",
+            {"Degenerative Spine Changes": 1.0},
+        ),
+        ("No acute process given low lung volumes.", {"Low Lung Volumes": 1.0}),
+        ("No change in the large hiatal hernia.", {"Hiatal Hernia": 1.0}),
+        (
+            "No change or evidence of old granulomatous disease.",
+            {"Calcified Granuloma": 0.0},
+        ),
+        # a capitalized word mid-clause is a lost line break
+        (
+            "No pneumothorax There is atherosclerotic calcification.",
+            {"Aortic Calcification": 1.0},
+        ),
+        (
+            "No evidence of pneumothorax Vascular calcification.",
+            {"Aortic Calcification": 1.0},
+        ),
+        ("NO EVIDENCE OF OLD GRANULOMATOUS DISEASE.", {"Calcified Granuloma": 0.0}),
         ("Calcified granuloma in the left upper lobe.", {"Calcified Granuloma": 1.0}),
         ("The lungs are clear. No pneumothorax.", {}),
         ("", {}),

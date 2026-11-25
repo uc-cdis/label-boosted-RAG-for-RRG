@@ -39,6 +39,38 @@ from labrag.labelers import devices, incidentals, severity
             {"Pacemaker or Defibrillator": 1.0},
         ),
         ("EKG leads overlie the chest.", {"Monitoring Leads": 1.0}),
+        # a negation reaches through an "or" list; "no change in" negates nothing
+        (
+            "No endotracheal tube or enteric tube.",
+            {"Endotracheal Tube": 0.0, "Enteric Tube": 0.0},
+        ),
+        (
+            "No change in the ETT or NG tube.",
+            {"Endotracheal Tube": 1.0, "Enteric Tube": 1.0},
+        ),
+        ("Not typical for a PICC line.", {"PICC Line": 0.0}),
+        # pulled back or partially withdrawn is repositioned, not removed
+        ("The PICC line has been pulled back.", {"PICC Line": 1.0}),
+        (
+            "The ET tube has been withdrawn and now lies 3 cm above the carina.",
+            {"Endotracheal Tube": 1.0},
+        ),
+        ("The NG tube has been withdrawn.", {"Enteric Tube": 0.0}),
+        ("The patient has been extubated.", {"Endotracheal Tube": 0.0}),
+        ("Possible loop recorder.", {"Pacemaker or Defibrillator": -1.0}),
+        # a Swan-Ganz's access site is not another central line
+        (
+            "Right IJ approach Swan-Ganz catheter tip in the pulmonary artery.",
+            {"Pulmonary Artery Catheter": 1.0},
+        ),
+        ("Right jugular catheter ends in the SVC.", {"Central Venous Catheter": 1.0}),
+        # things that are not the device: an NG tube's side port, defibrillator pads
+        (
+            "The side port of the NG tube is in the stomach.",
+            {"Enteric Tube": 1.0},
+        ),
+        ("Defibrillator pads overlie the chest.", {}),
+        ("Tricuspid valvuloplasty ring.", {"Cardiac Valve Device": 1.0}),
         ("The lungs are clear. No pneumothorax.", {}),
         ("", {}),
     ],
@@ -110,6 +142,45 @@ def test_device_table_has_every_name():
             {"Aortic Calcification": 1.0},
         ),
         ("NO EVIDENCE OF OLD GRANULOMATOUS DISEASE.", {"Calcified Granuloma": 0.0}),
+        # hedges and differentials are uncertain
+        ("Possible small hiatal hernia.", {"Hiatal Hernia": -1.0}),
+        ("Hiatal hernia is suspected.", {"Hiatal Hernia": -1.0}),
+        (
+            "Mild bibasilar atelectasis or scarring.",
+            {"Chronic Interstitial Changes or Scarring": -1.0},
+        ),
+        (
+            "Apical fibrosis or scarring.",
+            {"Chronic Interstitial Changes or Scarring": 1.0},
+        ),
+        # said to be gone after naming it
+        (
+            "The previously elevated left hemidiaphragm appears normal.",
+            {"Elevated Hemidiaphragm": 0.0},
+        ),
+        # stated normal without naming the finding
+        ("The lungs are well inflated.", {"Low Lung Volumes": 0.0}),
+        ("The right lung is well expanded.", {}),
+        ("Lungs are low in volume.", {"Low Lung Volumes": 1.0}),
+        ("Inspiration is suboptimal.", {"Low Lung Volumes": 1.0}),
+        # matches that name something else
+        ("Subcutaneous emphysema in the chest wall.", {}),
+        ("Overinflated endotracheal tube cuff.", {}),
+        ("Degenerative changes of the shoulders.", {}),
+        ("Atelectatic changes at the bases.", {}),
+        ("Calcification in a tortuous splenic artery.", {}),
+        ("Known Bochdalek hernia.", {}),
+        # interstitial markings alone don't say chronic
+        ("Prominent interstitial markings.", {}),
+        ("Interstitial markings are prominent.", {}),
+        (
+            "Interstitial markings appear chronic.",
+            {"Chronic Interstitial Changes or Scarring": 1.0},
+        ),
+        (
+            "Interstitial prominence may be chronic.",
+            {"Chronic Interstitial Changes or Scarring": -1.0},
+        ),
         ("Calcified granuloma in the left upper lobe.", {"Calcified Granuloma": 1.0}),
         ("The lungs are clear. No pneumothorax.", {}),
         ("", {}),

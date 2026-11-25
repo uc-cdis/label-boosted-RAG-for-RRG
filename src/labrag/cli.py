@@ -148,7 +148,8 @@ def add_finetune(sub) -> None:
     p.add_argument(
         "--labeler",
         choices=finetune.LABELERS,
-        help="the label set: chexbert14, or chexbert14.devices (and the device types)",
+        help="the label set: chexbert14, chexbert14.devices (and the device types) or "
+        "chexbert14.devices.incidentals (and the incidental findings)",
     )
     p.add_argument(
         "--dataset",
@@ -253,13 +254,14 @@ def add_build_prompts(sub) -> None:
         action="store_true",
         help="labrag-oracle: add the device types (labels --labeler devices) to the "
         "label set, shown and ranked on; labrag: the same, predicted by a "
-        "chexbert14.devices fine-tune (--predictions)",
+        "chexbert14.devices(.incidentals) fine-tune (--predictions)",
     )
     p.add_argument(
         "--incidentals",
         action="store_true",
         help="labrag-oracle: add the incidental findings (labels --labeler "
-        "incidentals) to the label set, shown and ranked on",
+        "incidentals) to the label set, shown and ranked on; labrag: the same, "
+        "predicted by a chexbert14.devices.incidentals fine-tune (--predictions)",
     )
     p.add_argument(
         "--confidence",

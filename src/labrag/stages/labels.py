@@ -46,8 +46,10 @@ RULES = {
     INCIDENTALS: (incidentals, "share_with_an_incidental"),
 }
 LABELERS = ("chexbert14", *RULES, *padchest.VOCABULARIES)
-# One label set: CheXbert-14's labels, then the device types (finetune, predict).
+# One label set: CheXbert-14's labels, then the device types, then (WITH_INCIDENTALS)
+# the incidental findings (finetune, predict).
 WITH_DEVICES = f"chexbert14.{DEVICES}"
+WITH_INCIDENTALS = f"{WITH_DEVICES}.{INCIDENTALS}"
 # A label's value from several sections: the first of these any gives (NaN last).
 COMBINE = (1.0, -1.0, 0.0)
 COMBINE_RULE = (
@@ -114,8 +116,11 @@ def run(
 
 
 def parts(labeler: str) -> list[str]:
-    """The labels artifacts a label set reads: WITH_DEVICES is two."""
-    return ["chexbert14", DEVICES] if labeler == WITH_DEVICES else [labeler]
+    """The labels artifacts a label set reads: WITH_DEVICES two, WITH_INCIDENTALS
+    three."""
+    if labeler in (WITH_DEVICES, WITH_INCIDENTALS):
+        return labeler.split(".")
+    return [labeler]
 
 
 def label_dirs(dataset: str, section: str, labeler: str) -> list[Path]:

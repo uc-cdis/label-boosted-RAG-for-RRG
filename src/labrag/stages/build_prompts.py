@@ -49,7 +49,10 @@ predicted by a ``chexbert14.devices`` fine-tune (``--predictions``); without
 ``--devices`` its predicted device types are left out (CheXbert-14 labels only).
 ``--incidentals`` (labrag-oracle): the incidental findings (labels stage, labeler
 ``incidentals``: degenerative spine, aortic calcification, ...) join the label set the
-same way, after any device types; directory suffix ``.incidentals``.
+same way, after any device types; directory suffix ``.incidentals``. labrag
+``--incidentals``: the same, predicted by a ``chexbert14.devices.incidentals`` fine-tune,
+which predicts device types too (shown only with ``--devices``); without
+``--incidentals`` its predicted incidental findings are left out.
 ``--confidence`` (labrag): each target label shown with the classifier's probability,
 "Atelectasis (28%)" (its probs file); example labels, label set and ranking unchanged;
 directory suffix ``.confidence``.
@@ -104,6 +107,7 @@ from labrag.data import (
     priors,
 )
 from labrag.labelers import devices as device_types
+from labrag.labelers import incidentals as incidental_types
 from labrag.labelers import radgraph_sides
 from labrag.stages import severity as severity_stage
 from labrag.stages import styles as styles_stage
@@ -114,6 +118,7 @@ from labrag.stages.labels import (
     DEVICES,
     INCIDENTALS,
     WITH_DEVICES,
+    WITH_INCIDENTALS,
     combine,
 )
 
@@ -222,8 +227,8 @@ def run(
         raise SystemExit("build-prompts: --severity is for labrag-oracle")
     if devices and condition not in ("labrag-oracle", "labrag"):
         raise SystemExit("build-prompts: --devices is for labrag-oracle and labrag")
-    if incidentals and condition != "labrag-oracle":
-        raise SystemExit("build-prompts: --incidentals is for labrag-oracle")
+    if incidentals and condition not in ("labrag-oracle", "labrag"):
+        raise SystemExit("build-prompts: --incidentals is for labrag-oracle and labrag")
     if sides and severity:
         raise SystemExit("build-prompts: --sides or --severity, not both")
     if confidence and condition != "labrag":
@@ -251,7 +256,7 @@ def run(
         raise SystemExit(f"prompt {prompt!r} does not fit condition {condition!r}")
 
     labeler = LABELER + LABELER_SUFFIX[uncertain]
-    multiclass = with_types = False
+    multiclass = with_types = with_incidentals = False
     if transfer:
         source, clf_name, clf_sections, labeler = parse_classifier(predictions)
         readouts = clf_sections.split(JOIN)
@@ -267,7 +272,9 @@ def run(
             raise SystemExit(f"build-prompts: {predictions} has no {section} readout")
         readout = readouts[0]
         multiclass = labeler.endswith(MULTICLASS_SUFFIX)
-        with_types = labeler.removesuffix(MULTICLASS_SUFFIX) == WITH_DEVICES
+        base = labeler.removesuffix(MULTICLASS_SUFFIX)
+        with_incidentals = base == WITH_INCIDENTALS
+        with_types = with_incidentals or base == WITH_DEVICES
         if multiclass and (
             condition != "labrag" or confidence or corpus_labels != "reference"
         ):
@@ -301,7 +308,12 @@ def run(
     if devices and condition == "labrag" and not (transfer and with_types):
         raise SystemExit(
             f"build-prompts: labrag --devices needs --predictions of a {WITH_DEVICES} "
-            "fine-tune"
+            f"or {WITH_INCIDENTALS} fine-tune"
+        )
+    if incidentals and condition == "labrag" and not (transfer and with_incidentals):
+        raise SystemExit(
+            "build-prompts: labrag --incidentals needs --predictions of a "
+            f"{WITH_INCIDENTALS} fine-tune"
         )
     if (
         transfer
@@ -309,8 +321,8 @@ def run(
         and (corpus_labels != "reference" or uncertain != "zeros")
     ):
         raise SystemExit(
-            f"build-prompts: {WITH_DEVICES} predictions take reference corpus labels "
-            "and --uncertain zeros"
+            f"build-prompts: {labeler} predictions take reference corpus labels and "
+            "--uncertain zeros"
         )
     if categories and not multiclass:
         raise SystemExit(
@@ -485,6 +497,8 @@ def run(
                 f"the {INCIDENTALS} labels join the label set: target, examples, ranking"
             )
             condition_dir += ".incidentals"
+        elif transfer and with_incidentals:
+            config["incidentals"] = "the predicted incidental findings left out"
         if sides:
             config["sides"] = "reference, target and examples: label (side)"
             condition_dir += ".sides"
@@ -524,9 +538,15 @@ def run(
                 if joint
                 else tables[0].set_index("study_id")
             )
-            if with_types and not devices:
-                keep = [c for c in transferred.columns if c not in device_types.NAMES]
-                transferred = transferred[keep]
+            drop = [
+                *(device_types.NAMES if with_types and not devices else []),
+                *(
+                    incidental_types.NAMES
+                    if with_incidentals and not incidentals
+                    else []
+                ),
+            ]
+            transferred = transferred.drop(columns=drop)
             names = list(transferred.columns)
         studies = adapter.load_studies(cxr_root).set_index("study_id")
         if joint:

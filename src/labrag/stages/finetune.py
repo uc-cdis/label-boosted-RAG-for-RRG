@@ -21,7 +21,8 @@ images, data.study_images: the preferred frontal first; the studies are the same
 Only report-labelled datasets (CheXbert-14 on report text): every dataset's labels
 are then the same labeler on the same section. ``--labeler chexbert14.devices``:
 CheXbert-14's labels and then the device types (labels --labeler devices) as one label
-set, each a readout per section like the others.
+set, each a readout per section like the others; ``chexbert14.devices.incidentals``:
+then the incidental findings too (labels --labeler incidentals).
 
 ``--multiclass``: each label is one of CheXbert's four values (positive, negative,
 uncertain, blank) instead of positive vs the rest, softmax cross-entropy; the predicted
@@ -51,7 +52,7 @@ from labrag.stages import classify
 from labrag.stages import labels as labels_stage
 
 CLASSIFIERS = ("attn", "attn-cls", "attn-reader", "attn-all-images")
-LABELERS = ("chexbert14", labels_stage.WITH_DEVICES)
+LABELERS = ("chexbert14", labels_stage.WITH_DEVICES, labels_stage.WITH_INCIDENTALS)
 ALL_IMAGES = "attn-all-images"
 IMAGE = "preferred frontal per study, min-max to 8-bit grayscale"
 ALL_IMAGES_IMAGE = (
@@ -99,7 +100,8 @@ def run(
         sections = split_sections("finetune", d, section)
     if labeler not in LABELERS:
         raise SystemExit(f"finetune: --labeler {list(LABELERS)}")
-    with_devices = labeler == labels_stage.WITH_DEVICES
+    with_incidentals = labeler == labels_stage.WITH_INCIDENTALS
+    with_devices = with_incidentals or labeler == labels_stage.WITH_DEVICES
     if classifier not in CLASSIFIERS:
         raise SystemExit(f"finetune: --classifier {list(CLASSIFIERS)}")
     seed = 0 if seed is None else seed
@@ -138,6 +140,11 @@ def run(
             f"{d}/{s}": artifacts.artifact_record(p[1])
             for (d, s), p in lab_dirs.items()
         }
+    if with_incidentals:
+        inputs["incidental_labels"] = {
+            f"{d}/{s}": artifacts.artifact_record(p[2])
+            for (d, s), p in lab_dirs.items()
+        }
     if with_readers:
         inputs["readers"] = {
             d: [artifacts.file_record(cxr_root / f) for f in DATASETS[d].READER_FILES]
@@ -163,6 +170,11 @@ def run(
         config["devices"] = (
             "the device types join CheXbert-14's labels; like Support Devices, they "
             "never clear No Finding"
+        )
+    if with_incidentals:
+        config["incidentals"] = (
+            "the incidental findings join after the device types; they never clear No "
+            "Finding"
         )
     if classifier == "attn-cls":
         config["input"] = "CLS token only"

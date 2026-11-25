@@ -236,9 +236,20 @@ def test_severity_and_devices_are_for_the_oracle():
         build_prompts.run(
             "val", "mimic", "findings", "labrag", predictions=FT, severity=True
         )
-    with pytest.raises(SystemExit, match="--incidentals is for labrag-oracle"):
+    with pytest.raises(SystemExit, match="--incidentals is for labrag-oracle and"):
         build_prompts.run(
-            "val", "mimic", "findings", "labrag", predictions=FT, incidentals=True
+            "val", "mimic", "findings", "retrieval-only", incidentals=True
+        )
+    with pytest.raises(
+        SystemExit, match="needs --predictions of a chexbert14.devices.incidentals"
+    ):
+        build_prompts.run(
+            "val",
+            "mimic",
+            "findings",
+            "labrag",
+            predictions=FT + ".devices.mc",
+            incidentals=True,
         )
     with pytest.raises(SystemExit, match="--devices is for labrag-oracle and labrag"):
         build_prompts.run("val", "mimic", "findings", "retrieval-only", devices=True)

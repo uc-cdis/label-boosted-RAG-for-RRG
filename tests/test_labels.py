@@ -57,6 +57,11 @@ def test_read_labels_joins_label_sets_of_the_same_studies(tmp_path):
     with pytest.raises(AssertionError, match="other studies"):
         labels.read_labels([tmp_path / "chexbert14", tmp_path / "other"])
     assert labels.parts(labels.WITH_DEVICES) == ["chexbert14", "devices"]
+    assert labels.parts(labels.WITH_INCIDENTALS) == [
+        "chexbert14",
+        "devices",
+        "incidentals",
+    ]
     assert labels.parts("chexbert14") == ["chexbert14"]
 
 

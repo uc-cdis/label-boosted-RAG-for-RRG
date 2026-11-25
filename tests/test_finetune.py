@@ -349,9 +349,13 @@ def test_multiclass_finetune_then_predict(tmp_path, monkeypatch):
 
 
 @pytest.mark.train
-def test_device_finetune_then_predict(tmp_path, monkeypatch):
-    from labrag.labelers import devices
+@pytest.mark.parametrize("incidental", [False, True])
+def test_device_finetune_then_predict(tmp_path, monkeypatch, incidental):
+    from labrag.labelers import devices, incidentals
 
+    rules = {"devices": devices.NAMES}
+    if incidental:
+        rules["incidentals"] = incidentals.NAMES
     cxr_root = tmp_path / "cxr"
     monkeypatch.setattr(paths, "SHARED_ROOT", tmp_path / "shared")
     for name, n, seed in (("fakea", 30, 0), ("fakeb", 20, 1)):
@@ -361,16 +365,17 @@ def test_device_finetune_then_predict(tmp_path, monkeypatch):
         for section in ("findings", "impression"):
             ref = paths.SHARED_ROOT / "labels" / name / section / "chexbert14"
             ids = artifacts.read_table(ref / "labels.csv").study_id
-            codes = rng.choice([1.0, 0.0, np.nan], size=(len(ids), len(devices.NAMES)))
-            typed = pd.DataFrame(codes, columns=devices.NAMES)
-            typed.insert(0, "study_id", ids.to_numpy())
+            for rule, cols in rules.items():
+                codes = rng.choice([1.0, 0.0, np.nan], size=(len(ids), len(cols)))
+                typed = pd.DataFrame(codes, columns=cols)
+                typed.insert(0, "study_id", ids.to_numpy())
 
-            def build(out, typed=typed):
-                typed.to_csv(out / "labels.csv", index=False)
+                def build(out, typed=typed):
+                    typed.to_csv(out / "labels.csv", index=False)
 
-            artifacts.publish(
-                f"labels/{name}/{section}/devices", {"fake": name}, {}, build
-            )
+                artifacts.publish(
+                    f"labels/{name}/{section}/{rule}", {"fake": name}, {}, build
+                )
     monkeypatch.setattr(weights, "resolve", lambda name: (tmp_path, {"fake": name}))
     monkeypatch.setattr(finetune, "load_backbone", lambda d: tiny_backbone())
     monkeypatch.setattr(finetune, "load_processor", lambda d: tiny_processor())
@@ -379,26 +384,31 @@ def test_device_finetune_then_predict(tmp_path, monkeypatch):
 
     with pytest.raises(SystemExit, match="--labeler"):
         finetune_stage.run("fakea-fakeb", "findings", labeler="devices")
+    labeler = ".".join(["chexbert14", *rules])
     clf = finetune_stage.run(
         "fakea-fakeb",
         "findings-impression",
-        labeler="chexbert14.devices",
+        labeler=labeler,
         seed=3,
         multiclass=True,
         cxr_root=cxr_root,
     )
-    rel = "fakea-fakeb/raddino.ft-attn-seed3/findings-impression/chexbert14.devices.mc"
+    rel = f"fakea-fakeb/raddino.ft-attn-seed3/findings-impression/{labeler}.mc"
     assert clf == paths.SHARED_ROOT / "classifiers" / rel
     manifest = artifacts.read_manifest(clf)
     assert set(manifest["inputs"]["device_labels"]) == set(manifest["inputs"]["labels"])
-    names = [*NAMES, *devices.NAMES]
+    assert ("incidental_labels" in manifest["inputs"]) == incidental
+    assert ("incidentals" in manifest["config"]) == incidental
+    names = [*NAMES, *(c for cols in rules.values() for c in cols)]
     assert torch.load(clf / "model.pt", weights_only=False)["labels"] == names
 
     out = predict.run("fakeb", rel, cxr_root=cxr_root)
     pred = artifacts.read_table(out / "predictions.findings.csv")
     assert list(pred.columns[1:]) == names
     assert set(pd.read_csv(out / "metrics.csv").label) == set(names)
-    assert "device_labels" in artifacts.read_manifest(out)["inputs"]
+    inputs = artifacts.read_manifest(out)["inputs"]
+    assert "device_labels" in inputs
+    assert ("incidental_labels" in inputs) == incidental
 
 
 def test_reader_index_keeps_frequent_train_readers():

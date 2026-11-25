@@ -162,9 +162,13 @@ def _finetuned(
         "images": {"root": str(cxr_root / adapter.IMAGE_ROOT)},
         "weights": weights_record,
     }
-    if labeler == labels_stage.WITH_DEVICES:
+    if labeler in (labels_stage.WITH_DEVICES, labels_stage.WITH_INCIDENTALS):
         inputs["device_labels"] = {
             s: artifacts.artifact_record(d[1]) for s, d in lab_dirs.items()
+        }
+    if labeler == labels_stage.WITH_INCIDENTALS:
+        inputs["incidental_labels"] = {
+            s: artifacts.artifact_record(d[2]) for s, d in lab_dirs.items()
         }
     config = {
         "stage": "predict",

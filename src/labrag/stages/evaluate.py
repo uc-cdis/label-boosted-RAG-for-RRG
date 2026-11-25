@@ -272,11 +272,11 @@ def run(
                 concurrent.futures.wait(started)  # the GPU is free for the next phase
         concurrent.futures.wait(futures)
     finally:
-        pool.shutdown(cancel_futures=True)
-        if any("judge" in p["spec"] for p in plans):
-            compose(
-                "down", "--timeout", "30", tag=plans[0]["image"]["tag"], check=False
-            )
+        # Don't wait for running metrics: on SIGTERM they would hold the job past
+        # Slurm's KillWait, and its SIGKILL leaves their containers on the GPU.
+        # `down` removes every container of the job, `run` ones included.
+        pool.shutdown(wait=False, cancel_futures=True)
+        compose("down", "--timeout", "30", tag=plans[0]["image"]["tag"], check=False)
     failed = []
     for future, metric in futures.items():
         if future.exception() is None:

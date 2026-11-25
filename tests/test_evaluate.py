@@ -517,6 +517,32 @@ def test_judge_that_fails_to_start_fails_only_its_metric(monkeypatch):
     assert sorted(scored) == ["crimson", "cxr-report-metric", "ratescore"]
 
 
+@pytest.mark.parametrize("metric", ["crimson-native", "cxr-report-metric"])
+def test_cancelled_run_without_a_judge_still_removes_its_containers(
+    monkeypatch, metric
+):
+    """SIGTERM mid-score: run() returns without waiting for the scoring thread and
+    takes the project down (a native or CPU run's container would outlive the job)."""
+    release = threading.Event()
+
+    def blocked(plan, overwrite):  # a container that runs for hours
+        release.wait(10)
+        return []
+
+    calls = fake_run_env(monkeypatch, None, blocked)
+    monkeypatch.setattr(
+        evaluate.concurrent.futures,
+        "wait",
+        lambda *a, **k: (_ for _ in ()).throw(SystemExit(143)),  # SIGTERM arrives
+    )
+    try:
+        with pytest.raises(SystemExit):
+            evaluate.run(["g"], [metric])
+        assert calls == ["down"]
+    finally:
+        release.set()
+
+
 @pytest.mark.parametrize("metric", ["green-native", "crimson-native"])
 def test_native_judges_run_alone(metric):
     with pytest.raises(SystemExit, match="alone"):

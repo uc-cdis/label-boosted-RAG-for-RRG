@@ -173,6 +173,20 @@ def test_device_table_has_every_name():
         # interstitial markings alone don't say chronic
         ("Prominent interstitial markings.", {}),
         ("Interstitial markings are prominent.", {}),
+        ("Interstitial abnormality suggesting mild pulmonary edema.", {}),
+        ("Bibasilar reticular opacities.", {}),
+        (
+            "Chronic reticular opacities at the bases.",
+            {"Chronic Interstitial Changes or Scarring": 1.0},
+        ),
+        (
+            "Interstitial changes are chronic.",
+            {"Chronic Interstitial Changes or Scarring": 1.0},
+        ),
+        (
+            "Mild interstitial lung disease.",
+            {"Chronic Interstitial Changes or Scarring": 1.0},
+        ),
         (
             "Interstitial markings appear chronic.",
             {"Chronic Interstitial Changes or Scarring": 1.0},

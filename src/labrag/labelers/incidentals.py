@@ -57,10 +57,13 @@ INCIDENTALS = {
         r"elevat\w* (of the )?(right |left )?hemidiaphragm"
         r"|hemidiaphragm (is |remains )?(\w+ )?elevat|eventration"
     ),
+    # Interstitial and reticular wording is also edema or infection: it counts only
+    # when the report calls it chronic.
     "Chronic Interstitial Changes or Scarring": (
-        r"fibros|fibrotic|\bscar|interstitial (lung )?(disease|abnormalit|change)"
-        r"|chronic (\w+ ){0,2}interstitial|interstitial (\w+ ){0,10}chronic"
-        r"|reticul|bronchiectas|honeycomb"
+        r"fibros|fibrotic|\bscar|interstitial (lung )?disease"
+        r"|chronic (\w+ ){0,2}(interstitial|reticul)"
+        r"|(interstitial|reticul)\w* (\w+ ){0,10}chronic"
+        r"|bronchiectas|honeycomb"
     ),
     "Osteopenia": r"osteopen|demineraliz|osteopor",
 }

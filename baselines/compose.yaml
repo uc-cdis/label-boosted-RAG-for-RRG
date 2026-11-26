@@ -42,11 +42,13 @@ x-cxrmate-2: &cxrmate-2
   environment:
     - OMP_NUM_THREADS  # required by run.py
     # no home for the job's uid (HOME=/), no network; HF_HOME also gets the
-    # checkpoint's code (trust_remote_code)
+    # checkpoint's code (trust_remote_code); USER for getpass (no passwd entry for the
+    # uid), which torch calls to name its compile cache on import
     - HF_HOME=/tmp/huggingface
     - HF_HUB_OFFLINE=1
     - HF_DATASETS_OFFLINE=1
     - XDG_CACHE_HOME=/tmp/.cache
+    - USER=labrag
 
 services:
   # CXRMate-2 (Nicolson et al. 2026): `prepare`, on CPU.

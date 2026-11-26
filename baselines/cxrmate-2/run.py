@@ -80,12 +80,24 @@ def prepare(dataset: str, db_dir: str) -> None:
     print(f"prepared {dataset} {SPLIT} in {time.time() - start:.0f} s")
 
 
-def by_dicom_id(study: dict) -> dict:
-    """A MIMIC-CXR study's per-image lists, in dicom_id order."""
-    order = sorted(range(len(study["dicom_id"])), key=lambda i: study["dicom_id"][i])
-    for k in ("dicom_id", "images", "views"):
-        study[k] = [study[k][i] for i in order]
-    return study
+class ByDicomId:
+    """A MIMIC-CXR split whose rows have their per-image lists in dicom_id order, sorted
+    as read (no rewritten copy: the GPUs' containers share the prepared dataset)."""
+
+    def __init__(self, dataset):
+        self.dataset = dataset
+
+    def __getitem__(self, key):
+        study = self.dataset[key]
+        if not isinstance(key, int):  # a column
+            return study
+        order = sorted(range(len(study["dicom_id"])), key=study["dicom_id"].__getitem__)
+        for k in ("dicom_id", "images", "views"):
+            study[k] = [study[k][i] for i in order]
+        return study
+
+    def __len__(self):
+        return len(self.dataset)
 
 
 def generate(dataset: str, db_dir: str, targets_txt: str, out_csv: str) -> None:
@@ -109,11 +121,7 @@ def generate(dataset: str, db_dir: str, targets_txt: str, out_csv: str) -> None:
 
     test_set = datasets.load_from_disk(os.path.join(db_dir, PREPARE[dataset][2]))[SPLIT]
     if dataset == "mimic":
-        test_set = test_set.map(
-            by_dicom_id,
-            cache_file_name=os.path.join(db_dir, "by_dicom_id.arrow"),
-            writer_batch_size=1,
-        )
+        test_set = ByDicomId(test_set)
     ids = [str(i) for i in test_set["study_id"]]
     index = dict(zip(ids, range(len(ids)), strict=True))
     if missing := [t for t in targets if t not in index]:

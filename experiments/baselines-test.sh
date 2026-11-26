@@ -4,8 +4,8 @@
 # own container, baselines/), on the core experiment's targets, scored with our suite.
 # A yardstick for labrag - retrieval-only, not a generator of ours. Compared with the
 # core experiment's retrieval-only and labrag pools (core-test.sh: run that first).
-#   cxrmate-2   CXRMate-2 (Nicolson et al. 2026); parity with its published test
-#               reports is in the generations' manifest
+#   cxrmate-2   CXRMate-2 (Nicolson et al. 2026), its upstream's inputs; parity with
+#               its published test reports is in the generations' manifest
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -32,10 +32,10 @@ for dataset in mimic rexgradient; do
   for model in cxrmate-2; do
     # 4 GPUs: one container each, on a quarter of the targets
     b=$(s --gres=gpu:4 --cpus-per-task=64 --mem=128G -- labrag baseline --model $model --dataset $dataset --set $SET)
-    e=$(s -d afterok:$b --gres=gpu:1 -- labrag evaluate --generations $F/baseline/$model/$SET)
+    e=$(s -d afterok:$b --gres=gpu:1 -- labrag evaluate --generations $F/baseline/upstream/$model/$SET)
     ids+=" $dataset $model $b $e"
     dep+=":$e"
-    cells+="$model=$F/baseline/$model/$SET "
+    cells+="$model=$F/baseline/upstream/$model/$SET "
   done
   cmp=$(s -d afterok$dep -- labrag compare --generations $cells --out $F/baselines/$SET)
   ids+=" compare $cmp"

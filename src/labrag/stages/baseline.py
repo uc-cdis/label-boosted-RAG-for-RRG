@@ -1,7 +1,8 @@
 """Stage ``baseline``: a published report generator, run as published, on our targets.
 
-Writes ``generations/<set>/<dataset>/findings+impression/baseline/<model>/<set>/
-generations.jsonl.gz`` (study_id, set, report), as generate does, so evaluate and
+Writes ``generations/<set>/<dataset>/findings+impression/baseline/<inputs>/<model>/
+<set>/generations.jsonl.gz`` (study_id, set, report), at generate's depth (<inputs>
+in the prompt's place: ``upstream`` = what its own pipeline feeds it), so evaluate and
 compare take it like any condition. The targets and their references are those of the
 set's no-context prompt artifact (every condition's targets are the same).
 
@@ -45,6 +46,7 @@ MODELS = {
         "generate": "cxrmate-2",
         "upstream": "external/cxrmate-2",
         "weights": "baseline.cxrmate-2",
+        "inputs": "upstream",
         # our study id -> upstream's: ReXGradient's is the StudyInstanceUid
         "upstream_id": {
             "mimic": lambda s: s,
@@ -66,10 +68,14 @@ def run(model: str, dataset: str, target_set: str, overwrite: bool = False):
     if dataset not in spec["upstream_id"]:
         raise SystemExit(f"baseline {model}: no {dataset} pipeline upstream")
     prompt_rel = TARGETS.format(set=target_set, dataset=dataset, section=JOINT)
-    rel = f"generations/{target_set}/{dataset}/{JOINT}/{NAME}/{model}/{target_set}"
+    rel = (
+        f"generations/{target_set}/{dataset}/{JOINT}/{NAME}/{spec['inputs']}/{model}/"
+        f"{target_set}"
+    )
     config = {
         "stage": NAME,
         "model": model,
+        "inputs": spec["inputs"],
         "dataset": dataset,
         "set": target_set,
         "prompts": prompt_rel,  # the targets and references only

@@ -21,8 +21,9 @@ image from the current checkout, checks the weights (sha256, `configs/weights.ya
 and runs two steps. `prepare` runs upstream's prepare script on CPU, into node-local
 disk. `generate` runs one container per GPU of the job, each on its share of the
 targets. Reports go to
-`generations/test/<dataset>/findings+impression/baseline/<m>/test/`, in the layout
-generate uses, so `labrag evaluate` and `compare` take them unchanged
+`generations/test/<dataset>/findings+impression/baseline/<inputs>/<m>/test/`, at
+generate's depth (`<inputs>` in the prompt's place: `upstream` = what the model's own
+pipeline feeds it), so `labrag evaluate` and `compare` take them unchanged
 ([experiments/baselines-test.sh](../experiments/baselines-test.sh)).
 
 Containers need Docker, so they run in Slurm jobs, never in the dev container.

@@ -853,3 +853,53 @@ joint-simple-negatives-indication-prior-changes-image:
 
     Now generate the report for the current case using its label below. Always generate reports based on the examples shown.
     Label: {labels}
+
+# The base inputs of joint-*-prior-changes-* without the examples: no-context (no labels)
+# and labels only (the target's labels, no retrieval). The instructions about the
+# examples (mimic their style, base the report on them) go; the rest is unchanged.
+
+joint-no-context-negatives-indication-prior-changes-image:
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given the indication, the prior report and the chest X-ray of the current case.
+    Strictly follow the instructions below to generate the report.
+
+    **Instructions**
+
+    1. The report must be based on the image of the current case, its indication and its prior report.
+    2. Do not generate blank reports.
+    3. The prior report is the report of this patient's previous study, or "None" if there is none. Use it to know the patient's earlier findings and devices. Compare with it only for a specific finding or device, and only where the image of the current case supports the comparison (e.g. a new, worse, improved, resolved or persisting finding; a device placed or removed); do not add a general statement that the study is unchanged or stable. If it is "None", do not refer to prior examinations. Do not include dates, times or names.
+    4. Write the Findings and Impression sections of the report, in that order, each starting with its header: "Findings:" and "Impression:".
+    5. State the pertinent negatives: the relevant findings that are absent.
+    6. The indication is the reason the study was ordered: use it to judge which findings are pertinent, but do not report a finding only because the indication names it.
+
+    CURRENT CASE:
+    Indication: {indication}
+    Prior report: {prior}
+    {image}
+
+    Now generate the report for the current case.
+
+joint-labels-only-negatives-indication-prior-changes-image:
+  user: |
+    You are an expert radiological assistant.
+    Your task is to generate a radiology report given the indication, the prior report, the chest X-ray and the label of the current case.
+    Generate the report for the current case based on the current label.
+    Strictly follow the instructions below to generate the report.
+
+    **Instructions**
+
+    1. The report must be based on the image of the current case, its indication, its prior report and the current label.
+    2. Do not generate blank reports.
+    3. The prior report is the report of this patient's previous study, or "None" if there is none. Use it to know the patient's earlier findings and devices. Compare with it only for a specific finding or device, and only where the image of the current case supports the comparison (e.g. a new, worse, improved, resolved or persisting finding; a device placed or removed); do not add a general statement that the study is unchanged or stable. If it is "None", do not refer to prior examinations. Do not include dates, times or names.
+    4. Write the Findings and Impression sections of the report, in that order, each starting with its header: "Findings:" and "Impression:".
+    5. State the pertinent negatives: the relevant findings that are absent.
+    6. The indication is the reason the study was ordered: use it to judge which findings are pertinent, but do not report a finding only because the indication names it.
+
+    CURRENT CASE:
+    Indication: {indication}
+    Prior report: {prior}
+    {image}
+
+    Now generate the report for the current case using its label below.
+    Label: {labels}

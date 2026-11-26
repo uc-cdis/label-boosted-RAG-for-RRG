@@ -22,6 +22,30 @@ def test_add_fn_adds_the_misses():
     ]
 
 
+def test_shuffled_labels_come_from_another_patient():
+    subjects = np.array([1, 1, 2, 3, 3, 3, 4, 5, 6, 7])
+    donor = build_prompts.donors(subjects, 0)
+    assert sorted(donor) == list(range(len(subjects)))  # each target's labels used once
+    assert not (subjects[donor] == subjects).any()
+    assert (donor == build_prompts.donors(subjects, 0)).all()  # fixed by the seed
+    with pytest.raises(SystemExit, match="nothing to shuffle"):
+        build_prompts.donors(np.array([1, 1]), 0)
+
+
+@pytest.mark.parametrize(
+    "condition, prompt",
+    [
+        ("no-context", "joint-naive-negatives-indication-prior-changes-image"),
+        ("retrieval-only", "joint-no-context-negatives-indication-prior-changes-image"),
+        ("retrieval-only", "joint-simple-negatives-indication-prior-changes-image"),
+        ("labrag-oracle", "joint-no-context-negatives-indication-prior-changes-image"),
+    ],
+)
+def test_prompt_must_fit_the_condition(condition, prompt):
+    with pytest.raises(SystemExit, match="does not fit condition"):
+        build_prompts.run("test", "mimic", "findings+impression", condition, prompt)
+
+
 def test_every_diagnostic_mixes_and_has_a_prompt():
     for condition in DIAGNOSTICS:
         mix_labels(condition, PRED, REF)
@@ -236,7 +260,7 @@ def test_severity_and_devices_are_for_the_oracle():
         build_prompts.run(
             "val", "mimic", "findings", "labrag", predictions=FT, severity=True
         )
-    with pytest.raises(SystemExit, match="--incidentals is for labrag-oracle and"):
+    with pytest.raises(SystemExit, match="--incidentals is for labrag-oracle, labrag"):
         build_prompts.run(
             "val", "mimic", "findings", "retrieval-only", incidentals=True
         )
@@ -251,7 +275,7 @@ def test_severity_and_devices_are_for_the_oracle():
             predictions=FT + ".devices.mc",
             incidentals=True,
         )
-    with pytest.raises(SystemExit, match="--devices is for labrag-oracle and labrag"):
+    with pytest.raises(SystemExit, match="--devices is for labrag-oracle, labrag"):
         build_prompts.run("val", "mimic", "findings", "retrieval-only", devices=True)
     with pytest.raises(SystemExit, match="needs --predictions of a chexbert14.devices"):
         build_prompts.run(
@@ -304,3 +328,25 @@ def test_priors_need_a_strictly_earlier_time():
     got = priors(studies, times).fillna("-").to_dict()
     # r and s share a time: neither is the other's prior; p takes s (ties by id)
     assert got == {"p": "s", "q": "-", "r": "q", "s": "q", "t": "-"}
+
+
+def test_labels_only_takes_no_ranking_or_same():
+    labels_only = "joint-labels-only-negatives-indication-prior-changes-image"
+    with pytest.raises(SystemExit, match="--ranking is for conditions with labels and"):
+        build_prompts.run(
+            "test",
+            "mimic",
+            "findings+impression",
+            "labrag-oracle",
+            labels_only,
+            ranking="image",
+        )
+    with pytest.raises(SystemExit, match="--same reader is for conditions with"):
+        build_prompts.run(
+            "test",
+            "mimic",
+            "findings+impression",
+            "labrag-oracle",
+            labels_only,
+            same="reader",
+        )

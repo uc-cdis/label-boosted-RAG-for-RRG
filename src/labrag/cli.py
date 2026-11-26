@@ -23,6 +23,7 @@ from labrag.stages import (
     severity,
     sides,
     styles,
+    template,
     threshold,
 )
 
@@ -311,6 +312,22 @@ def add_generate(sub) -> None:
     )
 
 
+def add_template(sub) -> None:
+    p = stage(sub, template)
+    p.add_argument(
+        "--prompts",
+        required=True,
+        help="prompt artifact, relative to prompts/ (a label condition)",
+    )
+    p.add_argument(
+        "--set",
+        dest="target_set",
+        metavar="SET",
+        required=True,
+        help="target set, e.g. test",
+    )
+
+
 def add_evaluate(sub) -> None:
     p = stage(sub, evaluate)
     p.add_argument(
@@ -370,6 +387,7 @@ COMMANDS = (
     add_predict,
     add_build_prompts,
     add_generate,
+    add_template,
     add_evaluate,
     add_compare,
     add_provenance,

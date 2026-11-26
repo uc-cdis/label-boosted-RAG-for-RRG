@@ -8,7 +8,8 @@ without), reference (trimmed only).
 An experiment fixes, per dataset, the target and corpus roles (EXPERIMENTS): ``pilot``
 (CheXpert Plus pilot split), ``val`` (every val study of MIMIC-CXR and ReXGradient,
 corpus train only; their thresholds were set on val, so max-F1 labels are in-sample),
-``smoke`` (100 of those val patients, one study each).
+``smoke`` (100 of those val patients, one study each), ``test`` (every test study,
+corpus train only, as val).
 
 Conditions: ``retrieval-only`` (top K by image similarity) and ``labrag.<labeler>``
 (Jaccard on positive labels, ties by image similarity; the target's predicted labels in
@@ -20,8 +21,16 @@ written to ``labrag.<name>.<sections>.<labeler>`` (name without the encoder).
 predicted ones: the ceiling for any classifier. Two diagnostics between the two (they
 read the reference, so they are never a method): ``labrag-drop-fp.<labeler>``, the
 predicted labels without their false positives, and ``labrag-add-fn.<labeler>``, with
-their misses added. ``no-context``: no retrieval and no labels, so its prompt must show
-the image. Retrieval never returns a study of the target's patient.
+their misses added. ``labrag-shuffled.<labeler>``: labrag with another target's
+predicted labels (each target gets those of one other target, of another patient, a
+fixed derangement): the classifier's label distribution with nothing about this study.
+``no-context``: no retrieval and no labels, so its prompt must show the image.
+Retrieval never returns a study of the target's patient.
+
+The prompt version decides what a label condition does with the labels: a version with
+{labels} and {examples} shows them and ranks on them (LaB-RAG); one without {labels}
+only ranks the examples on them (filter only: the labels are never shown); one without
+{examples} only shows them (labels only: no retrieval).
 
 ``--predictions <source>/<name>/<sections>/<labeler>`` takes the target's labels from a
 predict artifact (a classifier from another dataset or fine-tuned on images: its
@@ -129,6 +138,7 @@ VAL = {
     "corpus": ("train",),
 }
 SMOKE = VAL | {"sample": {"patients": 100, "seed": 20261119}}
+TEST = {"targets": ("test",), "corpus": ("train",)}
 EXPERIMENTS = {
     "pilot": {
         "chexpertplus": {
@@ -138,18 +148,29 @@ EXPERIMENTS = {
     },
     "smoke": {"mimic": SMOKE, "rexgradient": SMOKE},
     "val": {"mimic": VAL, "rexgradient": VAL},
+    "test": {"mimic": TEST, "rexgradient": TEST},
 }
 # label diagnostics -> how the target's labels mix predicted and reference
 DIAGNOSTICS = {
     "labrag-drop-fp": "predicted and reference",
     "labrag-add-fn": "predicted or reference",
 }
-CONDITIONS = ("no-context", "retrieval-only", "labrag", "labrag-oracle", *DIAGNOSTICS)
+SHUFFLED = "labrag-shuffled"
+SHUFFLE_SEED = 20261126
+CONDITIONS = (
+    "no-context",
+    "retrieval-only",
+    "labrag",
+    "labrag-oracle",
+    SHUFFLED,
+    *DIAGNOSTICS,
+)
 DEFAULT_PROMPT = {
     "no-context": "section-image",
     "retrieval-only": "preprint-naive",
     "labrag": "preprint-simple",
     "labrag-oracle": "preprint-simple",
+    SHUFFLED: "preprint-simple",
 } | {c: "preprint-simple" for c in DIAGNOSTICS}
 K = 5
 STYLE = "style"  # report-style clusters (the styles stage), not an adapter group
@@ -197,16 +218,23 @@ def run(
     if joint and (sides or confidence):
         raise SystemExit(f"build-prompts: no --sides or --confidence for {JOINT}")
     version = prompts.load(prompt)
-    with_labels = condition.startswith("labrag")
-    with_examples = condition != "no-context"
+    with_labels = condition.startswith("labrag")  # ranked on and/or shown
+    shows_labels = prompts.uses_labels(version)
+    with_examples = prompts.uses_examples(version)
     with_image = prompts.uses_image(version)
     oracle = condition == "labrag-oracle"
-    predicted = condition == "labrag" or condition in DIAGNOSTICS
+    predicted = condition in ("labrag", SHUFFLED) or condition in DIAGNOSTICS
+    if with_labels:
+        fits = shows_labels or with_examples
+    else:
+        fits = not shows_labels and with_examples == (condition == "retrieval-only")
+    if not fits:
+        raise SystemExit(f"prompt {prompt!r} does not fit condition {condition!r}")
     if (classifier is not None or predictions) and not predicted:
         raise SystemExit(
             "build-prompts: --classifier/--predictions are for predicted labels"
         )
-    if corpus_labels != "reference" and condition != "labrag":
+    if corpus_labels != "reference" and (condition != "labrag" or not with_examples):
         raise SystemExit("build-prompts: predicted corpus labels are for labrag only")
     if predictions and classifier is not None:
         raise SystemExit("build-prompts: --predictions brings its own labels")
@@ -219,16 +247,23 @@ def run(
         raise SystemExit(
             "build-prompts: --corpus-labels predicted needs a -oofK classifier"
         )
-    if ranking != "labels" and not with_labels:
-        raise SystemExit("build-prompts: --ranking is for conditions with labels")
+    if ranking != "labels" and not (with_labels and with_examples):
+        raise SystemExit(
+            "build-prompts: --ranking is for conditions with labels and examples"
+        )
     if sides and condition != "labrag-oracle":
         raise SystemExit("build-prompts: --sides is for labrag-oracle")
     if severity and condition != "labrag-oracle":
         raise SystemExit("build-prompts: --severity is for labrag-oracle")
-    if devices and condition not in ("labrag-oracle", "labrag"):
-        raise SystemExit("build-prompts: --devices is for labrag-oracle and labrag")
-    if incidentals and condition not in ("labrag-oracle", "labrag"):
-        raise SystemExit("build-prompts: --incidentals is for labrag-oracle and labrag")
+    if devices and condition not in ("labrag-oracle", "labrag", SHUFFLED):
+        raise SystemExit(
+            "build-prompts: --devices is for labrag-oracle, labrag and labrag-shuffled"
+        )
+    if incidentals and condition not in ("labrag-oracle", "labrag", SHUFFLED):
+        raise SystemExit(
+            "build-prompts: --incidentals is for labrag-oracle, labrag and "
+            "labrag-shuffled"
+        )
     if sides and severity:
         raise SystemExit("build-prompts: --sides or --severity, not both")
     if confidence and condition != "labrag":
@@ -249,11 +284,6 @@ def run(
     prior = prompts.uses_prior(version)
     if prior and not has_times(dataset):
         raise SystemExit(f"build-prompts: {dataset}'s adapter gives no study times")
-    if (prompts.uses_labels(version), prompts.uses_examples(version)) != (
-        with_labels,
-        with_examples,
-    ):
-        raise SystemExit(f"prompt {prompt!r} does not fit condition {condition!r}")
 
     labeler = LABELER + LABELER_SUFFIX[uncertain]
     multiclass = with_types = with_incidentals = False
@@ -276,7 +306,9 @@ def run(
         with_incidentals = base == WITH_INCIDENTALS
         with_types = with_incidentals or base == WITH_DEVICES
         if multiclass and (
-            condition != "labrag" or confidence or corpus_labels != "reference"
+            condition not in ("labrag", SHUFFLED)
+            or confidence
+            or corpus_labels != "reference"
         ):
             raise SystemExit(
                 "build-prompts: multiclass predictions are for labrag with reference "
@@ -305,12 +337,16 @@ def run(
             )
         if section not in clf_sections.split(JOIN):
             raise SystemExit(f"build-prompts: {classifier} has no {section} readout")
-    if devices and condition == "labrag" and not (transfer and with_types):
+    if devices and condition in ("labrag", SHUFFLED) and not (transfer and with_types):
         raise SystemExit(
             f"build-prompts: labrag --devices needs --predictions of a {WITH_DEVICES} "
             f"or {WITH_INCIDENTALS} fine-tune"
         )
-    if incidentals and condition == "labrag" and not (transfer and with_incidentals):
+    if (
+        incidentals
+        and condition in ("labrag", SHUFFLED)
+        and not (transfer and with_incidentals)
+    ):
         raise SystemExit(
             "build-prompts: labrag --incidentals needs --predictions of a "
             f"{WITH_INCIDENTALS} fine-tune"
@@ -434,7 +470,14 @@ def run(
         config |= {
             "labeler": labeler,
             "target_labels": (
-                "reference" if oracle else DIAGNOSTICS.get(condition, "predicted")
+                "reference"
+                if oracle
+                else (
+                    "predicted, of another target of another patient (a derangement, "
+                    f"seed {SHUFFLE_SEED})"
+                    if condition == SHUFFLED
+                    else DIAGNOSTICS.get(condition, "predicted")
+                )
             ),
             "corpus_labels": (
                 "reference"
@@ -476,6 +519,10 @@ def run(
                 else {}
             ),
         }
+        if not shows_labels:
+            config["labels_shown"] = "none: they only rank the examples (filter only)"
+        if not with_examples:
+            config["ranking"] = "none: no examples (labels only)"
         condition_dir = f"{condition}.{labeler}"
         if predicted:
             short = clf_name.removeprefix(f"{ENCODER}.")
@@ -561,32 +608,32 @@ def run(
         if "sample" in exp:
             target = sample_targets(target, **exp["sample"])
         corpus = studies[studies.role.isin(exp["corpus"])]
-        if not with_examples:
-            summary = write(out, [record(i, row) for i, row in target.iterrows()])
-            print(json.dumps(summary, indent=2))
-            return summary
+        if with_examples:
+            embedded = artifacts.read_table(emb_dir / "studies.csv")
+            embedded = embedded.set_index("study_id")
+            embedded["row"] = np.arange(len(embedded))
+            emb = np.load(emb_dir / "embeddings.npy")
 
-        embedded = artifacts.read_table(emb_dir / "studies.csv").set_index("study_id")
-        embedded["row"] = np.arange(len(embedded))
-        emb = np.load(emb_dir / "embeddings.npy")
+            def embeddings(rows: pd.DataFrame) -> np.ndarray:
+                # The embedded image must be the one the adapter picks for the study.
+                e = embedded.loc[rows.index]
+                assert (e.image_path == rows.image_path).all(), "image mismatch"
+                return emb[e.row.to_numpy()]
 
-        def embeddings(rows: pd.DataFrame) -> np.ndarray:
-            # The embedded image must be the one the adapter picks for the study today.
-            e = embedded.loc[rows.index]
-            assert (e.image_path == rows.image_path).all(), "image mismatch"
-            return emb[e.row.to_numpy()]
-
-        sim = retrieval.cosine(embeddings(target), embeddings(corpus))
-        exclude = target.subject_id.to_numpy()[:, None] == corpus.subject_id.to_numpy()
-        if same == STYLE:
-            table = artifacts.read_table(styles_dir / "styles.csv")
-            group = table.set_index("study_id")["style"]
-        elif same:
-            group = groups(dataset, same, cxr_root)
-        if same:
-            t, c = group.reindex(target.index), group.reindex(corpus.index)
-            assert t.notna().all(), f"a target study has no {same}"
-            exclude |= t.to_numpy()[:, None] != c.to_numpy()[None, :]
+            sim = retrieval.cosine(embeddings(target), embeddings(corpus))
+            exclude = (
+                target.subject_id.to_numpy()[:, None] == corpus.subject_id.to_numpy()
+            )
+            if same == STYLE:
+                table = artifacts.read_table(styles_dir / "styles.csv")
+                group = table.set_index("study_id")["style"]
+            elif same:
+                group = groups(dataset, same, cxr_root)
+            if same:
+                t, c = group.reindex(target.index), group.reindex(corpus.index)
+                assert t.notna().all(), f"a target study has no {same}"
+                exclude |= t.to_numpy()[:, None] != c.to_numpy()[None, :]
+        overlap = None
         if with_labels:
 
             def reference(rows: pd.DataFrame) -> np.ndarray:
@@ -595,7 +642,9 @@ def run(
 
             if corpus_labels == "reference":
                 assert names == list(labels.columns), "classifier labels differ"
-            if transfer and corpus_labels == "predicted":
+            if not with_examples:
+                corpus_y = None
+            elif transfer and corpus_labels == "predicted":
                 corpus_y = transferred.loc[predicted_rows(transferred, corpus)]
                 corpus_y = corpus_y.to_numpy(dtype=int)
             elif corpus_labels == "predicted":
@@ -619,10 +668,19 @@ def run(
                 target_y = pred.loc[target.index, names].to_numpy(dtype=int)
             if condition in DIAGNOSTICS:
                 target_y = mix_labels(condition, target_y, reference(target))
-            overlap = retrieval.jaccard(target_y, corpus_y)
+            if condition == SHUFFLED:
+                donor = donors(target.subject_id.to_numpy(), SHUFFLE_SEED)
+                target_y = target_y[donor]
+                if target_codes is not None:
+                    target_codes = target_codes[donor]
+            if with_examples:
+                overlap = retrieval.jaccard(target_y, corpus_y)
+        if with_examples:
+            top = retrieval.top_k(
+                K, sim, exclude, overlap if ranking == "labels" else None
+            )
         else:
-            overlap = None
-        top = retrieval.top_k(K, sim, exclude, overlap if ranking == "labels" else None)
+            top = np.zeros((len(target), 0), dtype=int)
 
         detail = {}  # (study_id, label) -> side or severity, shown after the label
         if sides:
@@ -678,17 +736,19 @@ def run(
                 )
                 for j in idx
             ]
-            retrieved = {
-                "retrieved": corpus_ids[idx].tolist(),
-                "retrieved_similarity": sim[i, idx].tolist(),
-            }
-            if with_labels:
+            retrieved = None
+            if with_examples:
+                retrieved = {
+                    "retrieved": corpus_ids[idx].tolist(),
+                    "retrieved_similarity": sim[i, idx].tolist(),
+                }
+            if with_examples and with_labels:
                 retrieved["retrieved_jaccard"] = overlap[i, idx].tolist()
             if categories:
                 labels_i = prompts.categories(target_codes[i], names, shown)
             else:
                 labels_i = (
-                    positives(target_y[i], study_id, True) if with_labels else None
+                    positives(target_y[i], study_id, True) if shows_labels else None
                 )
             absent_i = (
                 [n for n, c in zip(names, target_codes[i]) if c == 0]
@@ -710,8 +770,9 @@ def run(
                 )
             )
         summary = write(out, records)
-        summary["n_corpus"] = len(corpus)
-        if with_labels:
+        if with_examples:
+            summary["n_corpus"] = len(corpus)
+        if with_examples and with_labels:
             best = overlap[np.arange(len(top)), top[:, 0]]
             summary["top1_jaccard_1"] = float((best == 1).mean())
             summary["mean_retrieved_jaccard"] = float(
@@ -844,6 +905,21 @@ def predicted_rows(pred: pd.DataFrame, rows: pd.DataFrame) -> pd.Index:
             f"(e.g. {rows.index[missing][0]})"
         )
     return rows.index
+
+
+def donors(subjects: np.ndarray, seed: int) -> np.ndarray:
+    """Per target, the index of the target whose labels it gets (labrag-shuffled): a
+    random cyclic order, each target taking the next one's; shifted further until no
+    target gets a study of its own patient."""
+    order = np.random.default_rng(seed).permutation(len(subjects))
+    for shift in range(1, len(subjects)):
+        donor = np.empty(len(subjects), dtype=int)
+        donor[order] = np.roll(order, -shift)
+        if not (subjects[donor] == subjects).any():
+            return donor
+    raise SystemExit(
+        "build-prompts: every target is of one patient; nothing to shuffle"
+    )
 
 
 def mix_labels(condition: str, predicted: np.ndarray, reference: np.ndarray):

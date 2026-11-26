@@ -145,3 +145,28 @@ crimson.medgemma-4b-it:
     model.safetensors: d858e73a744b4c34cc0bed90e2d4da7273256ff27a85c24e02aeb3a792ec5c9b
     tokenizer.json: daab2354f8a74e70d70b4d1f804939b68a8c9624dd06cb7858e52dd8970e9726
     tokenizer_config.json: eb28e3a9807f77cd74dce1b8aed91884621c0302941794470c5a46f884462615
+
+# CXRMate-2 (Nicolson et al. 2026; Apache-2.0, not gated), the literature baseline
+# (baselines/cxrmate-2), revision aa8e2d16: fp32 weights, its trust_remote_code
+# modelling/processing code (byte-identical to external/cxrmate-2's, but the config
+# class) and the test reports it published (the baseline stage's parity check).
+baseline.cxrmate-2:
+  repo: aehrc/cxrmate-2
+  files:
+    config.json: 0472005455c28eee518b0030624a16c13bc41fd9a2467edf154f3197f14cf922
+    configuration_cxrmate2.py: 208f67268df81f1585e70f476e4e23c1338031569fa7a197f4f8328b45f678f5
+    cxrmate2_generated_reports_mimic_cxr_test.csv: 23b7e003dbf025048e6cf405f714ee971241320e64e69363f980c5e1e5e627c7
+    cxrmate2_generated_reports_rexgradient_test.csv: 0b4116737423e487f5d8ca9c0d6967dbe9bffa1a1ea61d0e956e8cbfd83c58d3
+    dataset.py: 718f7534de2cd3554a546537a4cb1d1d24085722ff74e7305006ccbb4c6722f6
+    generation_config.json: 1ea7e18446d8ff031c81220a00bd3433abb1861459587d190c16c7f1f16d205a
+    model-00001-of-00003.safetensors: d6a5e94e1ebdc1c7387247acc2981fffe5aee708d139a647aeb052e6450bc2a1
+    model-00002-of-00003.safetensors: f288d34e0ea1e511230caf91fa3190cbf1d9591f67544a2be5007aae7a303c6f
+    model-00003-of-00003.safetensors: 2c24d50eb28331a08a3ea9888cec245fef95f06e724b58fecc22fe2d393363e2
+    model.safetensors.index.json: c0748d4c8397829a47a72c13ef5d48aff1e1d30e960546b5067001620e6d399d
+    modelling_cxrmate2.py: d49c90e8e9dce353a8b375e857e32197632760d569031930ce23b0485990a216
+    preprocessor_config.json: ceaa94d6c7ee5ae38006194626ea658c7f8ca080218d0c3071060cab090a788d
+    processing_cxrmate2.py: 96d3bb2503890920f4c00e13b83cd71ab7bb1231c1a0dfe7f593a1814c450db2
+    processor_config.json: 329181eff4d42c413614af65499131b44a3ea448e4ef57df65a000f70a15ef99
+    special_tokens_map.json: 36aaa0def79a3900daedf06a418fdcdb275488f272d991ac98369a0a577d5118
+    tokenizer.json: ba69779559dee474102786407ff1444214680fdd3d65c2eb270fd92a57034ff2
+    tokenizer_config.json: 06bc62c24f6c08efaab291f9d15ef6aa05bf001090662b0af99c048b6de35f74

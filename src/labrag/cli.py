@@ -11,6 +11,7 @@ from labrag import artifacts, data, serving
 from labrag.classifiers import quant
 from labrag.data import DATASETS
 from labrag.stages import (
+    baseline,
     build_prompts,
     classify,
     compare,
@@ -328,6 +329,19 @@ def add_template(sub) -> None:
     )
 
 
+def add_baseline(sub) -> None:
+    p = stage(sub, baseline)
+    p.add_argument("--model", required=True, choices=sorted(baseline.MODELS))
+    p.add_argument("--dataset", required=True, choices=["mimic", "rexgradient"])
+    p.add_argument(
+        "--set",
+        dest="target_set",
+        metavar="SET",
+        required=True,
+        help="target set, e.g. test",
+    )
+
+
 def add_evaluate(sub) -> None:
     p = stage(sub, evaluate)
     p.add_argument(
@@ -388,6 +402,7 @@ COMMANDS = (
     add_build_prompts,
     add_generate,
     add_template,
+    add_baseline,
     add_evaluate,
     add_compare,
     add_provenance,

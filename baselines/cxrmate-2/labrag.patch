@@ -1,0 +1,81 @@
+diff --git a/prepare_datasets/prepare_mimic_cxr_jpg.py b/prepare_datasets/prepare_mimic_cxr_jpg.py
+index 530ef83..fc77bf5 100644
+--- a/prepare_datasets/prepare_mimic_cxr_jpg.py
++++ b/prepare_datasets/prepare_mimic_cxr_jpg.py
+@@ -280,7 +280,7 @@ class PrepareDataset:
+             gc.collect()
+             
+         dataset = datasets.DatasetDict(dataset_dict)
+-        dataset.save_to_disk(os.path.join(database_dir, 'mimic_cxr_jpg_dataset'))
++        dataset.save_to_disk(os.path.join(self.database_dir, 'mimic_cxr_jpg_dataset'))
+         
+         self.con.close()
+ 
+diff --git a/prepare_datasets/prepare_rexgradient.py b/prepare_datasets/prepare_rexgradient.py
+index 28c3b6f..fd5a2d1 100644
+--- a/prepare_datasets/prepare_rexgradient.py
++++ b/prepare_datasets/prepare_rexgradient.py
+@@ -17,26 +17,12 @@ from huggingface_hub import hf_hub_download
+ from PIL import Image
+ 
+ 
+-def prepare_dataset(database_dir, num_workers=None):
++def prepare_dataset(database_dir, rexgradient_dir, num_workers=None, splits=('train', 'validation', 'test')):
+ 
+-    file_paths = []
+-    for i in range(10):
+-        file_paths.append(hf_hub_download(repo_id='rajpurkarlab/ReXGradient-160K', filename=f'deid_png.part0{i}', repo_type='dataset'))
+-
+-    output_tar_file_path = os.path.join(database_dir, 'rexgradient_images.tar')
+-    output_images_dir = os.path.join(database_dir, 'rexgradient_images')
+-    if not os.path.exists(output_tar_file_path):
+-        with open(output_tar_file_path, 'wb') as tar_f:
+-            for i in file_paths:
+-                with open(i, 'rb') as part_f:
+-                    shutil.copyfileobj(part_f, tar_f)
+-        with open(output_tar_file_path, 'rb') as comp_fd:
+-            dctx = zstd.ZstdDecompressor()
+-            stream_reader = dctx.stream_reader(comp_fd)
+-            with tarfile.open(mode='r|*', fileobj=stream_reader) as tar:
+-                tar.extractall(path=output_images_dir)
+-
+-    dataset = datasets.load_dataset('rajpurkarlab/ReXGradient-160K')
++    # labrag: a local copy of rajpurkarlab/ReXGradient-160K (images unpacked, metadata
++    # CSVs = the hub dataset's "metadata" config) instead of downloading it.
++    metadata = {'train': 'train_metadata.csv', 'validation': 'valid_metadata.csv', 'test': 'test_metadata.csv'}
++    dataset = datasets.load_dataset('csv', data_files={i: os.path.join(rexgradient_dir, 'metadata', metadata[i]) for i in splits})
+     
+     num_workers = num_workers if num_workers is not None else multiprocessing.cpu_count()
+ 
+@@ -44,7 +30,7 @@ def prepare_dataset(database_dir, num_workers=None):
+         images = []
+         for subject_id, accession_number, study_id in zip(row['subject_id'], row['AccessionNumber'], row['study_id'], strict=True):
+             study_images = []
+-            image_paths = glob.glob(os.path.join(database_dir, 'rexgradient_images', 'deid_png', subject_id[1:], accession_number, 'studies', study_id, 'series', '*', 'instances', '*'))
++            image_paths = sorted(glob.glob(os.path.join(rexgradient_dir, 'deid_png', subject_id[1:], accession_number, 'studies', study_id, 'series', '*', 'instances', '*')))  # labrag: sorted, glob order varies by filesystem
+             for image_path in image_paths:
+ 
+                 image = Image.open(image_path)
+@@ -67,7 +53,7 @@ def prepare_dataset(database_dir, num_workers=None):
+         return row
+             
+     dataset_dict = {}
+-    for split in ['train', 'validation', 'test']:
++    for split in splits:
+                 
+         df = dataset[split].to_pandas()
+         df['subject_id'] = df['id'].str.split('_').str[0]
+@@ -131,9 +117,13 @@ if __name__ == '__main__':
+     parser = argparse.ArgumentParser(description='Prepare the ReXGradient-160K dataset.')
+     parser.add_argument('--database_dir', type=str, default='database', help='Directory where the resultant database will be stored.')
+     parser.add_argument('--num_workers', type=int, default=4, help='Number of worker processes (default: 4).')
++    parser.add_argument('--rexgradient_dir', type=str, required=True, help='Local copy of ReXGradient-160K (metadata/, deid_png/).')
++    parser.add_argument('--splits', type=str, nargs='+', default=['train', 'validation', 'test'], help='Dataset splits to process.')
+     args = parser.parse_args()
+ 
+     prepare_dataset(
+         database_dir=args.database_dir,
++        rexgradient_dir=args.rexgradient_dir,
+         num_workers=args.num_workers,
++        splits=args.splits,
+     )

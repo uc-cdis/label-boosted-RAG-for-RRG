@@ -149,7 +149,7 @@ Fusion framing for the special issue: labels are a compact, interpretable, late-
   - in-domain test sets: MIMIC and ReXGradient
   - **cross-dataset**: the CheXpert Plus classifiers on MIMIC, ReXGradient and PadChest-GR, the same pairs as J
   - PadChest-GR test for the rich labels and the localized labels (§5). The only dataset where localized labels can be checked, since MIMIC and ReXGradient have no gold localized labels.
-- **Literature baselines:** 3–5 strong current public models (chosen using ReXrank; weights to be verified), on MIMIC and ReXGradient only. Modern models only; overlap with the preprint's baselines is fine. No ReXrank submission.
+- **Literature baselines:** 3–5 strong current public models (chosen using ReXrank; weights to be verified), on MIMIC and ReXGradient only. Modern models only; overlap with the preprint's baselines is fine. No ReXrank submission. Chosen: UniRG-CXR, CXRMate-2, MedGemma 1.5 4B, MedVersa; each run as published, in its own container ([baselines/](../baselines/README.md)), on the core experiment's test targets.
 
 ---
 

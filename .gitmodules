@@ -16,3 +16,6 @@
 [submodule "external/CRIMSON"]
 	path = external/CRIMSON
 	url = https://github.com/rajpurkarlab/CRIMSON.git
+[submodule "external/cxrmate-2"]
+	path = external/cxrmate-2
+	url = https://github.com/aehrc/cxrmate-2.git

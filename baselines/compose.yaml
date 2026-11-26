@@ -1,0 +1,67 @@
+# The literature baselines: one service per published model, in its own image with its
+# upstream's code and pins (baselines/README.md). The baseline stage builds and runs
+# them:
+#
+#   docker compose -f baselines/compose.yaml build <model>
+#   docker compose -f baselines/compose.yaml run --rm -v <dir>:<dir> --user <uid>:<gid> \
+#     -e OMP_NUM_THREADS=<n> <service> <args...>
+#
+# Images are tagged with the commit (LABRAG_COMMIT; "dev" by hand); each job is its own
+# compose project. No outside network: weights come from /models and the datasets from
+# their upstream's own paths, all read-only.
+
+name: labrag-baselines
+
+x-ro: &ro
+  type: bind
+  read_only: true
+  # a missing source fails instead of becoming an empty dir
+  bind:
+    create_host_path: false
+
+x-cxrmate-2: &cxrmate-2
+  image: labrag/cxrmate-2:${LABRAG_COMMIT:-dev}
+  # init: run.py is the container's PID 1 otherwise, and PID 1 ignores a SIGTERM it
+  # has no handler for: the init passes it on.
+  init: true
+  network_mode: none
+  volumes:
+    - <<: *ro
+      source: ${LABRAG_MODELS_ROOT:-/opt/gpudata/models}
+      target: /models
+    # upstream's PhysioNet layout: MIMIC-CXR reports, MIMIC-CXR-JPG images + csvs
+    - <<: *ro
+      source: ${LABRAG_CXR_ROOT:-/opt/gpudata/cxr}/mimic-cxr/notes
+      target: /physionet/mimic-cxr/2.0.0/files
+    - <<: *ro
+      source: ${LABRAG_CXR_ROOT:-/opt/gpudata/cxr}/mimic-cxr
+      target: /physionet/mimic-cxr-jpg/2.0.0
+    - <<: *ro
+      source: ${LABRAG_CXR_ROOT:-/opt/gpudata/cxr}/rexgradient
+      target: /data/rexgradient
+  environment:
+    - OMP_NUM_THREADS  # required by run.py
+    # no home for the job's uid (HOME=/), no network; HF_HOME also gets the
+    # checkpoint's code (trust_remote_code)
+    - HF_HOME=/tmp/huggingface
+    - HF_HUB_OFFLINE=1
+    - HF_DATASETS_OFFLINE=1
+    - XDG_CACHE_HOME=/tmp/.cache
+
+services:
+  # CXRMate-2 (Nicolson et al. 2026): `prepare`, on CPU.
+  cxrmate-2-prepare:
+    <<: *cxrmate-2
+    build:
+      context: cxrmate-2
+      additional_contexts:
+        upstream: ../external/cxrmate-2
+
+  # `generate`, on one GPU (CUDA_VISIBLE_DEVICES, a host index): cxrmate-2-prepare's
+  # image.
+  cxrmate-2:
+    <<: *cxrmate-2
+    pull_policy: never
+    gpus:
+      - driver: nvidia
+        device_ids: ["${CUDA_VISIBLE_DEVICES:-unset}"]

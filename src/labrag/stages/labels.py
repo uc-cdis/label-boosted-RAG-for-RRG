@@ -35,7 +35,7 @@ from labrag.data import (
     labels_only,
     padchest,
 )
-from labrag.labelers import chexbert, devices, incidentals
+from labrag.labelers import chexbert, devices, incidentals, scope, severity
 from labrag.stages.classify import NO_FINDING, NOT_PATHOLOGY
 
 DEVICES = "devices"
@@ -140,6 +140,15 @@ def read_labels(dirs: list[Path]) -> pd.DataFrame:
     return tables[0].join(tables[1:]) if len(tables) > 1 else tables[0]
 
 
+def rules_source(rules) -> dict[str, str]:
+    """sha256 of each module a rule labeler is written in: labels from older rules
+    have another config, so they are refused, never reused."""
+    return {
+        Path(m.__file__).name: artifacts.sha256_file(Path(m.__file__))
+        for m in (rules, scope, severity)
+    }
+
+
 def _rule_labels(
     dataset: str, section: str, labeler: str, overwrite: bool, cxr_root: Path
 ) -> Path:
@@ -156,6 +165,7 @@ def _rule_labels(
         "labeler": labeler,
         "labels": rules.NAMES,
         "text": "whitespace runs collapsed to one space",
+        "rules_sha256": rules_source(rules),
     }
 
     def build(out: Path) -> dict:

@@ -12,13 +12,14 @@
 # AdamW betas (.9, .999), eps 1e-8, weight decay .01, constant lr after 500 warmup
 # steps; token-level loss mean over the batch (dapo; upstream's batch was one group).
 # Ours: LoRA on every linear layer of the language model (vision frozen), lr 1e-5 =
-# upstream's full fine-tuning 1e-6 x ~10 (LoRA's usual factor); the deployed sampler
-# for rollouts; 8,192 completion tokens (0.1-0.2% of frozen val thinking runs longer),
+# upstream's full fine-tuning 1e-6 x ~10 (LoRA's usual factor); rollouts (and the tuned
+# cells' test generations) with Qwen's thinking settings minus the presence penalty
+# (upstream: T 1, no top-p/top-k, greedy at test); 8,192 completion tokens (0.1-0.2% of frozen val thinking runs longer),
 # truncated rollouts masked (upstream masked invalid ones); vLLM colocated on every
 # training GPU, asleep while it trains; 4 groups per GPU per generation round.
 grpo-thinking: &grpo-thinking
   model: qwen3.5-27b-vision
-  sampling: qwen3.5-thinking-32k
+  sampling: qwen3.5-thinking-32k-no-penalty
   studies: null
   lora: &lora
     r: 32

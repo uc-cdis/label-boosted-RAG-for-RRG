@@ -1,0 +1,31 @@
+--- a/trl/trainer/grpo_trainer.py
++++ b/trl/trainer/grpo_trainer.py
+@@ -2958,7 +2958,7 @@
+                 advantages = advantages / (std_rewards + 1e-4)
+             is_std_zero = torch.isclose(std_rewards, torch.zeros_like(std_rewards))  # for logging
+ 
+-        elif self.multi_objective_aggregation == "normalize_then_sum":
++        elif self.multi_objective_aggregation in ("normalize_then_sum", "normalize_then_sum_unscaled"):
+             grouped = rewards_per_func.view(-1, num_generations, len(self.reward_funcs))
+             mean_k = torch.nanmean(grouped, dim=1, keepdim=True)
+             std_k = nanstd(grouped, dim=1, keepdim=True) if num_generations > 1 else torch.zeros_like(mean_k)
+@@ -2967,13 +2967,17 @@
+             rewards = (reward_k * self.reward_weights.to(device).unsqueeze(0)).nansum(dim=1)
+             rewards[unscorable_mask] = torch.nan
+             std_rewards = nanstd(rewards).expand_as(rewards) if rewards.numel() > 1 else torch.zeros_like(rewards)
+-            advantages = (rewards - torch.nanmean(rewards)) / (std_rewards + 1e-4)
++            if self.multi_objective_aggregation == "normalize_then_sum_unscaled":
++                # labrag: CXRMate-2's advantage, the weighted sum of per-reward group z-scores as is
++                advantages = rewards
++            else:
++                advantages = (rewards - torch.nanmean(rewards)) / (std_rewards + 1e-4)
+             is_std_zero = torch.isclose(std_rewards, torch.zeros_like(std_rewards))  # for logging
+ 
+         else:
+             raise ValueError(
+                 f"Invalid multi_objective_aggregation: {self.multi_objective_aggregation}. Must be "
+-                "'sum_then_normalize' or 'normalize_then_sum'."
++                "'sum_then_normalize', 'normalize_then_sum' or 'normalize_then_sum_unscaled'."
+             )
+ 
+         # Unscorable completions (every reward func returned None) carry no learning signal: their reward is NaN here,

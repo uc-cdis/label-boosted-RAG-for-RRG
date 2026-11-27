@@ -172,14 +172,22 @@ def run(
     return built
 
 
-def image_url(path: Path, short_edge: int | None) -> str:
-    """The image as sent: 8-bit, resized (unless native), a PNG data URL."""
+def image_png(path: Path, short_edge: int | None) -> bytes:
+    """The image as sent: 8-bit, resized (unless native), PNG bytes."""
     image = load_8bit(path)
     if short_edge is not None:
         image = resize_short_edge(image, short_edge)
     buf = io.BytesIO()
     image.save(buf, format="PNG", compress_level=1)  # lossless; level only sets speed
-    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    return buf.getvalue()
+
+
+def image_url(path: Path, short_edge: int | None) -> str:
+    """image_png as a data URL."""
+    return (
+        "data:image/png;base64,"
+        + base64.b64encode(image_png(path, short_edge)).decode()
+    )
 
 
 def request_messages(

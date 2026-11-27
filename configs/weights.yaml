@@ -170,3 +170,12 @@ baseline.cxrmate-2:
     special_tokens_map.json: 36aaa0def79a3900daedf06a418fdcdb275488f272d991ac98369a0a577d5118
     tokenizer.json: ba69779559dee474102786407ff1444214680fdd3d65c2eb270fd92a57034ff2
     tokenizer_config.json: 06bc62c24f6c08efaab291f9d15ef6aa05bf001090662b0af99c048b6de35f74
+
+# The GRPO reward's ARN tokenizer: CXRMate-2's own (upstream calls ARNReward with its
+# processor's tokenizer); the same files as baseline.cxrmate-2's.
+grpo-reward.cxrmate-2-tokenizer:
+  repo: aehrc/cxrmate-2
+  files:
+    special_tokens_map.json: 36aaa0def79a3900daedf06a418fdcdb275488f272d991ac98369a0a577d5118
+    tokenizer.json: ba69779559dee474102786407ff1444214680fdd3d65c2eb270fd92a57034ff2
+    tokenizer_config.json: 06bc62c24f6c08efaab291f9d15ef6aa05bf001090662b0af99c048b6de35f74

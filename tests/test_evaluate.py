@@ -9,15 +9,20 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from labrag import weights
+from labrag import reports, weights
+from labrag.data import JOINT_PARTS
 from labrag.stages import evaluate
 
 SPEC = evaluate.METRICS["cxr-report-metric"]
 
 
+def test_reports_joint_parts_are_the_datasets():
+    assert reports.JOINT_PARTS == JOINT_PARTS
+
+
 def test_format_report_collapses_whitespace_without_header():
     text = "\n\nThe heart is\nnormal. \nNo effusion.  \n"
-    assert evaluate.format_report(text) == "The heart is normal. No effusion."
+    assert reports.format_report(text) == "The heart is normal. No effusion."
 
 
 @pytest.mark.parametrize(
@@ -25,12 +30,12 @@ def test_format_report_collapses_whitespace_without_header():
     ["Findings: Heart normal.", "\nFINDINGS:\nHeart normal.", "findings:Heart normal."],
 )
 def test_format_report_removes_leading_findings_header(text):
-    assert evaluate.format_report(text) == "Heart normal."
+    assert reports.format_report(text) == "Heart normal."
 
 
 def test_format_report_keeps_findings_mid_text():
     text = "No new findings: heart normal. Findings: stable."
-    assert evaluate.format_report(text) == text
+    assert reports.format_report(text) == text
 
 
 def rows(*reports):
@@ -73,7 +78,7 @@ def test_pair_reports_scores_empty_reports_as_placeholder(report):
     ],
 )
 def test_split_joint_takes_both_headers(text):
-    assert evaluate.split_joint(text) == ("Lungs clear.", "Normal.")
+    assert reports.split_joint(text) == ("Lungs clear.", "Normal.")
 
 
 @pytest.mark.parametrize(
@@ -89,7 +94,7 @@ def test_split_joint_takes_both_headers(text):
     ],
 )
 def test_split_joint_is_strict(text):
-    assert evaluate.split_joint(text) is None
+    assert reports.split_joint(text) is None
 
 
 def test_pair_reports_joint_scores_content_and_flags_unparsed():

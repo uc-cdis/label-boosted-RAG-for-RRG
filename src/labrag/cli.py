@@ -26,6 +26,7 @@ from labrag.stages import (
     styles,
     template,
     threshold,
+    tune,
 )
 
 SUITE = ", ".join(evaluate.SUITE)
@@ -342,6 +343,17 @@ def add_baseline(sub) -> None:
     )
 
 
+def add_tune(sub) -> None:
+    p = stage(sub, tune)
+    p.add_argument(
+        "--prompts",
+        required=True,
+        nargs="+",
+        help="train prompt artifacts, one per dataset, relative to prompts/",
+    )
+    p.add_argument("--config", required=True, choices=sorted(tune.load_config()))
+
+
 def add_evaluate(sub) -> None:
     p = stage(sub, evaluate)
     p.add_argument(
@@ -403,6 +415,7 @@ COMMANDS = (
     add_generate,
     add_template,
     add_baseline,
+    add_tune,
     add_evaluate,
     add_compare,
     add_provenance,

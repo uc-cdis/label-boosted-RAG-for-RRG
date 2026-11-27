@@ -1,0 +1,12 @@
+# Added to the vLLM image's env (the pinned vllm container, configs/containers.yaml),
+# which keeps every package it has (its pip freeze is the constraint): TRL's
+# GRPOTrainer with PEFT LoRA, and flash-linear-attention for Qwen3.5's Gated DeltaNet
+# layers in training (transformers falls back to slow torch code without it). Latest
+# releases on 2026-11-27, the day pinned; resolved with vllm==0.32.0 (torch 2.13.0) by
+#   uv pip compile requirements.in --python-version 3.12 \
+#     --python-platform x86_64-manylinux_2_28 --exclude-newer 2026-11-28
+# (vLLM 0.22-0.32.x is the range TRL 1.19 supports).
+trl==1.19.0
+peft==0.22.0
+flash-linear-attention==0.6.0
+fla-core==0.6.0

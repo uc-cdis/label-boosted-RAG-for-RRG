@@ -1,0 +1,86 @@
+# LLM fine-tuning: the GRPO trainer and its reward service, each in its own image
+# (tuning/README.md). The tune stage builds and runs them:
+#
+#   docker compose -f tuning/compose.yaml build
+#   docker compose -f tuning/compose.yaml run --rm -v <work>:/work --user <uid>:<gid> \
+#     -e OMP_NUM_THREADS=<n> grpo /work
+#
+# Images are tagged with the commit (LABRAG_COMMIT; "dev" by hand); each job is its own
+# compose project. No outside network: weights come from /models (read-only); only the
+# trainer and the reward service share a network.
+
+name: labrag-tuning
+
+x-models: &models
+  # long syntax: a missing weights root fails instead of becoming an empty dir
+  type: bind
+  source: ${LABRAG_MODELS_ROOT:-/opt/gpudata/models}
+  target: /models
+  read_only: true
+  bind:
+    create_host_path: false
+
+networks:
+  reward:
+    internal: true
+
+services:
+  # TRL GRPO on every GPU of the job (CUDA_VISIBLE_DEVICES, host indices): one DDP
+  # process each, vLLM colocated. Compile caches stay in the container; USER for getpass
+  # (the uid has no passwd entry).
+  grpo:
+    image: labrag/grpo:${LABRAG_COMMIT:-dev}
+    build:
+      context: grpo
+      additional_contexts:
+        labrag: ../src/labrag
+    init: true  # PID 1 ignores a SIGTERM it has no handler for: the init passes it on
+    networks: [reward]
+    volumes: [*models]
+    gpus:
+      - driver: nvidia
+        device_ids: ["${CUDA_VISIBLE_DEVICES:-unset}"]
+    ipc: host  # NCCL and vLLM shared memory, as the generators' server
+    depends_on:
+      grpo-reward:
+        condition: service_healthy
+    environment:
+      - OMP_NUM_THREADS  # torch threads per process
+      - HOME=/tmp
+      - USER=labrag
+      - HF_HUB_OFFLINE=1
+      - HF_DATASETS_OFFLINE=1
+      - VLLM_NO_USAGE_STATS=1
+      - DO_NOT_TRACK=1
+      - TOKENIZERS_PARALLELISM=false
+
+  # CXRMate-2's rewards (upstream rewards.py + RaTEScore) on the job's first GPU, next
+  # to that GPU's trainer process (a few GB).
+  grpo-reward:
+    image: labrag/grpo-reward:${LABRAG_COMMIT:-dev}
+    build:
+      context: reward
+      additional_contexts:
+        upstream: ../external/cxrmate-2
+    init: true
+    networks: [reward]
+    volumes: [*models]
+    gpus:
+      - driver: nvidia
+        device_ids: ["${CUDA_VISIBLE_DEVICES:-unset}"]
+    environment:
+      - OMP_NUM_THREADS  # BERTScore's tokenizer threads, as upstream's num_workers
+      # no home for the job's uid (HOME=/), no network; HF_HOME gets the offline hub
+      # cache (server.py) and CXR-BERT's code (trust_remote_code)
+      - HF_HOME=/tmp/huggingface
+      - HF_HUB_OFFLINE=1
+      - XDG_CACHE_HOME=/tmp/.cache
+      - USER=labrag
+    command: ["8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30m  # model loads

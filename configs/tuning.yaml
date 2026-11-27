@@ -1,0 +1,76 @@
+# LLM fine-tuning recipes (the tune stage). Each entry: the generator it tunes
+# (configs/models.yaml: weights, image size), the rollout sampler (configs/sampling.yaml;
+# its max_tokens is replaced by grpo.max_completion_length), the studies (null = all of
+# the prompts' train targets; or n drawn with seed), the LoRA adapter (peft.LoraConfig),
+# the reward weights and TRL's GRPOConfig. Changing an entry changes the artifacts' config.
+
+# GRPO with thinking, CXRMate-2's recipe (Nicolson et al. 2026; external/cxrmate-2
+# config/grpo_public.yaml + stages_cxrmate2_grpo.py), from the frozen model (no SFT):
+# group of 4, beta .04 (reference = the frozen model: the adapter off), epsilon .2,
+# 3 policy iterations per batch, each an optimizer step; its four rewards weighted
+# .3/.3/.3/.1, each z-scored within its group and summed without rescaling (trl.patch);
+# AdamW betas (.9, .999), eps 1e-8, weight decay .01, constant lr after 500 warmup
+# steps; token-level loss mean over the batch (dapo; upstream's batch was one group).
+# Ours: LoRA on every linear layer of the language model (vision frozen), lr 1e-5 =
+# upstream's full fine-tuning 1e-6 x ~10 (LoRA's usual factor); the deployed sampler
+# for rollouts; 8,192 completion tokens (0.1-0.2% of frozen val thinking runs longer),
+# truncated rollouts masked (upstream masked invalid ones); vLLM colocated on every
+# training GPU, asleep while it trains; 4 groups per GPU per generation round.
+grpo-thinking: &grpo-thinking
+  model: qwen3.5-27b-vision
+  sampling: qwen3.5-thinking-32k
+  studies: null
+  lora: &lora
+    r: 32
+    lora_alpha: 64
+    lora_dropout: 0.0
+    target_modules: '.*language_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj|in_proj_qkv|in_proj_z|in_proj_b|in_proj_a|out_proj)'
+  reward_weights: {ratescore: 0.3, cxrbert: 0.3, bertscore: 0.3, arn: 0.1}
+  grpo: &grpo
+    num_generations: 4
+    beta: 0.04
+    epsilon: 0.2
+    num_iterations: 3
+    loss_type: dapo
+    multi_objective_aggregation: normalize_then_sum_unscaled
+    mask_truncated_completions: true
+    max_completion_length: 8192
+    learning_rate: 1.0e-5
+    lr_scheduler_type: constant_with_warmup
+    warmup_steps: 500
+    optim: adamw_torch
+    adam_beta1: 0.9
+    adam_beta2: 0.999
+    adam_epsilon: 1.0e-8
+    weight_decay: 0.01
+    num_train_epochs: 1
+    per_device_train_batch_size: 4  # completions per GPU per optimizer step (a group's worth)
+    gradient_accumulation_steps: 1
+    steps_per_generation: 4
+    bf16: true
+    gradient_checkpointing: true
+    gradient_checkpointing_kwargs: {use_reentrant: false}
+    use_vllm: true
+    vllm_mode: colocate
+    vllm_enable_sleep_mode: true
+    vllm_gpu_memory_utilization: 0.5
+    vllm_tensor_parallel_size: 1
+    vllm_max_model_length: 11264  # prompts reach ~2.2k tokens
+    save_strategy: steps
+    save_steps: 100
+    logging_steps: 1
+    log_completions: false
+    report_to: none
+    seed: 20261127
+    dataloader_num_workers: 2
+
+# The same, 8 studies, 2 optimizer steps, a checkpoint each: does it run.
+grpo-thinking-smoke:
+  <<: *grpo-thinking
+  studies: {n: 8, seed: 20261127}
+  grpo:
+    <<: *grpo
+    max_steps: 2
+    warmup_steps: 0
+    steps_per_generation: 1
+    save_steps: 1

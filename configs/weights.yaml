@@ -179,3 +179,28 @@ grpo-reward.cxrmate-2-tokenizer:
     special_tokens_map.json: 36aaa0def79a3900daedf06a418fdcdb275488f272d991ac98369a0a577d5118
     tokenizer.json: ba69779559dee474102786407ff1444214680fdd3d65c2eb270fd92a57034ff2
     tokenizer_config.json: 06bc62c24f6c08efaab291f9d15ef6aa05bf001090662b0af99c048b6de35f74
+
+# The GRPO reward's BERTScore model: upstream's BERTScorer(model_type='roberta-large',
+# num_layers=17), the hub id resolved offline to this clone (tuning/reward/server.py).
+grpo-reward.roberta-large:
+  repo: FacebookAI/roberta-large
+  files:
+    config.json: 82ba49810e6441735e696033ac2512ee09da555507b2917ac3865b202d592cc3
+    merges.txt: 1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5
+    model.safetensors: 047c85f0b96269cd62e6f732644f067004eebd95af5b5d35965ae2528f13bf38
+    tokenizer.json: 847bbeab6174d66a88898f729d52fa8d355fafe1bea101cf960dd404581df70e
+    tokenizer_config.json: 994f46754c5bf4014f1aa92d34b1374319c3a6b3f702105cd5b742beaecd18ce
+    vocab.json: 9e7f63c2d15d666b52e21d250d2e513b87c9b713cfa6987a82ed89e5e6e50655
+
+# The GRPO reward's CXR-BERT (cosine of projected CLS embeddings; its own modelling
+# code, trust_remote_code).
+grpo-reward.cxr-bert:
+  repo: microsoft/BiomedVLP-CXR-BERT-specialized
+  files:
+    config.json: 677244c654ba9490effdfb74d3b9333660e91ce8b66a00132482afb1bc720605
+    configuration_cxrbert.py: 94b40a0fda6553434dfdf431fcebe04e59d68748e384211cabc6bc05c2065c20
+    model.safetensors: ab65abb62d945287a80e985d3d37bfe82ff4003ec1f38c48758b36759941762d
+    modeling_cxrbert.py: b8038e079260424c30fc975f322119090dab82e9fb2c2ceb3b7627d19bb69d9c
+    special_tokens_map.json: 303df45a03609e4ead04bc3dc1536d0ab19b5358db685b6f3da123d05ec200e3
+    tokenizer_config.json: 5ae9739b3812d48f39b225a226703b6fc1c79a774a30dfcf17fb8785840cbd3e
+    vocab.txt: e025f479c3a7ce6e248971bfe1b409708db0439e9488d30e254f81f27f75d678

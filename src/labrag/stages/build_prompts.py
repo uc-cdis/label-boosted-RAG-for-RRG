@@ -9,7 +9,9 @@ An experiment fixes, per dataset, the target and corpus roles (EXPERIMENTS): ``p
 (CheXpert Plus pilot split), ``val`` (every val study of MIMIC-CXR and ReXGradient,
 corpus train only; their thresholds were set on val, so max-F1 labels are in-sample),
 ``smoke`` (100 of those val patients, one study each), ``test`` (every test study,
-corpus train only, as val).
+corpus train only, as val), ``train`` (every train-role study of CheXpert Plus,
+MIMIC-CXR and ReXGradient, corpus train: prompts for fine-tuning the LLM; the
+classifier trained on these studies, so predicted labels are in-sample).
 
 Conditions: ``retrieval-only`` (top K by image similarity) and ``labrag.<labeler>``
 (Jaccard on positive labels, ties by image similarity; the target's predicted labels in
@@ -139,6 +141,8 @@ VAL = {
 }
 SMOKE = VAL | {"sample": {"patients": 100, "seed": 20261119}}
 TEST = {"targets": ("test",), "corpus": ("train",)}
+# LLM fine-tuning prompts: the train studies, retrieving from the other train patients
+TRAIN = {"targets": ("train",), "corpus": ("train",)}
 EXPERIMENTS = {
     "pilot": {
         "chexpertplus": {
@@ -149,6 +153,7 @@ EXPERIMENTS = {
     "smoke": {"mimic": SMOKE, "rexgradient": SMOKE},
     "val": {"mimic": VAL, "rexgradient": VAL},
     "test": {"mimic": TEST, "rexgradient": TEST},
+    "train": {"chexpertplus": TRAIN, "mimic": TRAIN, "rexgradient": TRAIN},
 }
 # label diagnostics -> how the target's labels mix predicted and reference
 DIAGNOSTICS = {
@@ -620,20 +625,27 @@ def run(
                 assert (e.image_path == rows.image_path).all(), "image mismatch"
                 return emb[e.row.to_numpy()]
 
-            sim = retrieval.cosine(embeddings(target), embeddings(corpus))
-            exclude = (
-                target.subject_id.to_numpy()[:, None] == corpus.subject_id.to_numpy()
-            )
+            target_emb, corpus_emb = embeddings(target), embeddings(corpus)
+            t_subject = target.subject_id.to_numpy()
+            c_subject = corpus.subject_id.to_numpy()
             if same == STYLE:
                 table = artifacts.read_table(styles_dir / "styles.csv")
                 group = table.set_index("study_id")["style"]
             elif same:
                 group = groups(dataset, same, cxr_root)
             if same:
-                t, c = group.reindex(target.index), group.reindex(corpus.index)
-                assert t.notna().all(), f"a target study has no {same}"
-                exclude |= t.to_numpy()[:, None] != c.to_numpy()[None, :]
-        overlap = None
+                t_group = group.reindex(target.index)
+                assert t_group.notna().all(), f"a target study has no {same}"
+                t_group = t_group.to_numpy()
+                c_group = group.reindex(corpus.index).to_numpy()
+
+            def exclude(rows: slice) -> np.ndarray:
+                mask = t_subject[rows, None] == c_subject[None, :]
+                if same:
+                    mask |= t_group[rows, None] != c_group[None, :]
+                return mask
+
+        target_y = corpus_y = None
         if with_labels:
 
             def reference(rows: pd.DataFrame) -> np.ndarray:
@@ -673,11 +685,15 @@ def run(
                 target_y = target_y[donor]
                 if target_codes is not None:
                     target_codes = target_codes[donor]
-            if with_examples:
-                overlap = retrieval.jaccard(target_y, corpus_y)
         if with_examples:
-            top = retrieval.top_k(
-                K, sim, exclude, overlap if ranking == "labels" else None
+            top, top_sim, top_jaccard = retrieval.retrieve(
+                K,
+                target_emb,
+                corpus_emb,
+                exclude,
+                target_y,
+                corpus_y,
+                by_labels=ranking == "labels",
             )
         else:
             top = np.zeros((len(target), 0), dtype=int)
@@ -740,10 +756,10 @@ def run(
             if with_examples:
                 retrieved = {
                     "retrieved": corpus_ids[idx].tolist(),
-                    "retrieved_similarity": sim[i, idx].tolist(),
+                    "retrieved_similarity": top_sim[i].tolist(),
                 }
             if with_examples and with_labels:
-                retrieved["retrieved_jaccard"] = overlap[i, idx].tolist()
+                retrieved["retrieved_jaccard"] = top_jaccard[i].tolist()
             if categories:
                 labels_i = prompts.categories(target_codes[i], names, shown)
             else:
@@ -773,11 +789,8 @@ def run(
         if with_examples:
             summary["n_corpus"] = len(corpus)
         if with_examples and with_labels:
-            best = overlap[np.arange(len(top)), top[:, 0]]
-            summary["top1_jaccard_1"] = float((best == 1).mean())
-            summary["mean_retrieved_jaccard"] = float(
-                np.take_along_axis(overlap, top, 1).mean()
-            )
+            summary["top1_jaccard_1"] = float((top_jaccard[:, 0] == 1).mean())
+            summary["mean_retrieved_jaccard"] = float(top_jaccard.mean())
         print(json.dumps(summary, indent=2))
         return summary
 

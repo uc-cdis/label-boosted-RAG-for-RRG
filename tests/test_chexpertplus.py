@@ -18,6 +18,9 @@ def _images(rows):
     df["subject_id"] = df.study_id.str.split("_").str[0]
     df["split"] = "train"
     df["impression"] = None
+    for c in chexpertplus.INDICATION:
+        df[c] = None
+    df["report_order"] = 1
     return df
 
 
@@ -71,6 +74,30 @@ def test_corrupt_image_is_skipped_and_text_is_cleaned():
     studies = chexpertplus.canonical_studies(images).set_index("study_id")
     assert studies.loc["p1_s1", "findings"] == "kept text"
     assert pd.isna(studies.loc["p2_s1", "findings"])
+
+
+def test_indication_and_order_come_from_the_preferred_image():
+    images = _images(
+        [
+            ("p1_s1", "AP", "PNG/a/view1_frontal.png", "ap"),
+            ("p1_s1", "PA", "PNG/a/view2_frontal.png", "pa"),
+            ("p2_s1", "PA", "PNG/b/view1_frontal.png", "pa"),
+            ("p3_s1", "PA", "PNG/c/view1_frontal.png", "pa"),
+        ]
+    )
+    history, clinical = chexpertplus.INDICATION
+    images[history] = [" ap history ", " Male, 65. \n", None, None]
+    images[clinical] = ["ap clinical", "Cough.", " ", None]
+    images["report_order"] = [2, 3, 1, 4]
+    studies = chexpertplus.canonical_studies(images).set_index("study_id")
+    assert studies.indication.to_dict()["p1_s1"] == "Male, 65. Cough."
+    assert studies.indication.isna().to_dict() == {
+        "p1_s1": False,
+        "p2_s1": True,  # blank text only
+        "p3_s1": True,
+    }
+    assert studies.report_order.to_dict() == {"p1_s1": 3, "p2_s1": 1, "p3_s1": 4}
+    assert history not in studies and clinical not in studies
 
 
 @pytest.mark.data

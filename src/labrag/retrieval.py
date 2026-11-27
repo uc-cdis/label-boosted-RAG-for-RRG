@@ -6,6 +6,8 @@ sets ("No Finding" included), ties by image similarity; two empty sets have Jacc
 the target's patient are never returned.
 """
 
+from collections.abc import Callable
+
 import numpy as np
 
 
@@ -25,6 +27,46 @@ def jaccard(targets: np.ndarray, corpus: np.ndarray) -> np.ndarray:
     inter = t @ c.T
     union = t.sum(1)[:, None] + c.sum(1)[None, :] - inter
     return np.where(union == 0, 1.0, inter / np.maximum(union, 1))
+
+
+# Targets per block: bounds the (targets, corpus) matrices in memory. Cosines can round
+# differently with the block's shape, so every val and test set stays one block.
+CHUNK = 8192
+
+
+def retrieve(
+    k: int,
+    targets: np.ndarray,
+    corpus: np.ndarray,
+    exclude: Callable[[slice], np.ndarray],
+    target_y: np.ndarray | None = None,
+    corpus_y: np.ndarray | None = None,
+    by_labels: bool = True,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """top_k over blocks of CHUNK targets: (n_targets, k) corpus indices, their cosine
+    and their Jaccard (None without labels).
+
+    ``exclude(rows)`` gives the (block, n_corpus) mask for target rows ``rows``. With
+    labels, the ranking is Jaccard then cosine if ``by_labels``, else cosine alone.
+    """
+    top, sims, jacs = [], [], []
+    for start in range(0, len(targets), CHUNK):
+        rows = slice(start, start + CHUNK)
+        sim = cosine(targets[rows], corpus)
+        overlap = None if target_y is None else jaccard(target_y[rows], corpus_y)
+        t = top_k(k, sim, exclude(rows), overlap if by_labels else None)
+        top.append(t)
+        sims.append(np.take_along_axis(sim, t, 1))
+        if overlap is not None:
+            jacs.append(np.take_along_axis(overlap, t, 1))
+    if not top:  # no targets
+        top, sims = [np.zeros((0, k), dtype=np.int64)], [np.zeros((0, k))]
+        jacs = [np.zeros((0, k))] if target_y is not None else []
+    return (
+        np.concatenate(top),
+        np.concatenate(sims),
+        np.concatenate(jacs) if jacs else None,
+    )
 
 
 def top_k(

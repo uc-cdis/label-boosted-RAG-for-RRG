@@ -40,8 +40,15 @@ CLASSIFIER_VAL_FRACTION = 0.1
 CLASSIFIER_VAL_SEED = 20261111
 
 
+# The indication: these sections joined in this order, as CXRMate-2's "history"
+# (they appear together in 3 of 187,711 studies).
+INDICATION = ("section_history", "section_clinical_history")
+
+
 def load_images(cxr_root: Path) -> pd.DataFrame:
-    """One row per image: subject_id, study_id, image_path, split, view, findings, impression.
+    """One row per image: subject_id, study_id, image_path, split, view, findings,
+    impression, the INDICATION sections and report_order (the release's
+    patient_report_date_order, which can differ between a study's images).
 
     ``image_path`` is the PNG path relative to ``cxr_root / IMAGE_ROOT`` (the CSV
     names .jpg files; the release images are PNGs).
@@ -55,6 +62,8 @@ def load_images(cxr_root: Path) -> pd.DataFrame:
             "ap_pa",
             "section_findings",
             "section_impression",
+            *INDICATION,
+            "patient_report_date_order",
             "split",
         ],
     )
@@ -79,6 +88,8 @@ def load_images(cxr_root: Path) -> pd.DataFrame:
             "view": view,
             "findings": df.section_findings,
             "impression": df.section_impression,
+            **{c: df[c] for c in INDICATION},
+            "report_order": df.patient_report_date_order,
         }
     )
 
@@ -88,20 +99,31 @@ def load_studies(cxr_root: Path) -> pd.DataFrame:
     return canonical_studies(load_images(cxr_root))
 
 
+def load_study_times(cxr_root: Path) -> pd.Series:
+    """Each study's time by study_id, for ordering a patient's studies: the preferred
+    frontal image's report_order (the release has no dates)."""
+    return load_studies(cxr_root).set_index("study_id").report_order
+
+
 def canonical_studies(images: pd.DataFrame) -> pd.DataFrame:
     """One row per study with a usable frontal image: the preferred one (VIEW_RANK,
-    then path) and that image's report text, since a study's images can carry different
-    anonymized text (Stanford-AIMI/chexpert-plus#13). Text is stripped; no text
-    (has_text) is NaN."""
+    then path) and that image's report text, indication and report_order, since a
+    study's images can carry different anonymized text (Stanford-AIMI/chexpert-plus#13).
+    Text is stripped; no text (has_text) is NaN. The indication: the INDICATION
+    sections with text, joined by a space."""
     images = images[
         ~images.image_path.isin(CORRUPT_IMAGES) & images.view.isin(FRONTAL_VIEWS)
     ]
     rank = images.view.map(VIEW_RANK)
     order = np.lexsort((images.image_path.to_numpy(), rank.to_numpy()))
     studies = images.iloc[order].drop_duplicates("study_id").sort_values("study_id")
-    for section in ("findings", "impression"):
+    for section in ("findings", "impression", *INDICATION):
         text = studies[section].fillna("").astype(str).str.strip()
         studies[section] = text.where(has_text(studies[section]))
+    parts = studies[list(INDICATION)]
+    joined = parts.apply(lambda r: " ".join(r.dropna()), axis=1)
+    studies["indication"] = joined.where(parts.notna().any(axis=1))
+    studies = studies.drop(columns=list(INDICATION))
     return studies.reset_index(drop=True)
 
 

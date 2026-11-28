@@ -261,7 +261,12 @@ def publish(
     with tempfile.TemporaryDirectory(prefix="labrag-") as stage:
         stage = Path(stage)
         extra = build(stage) or {}
-        outputs = {p.name: sha256_file(p) for p in sorted(stage.iterdir())}
+        # Keyed by path relative to the artifact (tune's checkpoints/<step>/).
+        outputs = {
+            str(p.relative_to(stage)): sha256_file(p)
+            for p in sorted(stage.rglob("*"))
+            if p.is_file()
+        }
         manifest = {
             "artifact": relpath,
             "config": config,

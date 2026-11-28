@@ -32,6 +32,18 @@ def test_publish_writes_manifest(tmp_path, monkeypatch):
     assert final.stat().st_mode == (tmp_path / "plain").stat().st_mode
 
 
+def test_publish_hashes_nested_outputs(tmp_path):
+    def build(out):
+        (out / "checkpoints" / "2").mkdir(parents=True)
+        (out / "checkpoints" / "2" / "w.bin").write_bytes(b"w")
+        (out / "log.jsonl").write_text("{}\n")
+
+    final = artifacts.publish("t", {}, {}, build, shared_root=tmp_path)
+    m = json.loads((final / "manifest.json").read_text())
+    assert set(m["outputs"]) == {"checkpoints/2/w.bin", "log.jsonl"}
+    assert artifacts.artifact_record(final)["outputs"] == m["outputs"]
+
+
 def test_started_covers_work_done_before_publish(tmp_path):
     begun = artifacts.now()
     final = artifacts.publish(

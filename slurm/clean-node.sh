@@ -74,6 +74,11 @@ images=$(awk -F'\t' -v sha="$sha" '$1 ~ /^labrag\// && $2 != sha {
   print ($2 != "<none>" ? $1 ":" $2 : $1 "@" $3) "\t" $4 " " $5 }' <<<"$image_rows" | sort -u)
 dangling=$(awk -F'\t' '$1 == "<none>" { print $4 "\t" $5 }' <<<"$image_rows" | sort -u)
 
+frees() { # space removing these paths frees: venvs hard-link uv-cache's files, so only
+  # files with no other link count (du counts every link in full)
+  find "$@" -type f -links 1 -printf '%s\n' | awk '{s += $1} END {print s + 0}' |
+    numfmt --to=iec --suffix=B | sed 's/^/  frees /'
+}
 show() { # title, lines
   echo "$1: $(grep -c . <<<"$2" || true)"
   [[ -n $2 ]] && sed 's/^/  /' <<<"$2"
@@ -81,9 +86,9 @@ show() { # title, lines
 }
 echo "node $node at $sha ($($apply && echo apply || echo "dry run; --apply removes"))"
 show "other commits' run dirs" "$commits"
-[[ -z $commits ]] || du -shc $commits | tail -1
+[[ -z $commits ]] || frees $commits
 show "leftover work dirs" "$workdirs"
-[[ -z $workdirs ]] || du -shc $workdirs | tail -1
+[[ -z $workdirs ]] || frees $workdirs
 echo "published logs: $(grep -c . <<<"$logs" || true)"
 show "leftover containers" "$containers"
 show "leftover networks" "$networks"

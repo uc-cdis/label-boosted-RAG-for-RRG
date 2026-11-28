@@ -7,9 +7,9 @@
 # - run root: commits/<sha>/ of every other commit (a job rebuilds its own), and logs/
 #   whose copy in the shared logs dir is identical
 # - containers/networks of dead jobs (labrag-eval-<job>, labrag-<job>-<port>)
-# - every image this commit can't use: kept are labrag/*:<this sha> and images pinned by
-#   digest in configs/containers.yaml, compose files and Dockerfiles. Node-wide, not
-#   only labrag's; an image some container uses is refused, not removed.
+# - labrag/* images of other commits, and untagged images no name points to (node-wide:
+#   Docker can't tell whose). Other images are never touched; one a container uses is
+#   refused, not removed.
 # - build cache the rebuild didn't use: --apply first builds every compose image of this
 #   commit, then prunes cache last used before that build, then builds again and fails
 #   unless every image id stayed the same (the cache it kept is the cache jobs need).
@@ -58,19 +58,13 @@ networks=$(
   docker network ls --filter label=com.docker.compose.project \
     --format '{{.ID}}	{{.Name}}' | awk -F'\t' '$2 ~ /^labrag-eval-/'
 )
-pinned=$(cat configs/containers.yaml $(git ls-files '*compose.yaml' '*Dockerfile*') |
-  grep -oE 'sha256:[0-9a-f]{64}' | sort -u | paste -sd' ')
-# ref<TAB>id size; ref = repo:tag, repo@digest when untagged, id when dangling.
-images=$(
-  docker image ls --digests --no-trunc \
-    --format '{{.Repository}}	{{.Tag}}	{{.Digest}}	{{.ID}}	{{.Size}}' |
-    awk -F'\t' -v sha="$sha" -v pinned="$pinned" '
-      BEGIN { n = split(pinned, p, " "); for (i = 1; i <= n; i++) keep[p[i]] = 1 }
-      $3 in keep || ($1 ~ /^labrag\// && $2 == sha) { next }
-      { ref = $2 != "<none>" ? $1 ":" $2 : $3 != "<none>" ? $1 "@" $3 : $4
-        print ref "\t" $4 " " $5 }' |
-    sort -u
-)
+# ref<TAB>id size. Dangling = no repository at all: an image pulled by digest only
+# keeps its repository (and so is never listed).
+image_rows=$(docker image ls --digests --no-trunc \
+  --format '{{.Repository}}	{{.Tag}}	{{.Digest}}	{{.ID}}	{{.Size}}')
+images=$(awk -F'\t' -v sha="$sha" '$1 ~ /^labrag\// && $2 != sha {
+  print ($2 != "<none>" ? $1 ":" $2 : $1 "@" $3) "\t" $4 " " $5 }' <<<"$image_rows" | sort -u)
+dangling=$(awk -F'\t' '$1 == "<none>" { print $4 "\t" $5 }' <<<"$image_rows" | sort -u)
 
 show() { # title, lines
   echo "$1: $(grep -c . <<<"$2" || true)"
@@ -83,7 +77,8 @@ show "other commits' run dirs" "$commits"
 echo "published logs: $(grep -c . <<<"$logs" || true)"
 show "leftover containers" "$containers"
 show "leftover networks" "$networks"
-show "images this commit can't use" "$images"
+show "labrag images of other commits" "$images"
+echo "dangling images: $(grep -c . <<<"$dangling" || true)"
 docker system df
 
 $apply || exit 0
@@ -95,7 +90,7 @@ $apply || exit 0
 # By ref, without -f: an image a container still uses is refused, not removed.
 while IFS=$'\t' read -r ref _; do
   [[ -z $ref ]] || docker image rm "$ref" >/dev/null || echo "  kept $ref (in use)"
-done <<<"$images"
+done <<<"$images"$'\n'"$dangling"
 
 build() { # every compose file's built images, at this commit
   local f

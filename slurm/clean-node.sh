@@ -11,8 +11,9 @@
 #   Docker can't tell whose). Other images are never touched; one a container uses is
 #   refused, not removed.
 # - build cache the rebuild didn't use: --apply first builds every compose image of this
-#   commit, then prunes cache last used before that build, then builds again and fails
-#   unless every image id stayed the same (the cache it kept is the cache jobs need).
+#   commit (before removing anything), prunes cache last used before that build, then
+#   builds again and fails unless every image id stayed the same (the cache it kept is
+#   the cache jobs need).
 # Refuses while another labrag job runs on the node; holds setup.lock throughout, so a
 # job starting meanwhile waits in its setup.
 set -euo pipefail
@@ -82,6 +83,19 @@ show "dangling images" "$dangling"
 docker system df
 
 $apply || exit 0
+
+build() { # every compose file's built images, at this commit
+  local f
+  for f in $(git ls-files '*compose.yaml'); do
+    LABRAG_COMMIT=$sha docker compose -f "$f" -p "$project" build >&2
+  done
+  docker image ls --no-trunc --filter "reference=labrag/*:$sha" \
+    --format '{{.Repository}}:{{.Tag}} {{.ID}}' | sort
+}
+# Built before anything is removed: the old images' layers and cache can still serve it.
+start=$(date +%s)
+built=$(build)
+
 [[ -z $commits ]] || rm -rf $commits
 [[ -z $logs ]] || xargs -d '\n' rm -f <<<"$logs"
 # rm -f also stops a container that's still running; no job owns one (checked above).
@@ -92,16 +106,6 @@ while IFS=$'\t' read -r ref _; do
   [[ -z $ref ]] || docker image rm "$ref" >/dev/null || echo "  kept $ref (in use)"
 done <<<"$images"$'\n'"$dangling"
 
-build() { # every compose file's built images, at this commit
-  local f
-  for f in $(git ls-files '*compose.yaml'); do
-    LABRAG_COMMIT=$sha docker compose -f "$f" -p "$project" build >&2
-  done
-  docker image ls --no-trunc --filter "reference=labrag/*:$sha" \
-    --format '{{.Repository}}:{{.Tag}} {{.ID}}' | sort
-}
-start=$(date +%s)
-built=$(build)
 # until = last used before the build started; the build touched every record it reused.
 docker builder prune --all --force --filter "until=$(($(date +%s) - start + 1))s"
 echo "rebuilding: every step must come from the cache that was kept"

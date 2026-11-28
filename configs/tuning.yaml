@@ -75,3 +75,23 @@ grpo-thinking-smoke:
     warmup_steps: 0
     steps_per_generation: 1
     save_steps: 1
+
+# Control: does TRL's sequence-level importance weight (exp of the summed per-token
+# trainer - vLLM logp gap, one per completion) shrink the gradient? The recipe's
+# batching on 32 studies = 2 rollout rounds, 24 steps; the two differ only in the mode
+# and see the same studies in the same order.
+grpo-thinking-is-sequence-mask: &is-control
+  <<: *grpo-thinking
+  studies: {n: 32, seed: 20261127}
+  grpo: &is-grpo
+    <<: *grpo
+    vllm_importance_sampling_mode: sequence_mask  # TRL's default
+    max_steps: 24
+    warmup_steps: 0
+    save_steps: 24
+
+grpo-thinking-is-token-truncate:
+  <<: *is-control
+  grpo:
+    <<: *is-grpo
+    vllm_importance_sampling_mode: token_truncate  # each token's ratio clamped at 3

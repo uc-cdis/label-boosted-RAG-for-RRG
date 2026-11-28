@@ -4,8 +4,9 @@
 #   slurm/submit.sh -w <node> --cpus-per-task=16 -- slurm/clean-node.sh [--apply]
 #
 # Lists by default; --apply removes:
-# - run root: commits/<sha>/ of every other commit (a job rebuilds its own), and logs/
-#   whose copy in the shared logs dir is identical
+# - run root: commits/<sha>/ of every other commit (a job rebuilds its own), logs/
+#   whose copy in the shared logs dir is identical, and stages' work dirs
+#   (labrag-<stage>-*) that killed jobs left behind
 # - containers/networks of dead jobs (labrag-eval-<job>, labrag-<job>-<port>)
 # - labrag/* images of other commits, and untagged images no name points to (node-wide:
 #   Docker can't tell whose). Other images are never touched; one a container uses is
@@ -46,6 +47,8 @@ fi
 
 # One path per line.
 commits=$(find "$root/commits" -mindepth 1 -maxdepth 1 ! -name "$sha" | sort)
+# No other job runs (checked above), so every work dir is a leftover.
+workdirs=$(find "$root" -mindepth 1 -maxdepth 1 -type d -name 'labrag-*' | sort)
 logs=$(
   for f in "$root"/logs/*.out; do
     if [[ -f $f ]] && cmp -s "$f" "$shared/logs/${f##*/}"; then echo "$f"; fi
@@ -79,6 +82,8 @@ show() { # title, lines
 echo "node $node at $sha ($($apply && echo apply || echo "dry run; --apply removes"))"
 show "other commits' run dirs" "$commits"
 [[ -z $commits ]] || du -shc $commits | tail -1
+show "leftover work dirs" "$workdirs"
+[[ -z $workdirs ]] || du -shc $workdirs | tail -1
 echo "published logs: $(grep -c . <<<"$logs" || true)"
 show "leftover containers" "$containers"
 show "leftover networks" "$networks"
@@ -91,6 +96,7 @@ for f in $(git ls-files '*compose.yaml'); do
   LABRAG_COMMIT=$sha docker compose -f "$f" -p "$project" build
 done
 [[ -z $commits ]] || rm -rf $commits
+[[ -z $workdirs ]] || rm -rf $workdirs
 [[ -z $logs ]] || xargs -d '\n' rm -f <<<"$logs"
 # rm -f also stops a container that's still running; no job owns one (checked above).
 [[ -z $containers ]] || docker rm -f $(cut -f1 <<<"$containers")

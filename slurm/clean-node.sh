@@ -12,8 +12,9 @@
 #   refused, not removed.
 # - build cache the rebuild didn't use: --apply first builds every compose image of this
 #   commit (before removing anything), prunes cache last used before that build, then
-#   builds again and fails unless every image id stayed the same (the cache it kept is
-#   the cache jobs need).
+#   builds again and fails unless every image kept its layers (the cache it kept is the
+#   cache jobs need; image ids can't tell: the containerd store's provenance
+#   attestation gives every build a new id).
 # Refuses while another labrag job runs on the node. Holds setup.lock and
 # docker-build.lock throughout: a job starting meanwhile waits in its setup, and a run
 # Slurm doesn't list (job.sh without Slurm) can't build or read an image id meanwhile.
@@ -86,13 +87,15 @@ docker system df
 
 $apply || exit 0
 
-build() { # every compose file's built images, at this commit
-  local f
+build() { # every compose file's built images at this commit: ref, digest of its layers
+  local f ref
   for f in $(git ls-files '*compose.yaml'); do
     LABRAG_COMMIT=$sha docker compose -f "$f" -p "$project" build >&2
   done
-  docker image ls --no-trunc --filter "reference=labrag/*:$sha" \
-    --format '{{.Repository}}:{{.Tag}} {{.ID}}' | sort
+  for ref in $(docker image ls --filter "reference=labrag/*:$sha" \
+    --format '{{.Repository}}:{{.Tag}}' | sort); do
+    echo "$ref $(docker image inspect --format '{{json .RootFS.Layers}}' "$ref" | sha256sum | cut -c1-12)"
+  done
 }
 # Built before anything is removed: the old images' layers and cache can still serve it.
 start=$(date +%s)
@@ -112,7 +115,7 @@ done <<<"$images"$'\n'"$dangling"
 docker builder prune --all --force --filter "until=$(($(date +%s) - start + 1))s"
 echo "rebuilding: every step must come from the cache that was kept"
 if ! diff <(echo "$built") <(build); then
-  echo "image ids changed: the prune removed cache this commit's builds use" >&2
+  echo "layers changed: the prune removed cache these images' builds use" >&2
   exit 1
 fi
 echo "after:"

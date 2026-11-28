@@ -10,6 +10,9 @@
 # - labrag/* images of other commits, and untagged images no name points to (node-wide:
 #   Docker can't tell whose). Other images are never touched; one a container uses is
 #   refused, not removed.
+# --apply first builds every compose image of this commit, before removing anything: a
+# broken build stops it with nothing removed, and the build marks this commit's cache
+# as just used, the last Docker's GC evicts.
 # Build cache is left to Docker's own GC: on the containerd image store (nvl03/04) a
 # prune drops the cache of images built on a pre-pulled base even right after a build
 # used it, and it reclaimed little there.
@@ -29,6 +32,7 @@ sha=${LABRAG_COMMIT:?run through slurm/submit.sh (job.sh sets LABRAG_COMMIT)}
 cd "$(git rev-parse --show-toplevel)"
 read -r root shared < <(python -c 'from labrag import paths; print(paths.RUN_ROOT, paths.SHARED_ROOT)')
 node=${SLURMD_NODENAME:-$(hostname -s)}
+project=labrag-clean-${SLURM_JOB_ID:-local-$$}
 
 exec 9>"$root/setup.lock" 8>"$root/docker-build.lock"
 flock 9
@@ -83,6 +87,9 @@ show "dangling images" "$dangling"
 docker system df
 
 $apply || exit 0
+for f in $(git ls-files '*compose.yaml'); do
+  LABRAG_COMMIT=$sha docker compose -f "$f" -p "$project" build
+done
 [[ -z $commits ]] || rm -rf $commits
 [[ -z $logs ]] || xargs -d '\n' rm -f <<<"$logs"
 # rm -f also stops a container that's still running; no job owns one (checked above).

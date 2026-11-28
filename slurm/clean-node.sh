@@ -14,8 +14,9 @@
 #   commit (before removing anything), prunes cache last used before that build, then
 #   builds again and fails unless every image id stayed the same (the cache it kept is
 #   the cache jobs need).
-# Refuses while another labrag job runs on the node; holds setup.lock throughout, so a
-# job starting meanwhile waits in its setup.
+# Refuses while another labrag job runs on the node. Holds setup.lock and
+# docker-build.lock throughout: a job starting meanwhile waits in its setup, and a run
+# Slurm doesn't list (job.sh without Slurm) can't build or read an image id meanwhile.
 set -euo pipefail
 
 apply=false
@@ -31,8 +32,9 @@ read -r root shared < <(python -c 'from labrag import paths; print(paths.RUN_ROO
 node=${SLURMD_NODENAME:-$(hostname -s)}
 project=labrag-clean-${SLURM_JOB_ID:-local-$$}
 
-exec 9>"$root/setup.lock"
+exec 9>"$root/setup.lock" 8>"$root/docker-build.lock"
 flock 9
+flock 8
 running=$(squeue -h -w "$node" -n labrag -t RUNNING -o %i)
 others=$(grep -vx "${SLURM_JOB_ID:-}" <<<"$running" || true)
 if [[ -n $others ]]; then

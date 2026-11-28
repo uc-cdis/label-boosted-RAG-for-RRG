@@ -78,7 +78,7 @@ echo "published logs: $(grep -c . <<<"$logs" || true)"
 show "leftover containers" "$containers"
 show "leftover networks" "$networks"
 show "labrag images of other commits" "$images"
-echo "dangling images: $(grep -c . <<<"$dangling" || true)"
+show "dangling images" "$dangling"
 docker system df
 
 $apply || exit 0

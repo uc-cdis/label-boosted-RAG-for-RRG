@@ -10,11 +10,9 @@
 # - labrag/* images of other commits, and untagged images no name points to (node-wide:
 #   Docker can't tell whose). Other images are never touched; one a container uses is
 #   refused, not removed.
-# - build cache the rebuild didn't use: --apply first builds every compose image of this
-#   commit (before removing anything), prunes cache last used before that build, then
-#   builds again and fails unless every image kept its layers (the cache it kept is the
-#   cache jobs need; image ids can't tell: the containerd store's provenance
-#   attestation gives every build a new id).
+# Build cache is left to Docker's own GC: on the containerd image store (nvl03/04) a
+# prune drops the cache of images built on a pre-pulled base even right after a build
+# used it, and it reclaimed little there.
 # Refuses while another labrag job runs on the node. Holds setup.lock and
 # docker-build.lock throughout: a job starting meanwhile waits in its setup, and a run
 # Slurm doesn't list (job.sh without Slurm) can't build or read an image id meanwhile.
@@ -31,7 +29,6 @@ sha=${LABRAG_COMMIT:?run through slurm/submit.sh (job.sh sets LABRAG_COMMIT)}
 cd "$(git rev-parse --show-toplevel)"
 read -r root shared < <(python -c 'from labrag import paths; print(paths.RUN_ROOT, paths.SHARED_ROOT)')
 node=${SLURMD_NODENAME:-$(hostname -s)}
-project=labrag-clean-${SLURM_JOB_ID:-local-$$}
 
 exec 9>"$root/setup.lock" 8>"$root/docker-build.lock"
 flock 9
@@ -86,21 +83,6 @@ show "dangling images" "$dangling"
 docker system df
 
 $apply || exit 0
-
-build() { # every compose file's built images at this commit: ref, digest of its layers
-  local f ref
-  for f in $(git ls-files '*compose.yaml'); do
-    LABRAG_COMMIT=$sha docker compose -f "$f" -p "$project" build >&2
-  done
-  for ref in $(docker image ls --filter "reference=labrag/*:$sha" \
-    --format '{{.Repository}}:{{.Tag}}' | sort); do
-    echo "$ref $(docker image inspect --format '{{json .RootFS.Layers}}' "$ref" | sha256sum | cut -c1-12)"
-  done
-}
-# Built before anything is removed: the old images' layers and cache can still serve it.
-start=$(date +%s)
-built=$(build)
-
 [[ -z $commits ]] || rm -rf $commits
 [[ -z $logs ]] || xargs -d '\n' rm -f <<<"$logs"
 # rm -f also stops a container that's still running; no job owns one (checked above).
@@ -110,13 +92,5 @@ built=$(build)
 while IFS=$'\t' read -r ref _; do
   [[ -z $ref ]] || docker image rm "$ref" >/dev/null || echo "  kept $ref (in use)"
 done <<<"$images"$'\n'"$dangling"
-
-# until = last used before the build started; the build touched every record it reused.
-docker builder prune --all --force --filter "until=$(($(date +%s) - start + 1))s"
-echo "rebuilding: every step must come from the cache that was kept"
-if ! diff <(echo "$built") <(build); then
-  echo "layers changed: the prune removed cache these images' builds use" >&2
-  exit 1
-fi
 echo "after:"
 docker system df

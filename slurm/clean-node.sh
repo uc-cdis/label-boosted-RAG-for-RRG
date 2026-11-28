@@ -43,7 +43,7 @@ fi
 commits=$(find "$root/commits" -mindepth 1 -maxdepth 1 ! -name "$sha" | sort)
 logs=$(
   for f in "$root"/logs/*.out; do
-    [[ -f $f ]] && cmp -s "$f" "$shared/logs/${f##*/}" && echo "$f"
+    if [[ -f $f ]] && cmp -s "$f" "$shared/logs/${f##*/}"; then echo "$f"; fi
   done
 )
 # id<TAB>what, one line per object.
